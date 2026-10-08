@@ -4,6 +4,7 @@ import '../core/constants/theme_constants.dart';
 import '../providers/profile_provider.dart';
 import '../screens/edit_profile_screen.dart';
 import '../screens/profile_gate_screen.dart';
+import '../screens/settings_screen.dart';
 import 'profile_avatar.dart';
 
 class ProfileSwitcherSheet extends StatelessWidget {
@@ -309,17 +310,38 @@ class ProfileSwitcherSheet extends StatelessWidget {
               _buildListRow(
                 icon: Icons.settings_outlined,
                 title: 'App Settings',
-                onTap: () {},
+                onTap: () {
+                  Navigator.of(context).pop();
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const SettingsScreen(initialSection: SettingsSection.appSettings),
+                    ),
+                  );
+                },
               ),
               _buildListRow(
                 icon: Icons.person_outline,
                 title: 'Account',
-                onTap: () {},
+                onTap: () {
+                  Navigator.of(context).pop();
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const SettingsScreen(initialSection: SettingsSection.account),
+                    ),
+                  );
+                },
               ),
               _buildListRow(
                 icon: Icons.help_outline,
-                title: 'Help',
-                onTap: () {},
+                title: 'Help & Telegram',
+                onTap: () {
+                  Navigator.of(context).pop();
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => const SettingsScreen(initialSection: SettingsSection.help),
+                    ),
+                  );
+                },
               ),
               _buildListRow(
                 icon: Icons.logout,

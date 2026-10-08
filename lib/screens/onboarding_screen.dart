@@ -1,11 +1,9 @@
-import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:cached_network_image/cached_network_image.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../core/constants/theme_constants.dart';
-import '../core/network/api_service.dart';
 import '../providers/media_provider.dart';
 import '../providers/profile_provider.dart';
 import '../widgets/profile_avatar.dart';
@@ -19,152 +17,40 @@ class OnboardingScreen extends StatefulWidget {
 }
 
 class _OnboardingScreenState extends State<OnboardingScreen> {
-  int _step = 0;
+  final PageController _pageController = PageController();
   final TextEditingController _nameController = TextEditingController(text: 'Explorer');
-  final TextEditingController _actorSearchController = TextEditingController();
-
+  int _currentPage = 0;
   int _selectedColorIndex = 0;
+  bool _isKids = false;
 
-  // Selected sets
-  final Set<int> _selectedGenres = {};
-  final List<Map<String, dynamic>> _selectedActors = [];
-  final Set<String> _selectedLanguages = {};
-
-  // Actors state from TMDB
-  List<Map<String, dynamic>> _popularActors = [];
-  List<Map<String, dynamic>> _searchedActors = [];
-  bool _isLoadingActors = false;
-  Timer? _searchDebounce;
-
-  static const List<String> _stepTitles = [
-    'Profile',
-    'Genres',
-    'Actors',
-    'Languages',
-  ];
-
-  // Exact 16 GENRE_CHOICES from the Voidflix web version
-  static const List<Map<String, dynamic>> _genreChoices = [
-    {'id': 28, 'name': 'Action', 'emoji': '💥'},
-    {'id': 35, 'name': 'Comedy', 'emoji': '😂'},
-    {'id': 18, 'name': 'Drama', 'emoji': '🎭'},
-    {'id': 27, 'name': 'Horror', 'emoji': '👻'},
-    {'id': 878, 'name': 'Sci-Fi', 'emoji': '🚀'},
-    {'id': 10749, 'name': 'Romance', 'emoji': '💕'},
-    {'id': 53, 'name': 'Thriller', 'emoji': '🔪'},
-    {'id': 16, 'name': 'Animation', 'emoji': '🎨'},
-    {'id': 14, 'name': 'Fantasy', 'emoji': '🐉'},
-    {'id': 80, 'name': 'Crime', 'emoji': '🕵️'},
-    {'id': 12, 'name': 'Adventure', 'emoji': '🗺️'},
-    {'id': 99, 'name': 'Documentary', 'emoji': '🎥'},
-    {'id': 10751, 'name': 'Family', 'emoji': '👨‍👩‍👧'},
-    {'id': 9648, 'name': 'Mystery', 'emoji': '🔍'},
-    {'id': 36, 'name': 'History', 'emoji': '🏛️'},
-    {'id': 10752, 'name': 'War', 'emoji': '⚔️'},
-  ];
-
-  // Exact 10 LANGUAGE_CHOICES from the Voidflix web version
-  static const List<Map<String, dynamic>> _languageChoices = [
-    {'code': 'en', 'label': 'Hollywood', 'flag': '🇺🇸'},
-    {'code': 'hi', 'label': 'Bollywood', 'flag': '🇮🇳'},
-    {'code': 'ko', 'label': 'Korean', 'flag': '🇰🇷'},
-    {'code': 'ja', 'label': 'Japanese / Anime', 'flag': '🇯🇵'},
-    {'code': 'es', 'label': 'Spanish', 'flag': '🇪🇸'},
-    {'code': 'fr', 'label': 'French', 'flag': '🇫🇷'},
-    {'code': 'tr', 'label': 'Turkish', 'flag': '🇹🇷'},
-    {'code': 'ta', 'label': 'Tamil', 'flag': '🎬'},
-    {'code': 'te', 'label': 'Telugu', 'flag': '🎞️'},
-    {'code': 'zh', 'label': 'Chinese', 'flag': '🇨🇳'},
-  ];
-
-  @override
-  void initState() {
-    super.initState();
-    _loadPopularActors();
-  }
+  static const int _totalPages = 4;
+  static const String _telegramChannelUrl = 'https://t.me/VoidFlixOrg';
+  static const String _telegramChatUrl = 'https://t.me/Voidflixchat';
 
   @override
   void dispose() {
+    _pageController.dispose();
     _nameController.dispose();
-    _actorSearchController.dispose();
-    _searchDebounce?.cancel();
     super.dispose();
   }
 
-  Future<void> _loadPopularActors() async {
-    setState(() => _isLoadingActors = true);
+  Future<void> _openUrl(String url) async {
+    final uri = Uri.parse(url);
     try {
-      final list = await ApiService().getPopularPeople();
-      if (mounted) {
-        setState(() {
-          _popularActors = list;
-          _isLoadingActors = false;
-        });
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
       }
     } catch (_) {
-      if (mounted) setState(() => _isLoadingActors = false);
-    }
-  }
-
-  void _onActorSearchChanged(String val) {
-    _searchDebounce?.cancel();
-    final query = val.trim();
-    if (query.length < 2) {
-      setState(() => _searchedActors = []);
-      return;
-    }
-
-    _searchDebounce = Timer(const Duration(milliseconds: 300), () async {
-      final results = await ApiService().searchPeople(query);
       if (mounted) {
-        setState(() => _searchedActors = results);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not open link: $url')),
+        );
       }
-    });
-  }
-
-  void _toggleGenre(int id) {
-    setState(() {
-      if (_selectedGenres.contains(id)) {
-        _selectedGenres.remove(id);
-      } else {
-        _selectedGenres.add(id);
-      }
-    });
-  }
-
-  void _toggleLanguage(String code) {
-    setState(() {
-      if (_selectedLanguages.contains(code)) {
-        _selectedLanguages.remove(code);
-      } else {
-        _selectedLanguages.add(code);
-      }
-    });
-  }
-
-  void _toggleActor(Map<String, dynamic> actor) {
-    final id = actor['id'] as int;
-    final name = actor['name'] as String? ?? 'Actor';
-    final profilePath = actor['profile_path'] as String?;
-
-    setState(() {
-      final exists = _selectedActors.any((a) => a['id'] == id);
-      if (exists) {
-        _selectedActors.removeWhere((a) => a['id'] == id);
-      } else {
-        if (_selectedActors.length < 8) {
-          _selectedActors.add({
-            'id': id,
-            'name': name,
-            'profile_path': profilePath,
-          });
-        }
-      }
-    });
+    }
   }
 
   Future<void> _finish({bool skipped = false}) async {
-    // 1. Immediately and permanently mark global onboarding as completed in SharedPreferences
+    // 1. Permanently record completion in SharedPreferences
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool('voidflix_global_onboarding_completed', true);
 
@@ -178,13 +64,14 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
       name: finalName,
       avatar: '😊',
       colorIndex: _selectedColorIndex,
-      preferredLanguages: skipped ? ['en', 'hi'] : _selectedLanguages.toList(),
-      preferredGenres: skipped ? [28, 878] : _selectedGenres.toList(),
-      favoriteActors: skipped ? [] : _selectedActors.map((a) => a['name'] as String).toList(),
+      isKids: _isKids,
+      preferredLanguages: ['en', 'hi'],
+      preferredGenres: [28, 878],
+      favoriteActors: [],
       favoriteTitles: [],
     );
 
-    // Refresh personalized rails
+    // Refresh personalized feed
     mediaProv.fetchPersonalizedForProfile(profile, force: true);
 
     if (mounted) {
@@ -199,621 +86,556 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     }
   }
 
-  @override
-  Widget build(BuildContext context) {
-    final isLast = _step == _stepTitles.length - 1;
-
-    return Scaffold(
-      backgroundColor: Colors.black.withValues(alpha: 0.90),
-      body: SafeArea(
-        child: Center(
-          child: Container(
-            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            constraints: const BoxConstraints(maxWidth: 640),
-            decoration: BoxDecoration(
-              color: const Color(0xFF14141E),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(color: const Color(0xFF282836)),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withValues(alpha: 0.8),
-                  blurRadius: 30,
-                  spreadRadius: 2,
-                ),
-              ],
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                // Header (Exact 1:1 match of OnboardingModal.tsx)
-                _buildModalHeader(),
-
-                // Scrollable Content Body
-                Flexible(
-                  child: SingleChildScrollView(
-                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-                    child: _buildStepContent(),
-                  ),
-                ),
-
-                // Footer (Exact 1:1 match of OnboardingModal.tsx)
-                _buildModalFooter(isLast),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
+  void _nextPage() {
+    if (_currentPage < _totalPages - 1) {
+      _pageController.nextPage(
+        duration: const Duration(milliseconds: 350),
+        curve: Curves.easeInOutCubic,
+      );
+    } else {
+      _finish();
+    }
   }
 
-  Widget _buildModalHeader() {
-    return Container(
-      padding: const EdgeInsets.fromLTRB(20, 20, 20, 14),
-      decoration: const BoxDecoration(
-        border: Border(bottom: BorderSide(color: Color(0xFF282836))),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: Stack(
         children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        const Icon(Icons.auto_awesome, color: AppTheme.primaryRed, size: 24),
-                        const SizedBox(width: 8),
-                        Text(
-                          "Let's personalize Voidflix",
-                          style: GoogleFonts.inter(
-                            fontSize: 20,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.white,
-                          ),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 4),
-                    const Text(
-                      "Answer a few quick questions and we'll build recommendation rows just for you.",
-                      style: TextStyle(color: Colors.white60, fontSize: 13),
-                    ),
+          // Ambient background gradient
+          Positioned.fill(
+            child: Container(
+              decoration: const BoxDecoration(
+                gradient: LinearGradient(
+                  begin: Alignment.topCenter,
+                  end: Alignment.bottomCenter,
+                  colors: [
+                    Color(0xFF1B0709),
+                    Color(0xFF09090E),
+                    Colors.black,
                   ],
+                  stops: [0.0, 0.45, 1.0],
                 ),
               ),
-              IconButton(
-                icon: const Icon(Icons.close, color: Colors.white54, size: 20),
-                tooltip: 'Skip for now',
-                onPressed: () => _finish(skipped: true),
-              ),
-            ],
+            ),
           ),
-          const SizedBox(height: 16),
 
-          // Step Progress Pills (Matches web animated step pills)
-          Row(
-            children: [
-              for (int i = 0; i < _stepTitles.length; i++) ...[
-                AnimatedContainer(
-                  duration: const Duration(milliseconds: 200),
-                  height: 6,
-                  width: i == _step ? 32 : 16,
-                  decoration: BoxDecoration(
-                    color: i == _step
-                        ? AppTheme.primaryRed
-                        : i < _step
-                            ? AppTheme.primaryRed.withValues(alpha: 0.5)
-                            : const Color(0xFF282836),
-                    borderRadius: BorderRadius.circular(3),
+          // Main content safe area
+          SafeArea(
+            child: Column(
+              children: [
+                // Top Netflix Brand Header & Skip
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      // Brand Logo
+                      RichText(
+                        text: TextSpan(
+                          children: [
+                            TextSpan(
+                              text: 'VOID',
+                              style: GoogleFonts.bebasNeue(
+                                fontSize: 32,
+                                fontWeight: FontWeight.w900,
+                                color: AppTheme.primaryRed,
+                                letterSpacing: 2,
+                              ),
+                            ),
+                            TextSpan(
+                              text: 'FLIX',
+                              style: GoogleFonts.bebasNeue(
+                                fontSize: 32,
+                                fontWeight: FontWeight.w900,
+                                color: Colors.white,
+                                letterSpacing: 2,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      // Skip Action
+                      TextButton(
+                        onPressed: () => _finish(skipped: true),
+                        style: TextButton.styleFrom(
+                          foregroundColor: Colors.white70,
+                          textStyle: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+                        ),
+                        child: const Text('SKIP'),
+                      ),
+                    ],
                   ),
                 ),
-                if (i < _stepTitles.length - 1) const SizedBox(width: 6),
+
+                // PageView content
+                Expanded(
+                  child: PageView(
+                    controller: _pageController,
+                    onPageChanged: (idx) => setState(() => _currentPage = idx),
+                    children: [
+                      _buildWelcomeSlide(),
+                      _buildTelegramSlide(),
+                      _buildDownloadsSlide(),
+                      _buildProfileSetupSlide(),
+                    ],
+                  ),
+                ),
+
+                // Bottom Navigation (Indicators + CTA button)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(24, 8, 24, 20),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // Page Indicator Dots
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: List.generate(_totalPages, (i) {
+                          final isActive = i == _currentPage;
+                          return AnimatedContainer(
+                            duration: const Duration(milliseconds: 300),
+                            margin: const EdgeInsets.symmetric(horizontal: 4),
+                            height: 6,
+                            width: isActive ? 24 : 6,
+                            decoration: BoxDecoration(
+                              color: isActive ? AppTheme.primaryRed : Colors.white24,
+                              borderRadius: BorderRadius.circular(3),
+                            ),
+                          );
+                        }),
+                      ),
+                      const SizedBox(height: 20),
+
+                      // Netflix Red CTA Button
+                      SizedBox(
+                        width: double.infinity,
+                        height: 52,
+                        child: ElevatedButton(
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: AppTheme.primaryRed,
+                            foregroundColor: Colors.white,
+                            elevation: 8,
+                            shadowColor: AppTheme.primaryRed.withValues(alpha: 0.5),
+                            shape: RoundedRectangleBorder(
+                              borderRadius: BorderRadius.circular(8),
+                            ),
+                          ),
+                          onPressed: _nextPage,
+                          child: Text(
+                            _currentPage == _totalPages - 1 ? 'START WATCHING' : 'CONTINUE',
+                            style: const TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 1.2,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+
+                      // Subtle secondary hint
+                      if (_currentPage < _totalPages - 1)
+                        GestureDetector(
+                          onTap: () => _finish(skipped: true),
+                          child: const Padding(
+                            padding: EdgeInsets.symmetric(vertical: 4),
+                            child: Text(
+                              'Skip directly to home',
+                              style: TextStyle(
+                                color: Colors.white38,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ),
+                        )
+                      else
+                        const SizedBox(height: 18),
+                    ],
+                  ),
+                ),
               ],
-              const SizedBox(width: 12),
-              Text(
-                'Step ${_step + 1} of ${_stepTitles.length} · ${_stepTitles[_step]}',
-                style: const TextStyle(color: Colors.white54, fontSize: 12, fontWeight: FontWeight.bold),
-              ),
-            ],
+            ),
           ),
         ],
       ),
     );
   }
 
-  Widget _buildStepContent() {
-    switch (_step) {
-      case 0:
-        return _buildStepProfile();
-      case 1:
-        return _buildStepGenres();
-      case 2:
-        return _buildStepActors();
-      case 3:
-      default:
-        return _buildStepLanguages();
-    }
+  // Slide 1: Unlimited streaming
+  Widget _buildWelcomeSlide() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 28),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Container(
+            width: 110,
+            height: 110,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: Colors.white.withValues(alpha: 0.05),
+              border: Border.all(color: Colors.white12),
+            ),
+            child: const Center(
+              child: Icon(
+                Icons.movie_filter_rounded,
+                size: 58,
+                color: AppTheme.primaryRed,
+              ),
+            ),
+          ),
+          const SizedBox(height: 32),
+          Text(
+            'Unlimited movies,\nTV shows, and more',
+            textAlign: TextAlign.center,
+            style: GoogleFonts.montserrat(
+              color: Colors.white,
+              fontSize: 26,
+              fontWeight: FontWeight.w900,
+              height: 1.25,
+            ),
+          ),
+          const SizedBox(height: 16),
+          const Text(
+            'Watch anywhere. Stream blockbuster movies, trending series, anime, and live TV channels in full HD with zero subscriptions.',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: Colors.white70,
+              fontSize: 14,
+              height: 1.5,
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
-  // STEP 1: Profile Name & Netflix Classic Smiley Face Avatar
-  Widget _buildStepProfile() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text(
-          "Who is watching?",
-          style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
-        ),
-        const SizedBox(height: 4),
-        const Text(
-          "Pick your profile avatar color and enter your name.",
-          style: TextStyle(color: Colors.white54, fontSize: 12),
-        ),
-        const SizedBox(height: 20),
-
-        // Large Netflix Smiley Preview
-        Center(
-          child: ProfileAvatarTile(
-            name: _nameController.text,
-            gradientColors: ProfileProvider.avatarGradients[_selectedColorIndex],
-            size: 96,
+  // Slide 2: Telegram Community (Requested by user)
+  Widget _buildTelegramSlide() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 24),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          // Telegram Badge
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+            decoration: BoxDecoration(
+              color: const Color(0xFF0088CC).withValues(alpha: 0.15),
+              borderRadius: BorderRadius.circular(20),
+              border: Border.all(color: const Color(0xFF0088CC).withValues(alpha: 0.4)),
+            ),
+            child: const Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.send_rounded, color: Color(0xFF29B6F6), size: 14),
+                SizedBox(width: 6),
+                Text(
+                  'OFFICIAL COMMUNITY',
+                  style: TextStyle(
+                    color: Color(0xFF29B6F6),
+                    fontSize: 11,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 1.2,
+                  ),
+                ),
+              ],
+            ),
           ),
-        ),
-        const SizedBox(height: 20),
+          const SizedBox(height: 18),
 
-        // Color Swatches (Featuring the classic Netflix Smiley Face)
-        Center(
-          child: Wrap(
-            spacing: 12,
-            runSpacing: 10,
+          Text(
+            'Join our Telegram\nto stay up to date',
+            textAlign: TextAlign.center,
+            style: GoogleFonts.montserrat(
+              color: Colors.white,
+              fontSize: 26,
+              fontWeight: FontWeight.w900,
+              height: 1.25,
+            ),
+          ),
+          const SizedBox(height: 12),
+          const Text(
+            'Get instant mirror links, release alerts, direct title requests, and stay updated if domains change.',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: Colors.white70,
+              fontSize: 13,
+              height: 1.45,
+            ),
+          ),
+          const SizedBox(height: 24),
+
+          // Telegram Action Card
+          Container(
+            padding: const EdgeInsets.all(18),
+            decoration: BoxDecoration(
+              color: const Color(0xFF14141E),
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: const Color(0xFF262638)),
+              boxShadow: [
+                BoxShadow(
+                  color: Colors.black.withValues(alpha: 0.5),
+                  blurRadius: 16,
+                  offset: const Offset(0, 4),
+                ),
+              ],
+            ),
+            child: Column(
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      width: 48,
+                      height: 48,
+                      decoration: const BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: Color(0xFF0088CC),
+                      ),
+                      child: const Center(
+                        child: Icon(Icons.send_rounded, color: Colors.white, size: 24),
+                      ),
+                    ),
+                    const SizedBox(width: 14),
+                    const Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Voidflix Official Channel',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.bold,
+                              fontSize: 15,
+                            ),
+                          ),
+                          SizedBox(height: 3),
+                          Text(
+                            't.me/VoidFlixOrg',
+                            style: TextStyle(
+                              color: Color(0xFF29B6F6),
+                              fontWeight: FontWeight.w600,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+                SizedBox(
+                  width: double.infinity,
+                  height: 44,
+                  child: ElevatedButton.icon(
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: const Color(0xFF0088CC),
+                      foregroundColor: Colors.white,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                    onPressed: () => _openUrl(_telegramChannelUrl),
+                    icon: const Icon(Icons.send_rounded, size: 16),
+                    label: const Text(
+                      'Join Telegram Channel (@VoidFlixOrg)',
+                      style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                SizedBox(
+                  width: double.infinity,
+                  height: 40,
+                  child: OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.white,
+                      side: BorderSide(color: Colors.white.withValues(alpha: 0.2)),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                    ),
+                    onPressed: () => _openUrl(_telegramChatUrl),
+                    icon: const Icon(Icons.forum_outlined, size: 16, color: Color(0xFF29B6F6)),
+                    label: const Text(
+                      'Join Discussion Chat (@Voidflixchat)',
+                      style: TextStyle(fontWeight: FontWeight.w600, fontSize: 12),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Slide 3: Downloads & Offline Playback
+  Widget _buildDownloadsSlide() {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 28),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Container(
+            width: 110,
+            height: 110,
+            decoration: BoxDecoration(
+              shape: BoxShape.circle,
+              color: Colors.white.withValues(alpha: 0.05),
+              border: Border.all(color: Colors.white12),
+            ),
+            child: const Center(
+              child: Icon(
+                Icons.file_download_outlined,
+                size: 58,
+                color: AppTheme.primaryRed,
+              ),
+            ),
+          ),
+          const SizedBox(height: 32),
+          Text(
+            'Download and watch\noffline anytime',
+            textAlign: TextAlign.center,
+            style: GoogleFonts.montserrat(
+              color: Colors.white,
+              fontSize: 26,
+              fontWeight: FontWeight.w900,
+              height: 1.25,
+            ),
+          ),
+          const SizedBox(height: 16),
+          const Text(
+            'Save your favorite movies and shows to watch on the go. High-speed HLS and direct downloads with resume support.',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: Colors.white70,
+              fontSize: 14,
+              height: 1.5,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // Slide 4: Real Netflix Profile Creation (No childish emojis!)
+  Widget _buildProfileSetupSlide() {
+    final gradient = ProfileProvider.avatarGradients[
+      _selectedColorIndex % ProfileProvider.avatarGradients.length
+    ];
+
+    return SingleChildScrollView(
+      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          Text(
+            'Who\'s watching?',
+            style: GoogleFonts.montserrat(
+              color: Colors.white,
+              fontSize: 26,
+              fontWeight: FontWeight.w900,
+            ),
+          ),
+          const SizedBox(height: 8),
+          const Text(
+            'Create your profile with the classic Netflix avatar.',
+            style: TextStyle(color: Colors.white70, fontSize: 13),
+          ),
+          const SizedBox(height: 24),
+
+          // Netflix classic smiley avatar
+          ProfileAvatarTile(
+            name: _nameController.text.trim().isEmpty ? 'Explorer' : _nameController.text.trim(),
+            gradientColors: gradient,
+            size: 96,
+            isKids: _isKids,
+          ),
+          const SizedBox(height: 18),
+
+          // Avatar Color Palette Selector
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
             children: List.generate(ProfileProvider.avatarGradients.length, (idx) {
-              final isSel = idx == _selectedColorIndex;
-              final grad = ProfileProvider.avatarGradients[idx];
+              final isSelected = idx == _selectedColorIndex;
+              final colors = ProfileProvider.avatarGradients[idx];
+
               return GestureDetector(
                 onTap: () => setState(() => _selectedColorIndex = idx),
                 child: Container(
-                  width: 48,
-                  height: 48,
+                  margin: const EdgeInsets.symmetric(horizontal: 5),
+                  width: 32,
+                  height: 32,
                   decoration: BoxDecoration(
-                    gradient: LinearGradient(colors: grad),
-                    borderRadius: BorderRadius.circular(10),
+                    gradient: LinearGradient(colors: colors),
+                    shape: BoxShape.circle,
                     border: Border.all(
-                      color: isSel ? Colors.white : Colors.transparent,
+                      color: isSelected ? Colors.white : Colors.transparent,
                       width: 2.5,
                     ),
-                  ),
-                  child: Center(
-                    child: ProfileAvatarTile(
-                      name: '',
-                      gradientColors: grad,
-                      size: 40,
-                    ),
+                    boxShadow: isSelected
+                        ? [
+                            BoxShadow(
+                              color: colors.first.withValues(alpha: 0.7),
+                              blurRadius: 8,
+                            ),
+                          ]
+                        : null,
                   ),
                 ),
               );
             }),
           ),
-        ),
-        const SizedBox(height: 24),
+          const SizedBox(height: 24),
 
-        // Name TextField
-        const Text(
-          "Profile Name",
-          style: TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.bold),
-        ),
-        const SizedBox(height: 8),
-        TextField(
-          controller: _nameController,
-          style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold),
-          decoration: InputDecoration(
-            filled: true,
-            fillColor: const Color(0xFF191924),
-            hintText: 'e.g. Alex, Movie Lover...',
-            hintStyle: const TextStyle(color: Colors.white30, fontSize: 14),
-            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(8),
-              borderSide: const BorderSide(color: Color(0xFF282836)),
+          // Profile Name input
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            decoration: BoxDecoration(
+              color: const Color(0xFF161622),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: const Color(0xFF2C2C3D)),
             ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(8),
-              borderSide: const BorderSide(color: Color(0xFF282836)),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(8),
-              borderSide: const BorderSide(color: AppTheme.primaryRed, width: 1.5),
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-
-  // STEP 2: Genres (Exact clone of OnboardingModal.tsx Step 0)
-  Widget _buildStepGenres() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text(
-          "Which genres do you love?",
-          style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
-        ),
-        const SizedBox(height: 4),
-        const Text(
-          "Pick as many as you like.",
-          style: TextStyle(color: Colors.white54, fontSize: 12),
-        ),
-        const SizedBox(height: 16),
-
-        // 2-column grid of all 16 GENRE_CHOICES from the site
-        GridView.builder(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          itemCount: _genreChoices.length,
-          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: 2,
-            childAspectRatio: 3.2,
-            crossAxisSpacing: 10,
-            mainAxisSpacing: 10,
-          ),
-          itemBuilder: (context, index) {
-            final g = _genreChoices[index];
-            final id = g['id'] as int;
-            final isSelected = _selectedGenres.contains(id);
-
-            return GestureDetector(
-              onTap: () => _toggleGenre(id),
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 150),
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                decoration: BoxDecoration(
-                  color: isSelected ? AppTheme.primaryRed.withValues(alpha: 0.15) : const Color(0xFF161620),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(
-                    color: isSelected ? AppTheme.primaryRed : const Color(0xFF282836),
-                    width: isSelected ? 1.5 : 1,
-                  ),
-                ),
-                child: Row(
-                  children: [
-                    Text(g['emoji'] as String, style: const TextStyle(fontSize: 16)),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        g['name'] as String,
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 13,
-                          fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    if (isSelected)
-                      const Icon(Icons.check, color: AppTheme.primaryRed, size: 16),
-                  ],
-                ),
+            child: TextField(
+              controller: _nameController,
+              style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600),
+              decoration: const InputDecoration(
+                border: InputBorder.none,
+                hintText: 'Profile name (e.g. Explorer)',
+                hintStyle: TextStyle(color: Colors.white30),
+                icon: Icon(Icons.person_outline, color: Colors.white54),
               ),
-            );
-          },
-        ),
-      ],
-    );
-  }
-
-  // STEP 3: Actors (Exact clone of OnboardingModal.tsx Step 1 with TMDB Search & Popular list)
-  Widget _buildStepActors() {
-    final displayList = _searchedActors.isNotEmpty ? _searchedActors : _popularActors;
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text(
-          "Who are your favorite actors?",
-          style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
-        ),
-        const SizedBox(height: 4),
-        const Text(
-          "Pick up to 8 — we'll surface their movies for you.",
-          style: TextStyle(color: Colors.white54, fontSize: 12),
-        ),
-        const SizedBox(height: 14),
-
-        // Actor Search Input (Matches web search box)
-        TextField(
-          controller: _actorSearchController,
-          onChanged: _onActorSearchChanged,
-          style: const TextStyle(color: Colors.white, fontSize: 14),
-          decoration: InputDecoration(
-            hintText: 'Search any actor…',
-            hintStyle: const TextStyle(color: Colors.white38, fontSize: 13),
-            prefixIcon: const Icon(Icons.search, color: Colors.white54, size: 20),
-            suffixIcon: _actorSearchController.text.isNotEmpty
-                ? IconButton(
-                    icon: const Icon(Icons.close, color: Colors.white54, size: 16),
-                    onPressed: () {
-                      _actorSearchController.clear();
-                      setState(() => _searchedActors = []);
-                    },
-                  )
-                : null,
-            filled: true,
-            fillColor: const Color(0xFF191924),
-            contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(8),
-              borderSide: const BorderSide(color: Color(0xFF282836)),
+              onChanged: (_) => setState(() {}),
             ),
-            enabledBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(8),
-              borderSide: const BorderSide(color: Color(0xFF282836)),
-            ),
-            focusedBorder: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(8),
-              borderSide: const BorderSide(color: AppTheme.primaryRed, width: 1.5),
-            ),
-          ),
-        ),
-        const SizedBox(height: 12),
-
-        // Selected Actors Tags Row
-        if (_selectedActors.isNotEmpty) ...[
-          Wrap(
-            spacing: 6,
-            runSpacing: 6,
-            children: _selectedActors.map((a) {
-              return Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                decoration: BoxDecoration(
-                  color: AppTheme.primaryRed.withValues(alpha: 0.15),
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: AppTheme.primaryRed.withValues(alpha: 0.4)),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Text(
-                      a['name'] as String,
-                      style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
-                    ),
-                    const SizedBox(width: 4),
-                    GestureDetector(
-                      onTap: () => _toggleActor(a),
-                      child: const Icon(Icons.close, color: Colors.white70, size: 14),
-                    ),
-                  ],
-                ),
-              );
-            }).toList(),
           ),
           const SizedBox(height: 14),
-        ],
 
-        // Circular Photos Grid (Exact match of OnboardingModal.tsx)
-        if (_isLoadingActors && displayList.isEmpty)
-          const Center(
-            child: Padding(
-              padding: EdgeInsets.all(24.0),
-              child: CircularProgressIndicator(color: AppTheme.primaryRed),
+          // Kids profile switch
+          Container(
+            decoration: BoxDecoration(
+              color: const Color(0xFF161622),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: const Color(0xFF2C2C3D)),
             ),
-          )
-        else
-          GridView.builder(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            itemCount: displayList.length > 18 ? 18 : displayList.length,
-            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-              crossAxisCount: 3,
-              childAspectRatio: 0.85,
-              crossAxisSpacing: 12,
-              mainAxisSpacing: 12,
-            ),
-            itemBuilder: (context, index) {
-              final actor = displayList[index];
-              final id = actor['id'] as int;
-              final name = actor['name'] as String? ?? 'Actor';
-              final profilePath = actor['profile_path'] as String?;
-              final isSelected = _selectedActors.any((a) => a['id'] == id);
-
-              return GestureDetector(
-                onTap: () => _toggleActor(actor),
-                child: Column(
-                  children: [
-                    Expanded(
-                      child: Stack(
-                        alignment: Alignment.center,
-                        children: [
-                          Container(
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              border: Border.all(
-                                color: isSelected ? AppTheme.primaryRed : Colors.transparent,
-                                width: 2.5,
-                              ),
-                            ),
-                            child: ClipOval(
-                              child: profilePath != null
-                                  ? CachedNetworkImage(
-                                      imageUrl: ApiService.getImageUrl(profilePath, size: 'w200'),
-                                      fit: BoxFit.cover,
-                                      width: double.infinity,
-                                      height: double.infinity,
-                                      errorWidget: (_, _, _) => Container(
-                                        color: const Color(0xFF1F1F2B),
-                                        child: Center(
-                                          child: Text(
-                                            name.isNotEmpty ? name[0] : '?',
-                                            style: const TextStyle(color: Colors.white54, fontSize: 20),
-                                          ),
-                                        ),
-                                      ),
-                                    )
-                                  : Container(
-                                      color: const Color(0xFF1F1F2B),
-                                      child: Center(
-                                        child: Text(
-                                          name.isNotEmpty ? name[0] : '?',
-                                          style: const TextStyle(color: Colors.white54, fontSize: 20),
-                                        ),
-                                      ),
-                                    ),
-                            ),
-                          ),
-                          if (isSelected)
-                            Container(
-                              decoration: BoxDecoration(
-                                shape: BoxShape.circle,
-                                color: AppTheme.primaryRed.withValues(alpha: 0.45),
-                              ),
-                              child: const Center(
-                                child: Icon(Icons.check, color: Colors.white, size: 28),
-                              ),
-                            ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    Text(
-                      name,
-                      style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w500),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      textAlign: TextAlign.center,
-                    ),
-                  ],
-                ),
-              );
-            },
-          ),
-      ],
-    );
-  }
-
-  // STEP 4: Languages / Industries (Exact clone of OnboardingModal.tsx Step 2)
-  Widget _buildStepLanguages() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text(
-          "What do you like watching?",
-          style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
-        ),
-        const SizedBox(height: 4),
-        const Text(
-          "Pick the industries and languages you enjoy.",
-          style: TextStyle(color: Colors.white54, fontSize: 12),
-        ),
-        const SizedBox(height: 16),
-
-        // 2-column grid of all 10 LANGUAGE_CHOICES from the site
-        GridView.builder(
-          shrinkWrap: true,
-          physics: const NeverScrollableScrollPhysics(),
-          itemCount: _languageChoices.length,
-          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: 2,
-            childAspectRatio: 3.2,
-            crossAxisSpacing: 10,
-            mainAxisSpacing: 10,
-          ),
-          itemBuilder: (context, index) {
-            final l = _languageChoices[index];
-            final code = l['code'] as String;
-            final isSelected = _selectedLanguages.contains(code);
-
-            return GestureDetector(
-              onTap: () => _toggleLanguage(code),
-              child: AnimatedContainer(
-                duration: const Duration(milliseconds: 150),
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-                decoration: BoxDecoration(
-                  color: isSelected ? AppTheme.primaryRed.withValues(alpha: 0.15) : const Color(0xFF161620),
-                  borderRadius: BorderRadius.circular(8),
-                  border: Border.all(
-                    color: isSelected ? AppTheme.primaryRed : const Color(0xFF282836),
-                    width: isSelected ? 1.5 : 1,
-                  ),
-                ),
-                child: Row(
-                  children: [
-                    Text(l['flag'] as String, style: const TextStyle(fontSize: 16)),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        l['label'] as String,
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 13,
-                          fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                    if (isSelected)
-                      const Icon(Icons.check, color: AppTheme.primaryRed, size: 16),
-                  ],
-                ),
+            child: SwitchListTile(
+              activeThumbColor: AppTheme.primaryRed,
+              activeTrackColor: AppTheme.primaryRed.withValues(alpha: 0.3),
+              title: const Text(
+                'Kids Profile',
+                style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 14),
               ),
-            );
-          },
-        ),
-      ],
-    );
-  }
-
-  // Footer (Matches web OnboardingModal.tsx footer exactly)
-  Widget _buildModalFooter(bool isLast) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-      decoration: const BoxDecoration(
-        border: Border(top: BorderSide(color: Color(0xFF282836))),
-      ),
-      child: Row(
-        children: [
-          TextButton(
-            onPressed: () => _finish(skipped: true),
-            child: const Text('Skip for now', style: TextStyle(color: Colors.white54, fontSize: 13)),
-          ),
-          const Spacer(),
-          if (_step > 0) ...[
-            OutlinedButton.icon(
-              style: OutlinedButton.styleFrom(
-                foregroundColor: Colors.white70,
-                side: const BorderSide(color: Color(0xFF282836)),
-                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+              subtitle: const Text(
+                'Only display family-friendly movies & shows',
+                style: TextStyle(color: Colors.white54, fontSize: 12),
               ),
-              icon: const Icon(Icons.chevron_left, size: 18),
-              label: const Text('Back'),
-              onPressed: () => setState(() => _step--),
+              value: _isKids,
+              onChanged: (val) => setState(() => _isKids = val),
             ),
-            const SizedBox(width: 10),
-          ],
-          ElevatedButton.icon(
-            style: ElevatedButton.styleFrom(
-              backgroundColor: AppTheme.primaryRed,
-              foregroundColor: Colors.white,
-              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-            ),
-            icon: Icon(isLast ? Icons.check : Icons.chevron_right, size: 18),
-            label: Text(
-              isLast ? 'Build my recommendations' : 'Next',
-              style: const TextStyle(fontWeight: FontWeight.bold),
-            ),
-            onPressed: () {
-              if (isLast) {
-                _finish();
-              } else {
-                setState(() => _step++);
-              }
-            },
           ),
         ],
       ),

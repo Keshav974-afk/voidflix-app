@@ -15,8 +15,10 @@ import '../widgets/detail_modal.dart';
 import '../widgets/notifications_sheet.dart';
 import '../widgets/profile_avatar.dart';
 import '../widgets/profile_switcher_sheet.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'downloads_screen.dart';
 import 'player_screen.dart';
+import 'settings_screen.dart';
 import 'watchlist_screen.dart';
 
 class MyVoidflixScreen extends StatelessWidget {
@@ -115,6 +117,15 @@ class MyVoidflixScreen extends StatelessWidget {
                 ),
             ],
           ),
+          IconButton(
+            icon: const Icon(Icons.settings_outlined, color: Colors.white, size: 24),
+            tooltip: 'Settings',
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const SettingsScreen()),
+              );
+            },
+          ),
           const SizedBox(width: 8),
         ],
       ),
@@ -178,6 +189,82 @@ class MyVoidflixScreen extends StatelessWidget {
                   ),
                 ),
               ),
+            ),
+          ),
+          const SizedBox(height: 12),
+
+          // Quick Settings & Telegram Action Cards
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: Row(
+              children: [
+                Expanded(
+                  child: InkWell(
+                    onTap: () {
+                      Navigator.of(context).push(
+                        MaterialPageRoute(builder: (_) => const SettingsScreen()),
+                      );
+                    },
+                    borderRadius: BorderRadius.circular(10),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF16161E),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+                      ),
+                      child: const Row(
+                        children: [
+                          Icon(Icons.settings_outlined, color: Colors.white70, size: 19),
+                          SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Settings',
+                              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          Icon(Icons.chevron_right, color: Colors.white38, size: 18),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: InkWell(
+                    onTap: () async {
+                      final uri = Uri.parse('https://t.me/VoidFlixOrg');
+                      if (await canLaunchUrl(uri)) {
+                        await launchUrl(uri, mode: LaunchMode.externalApplication);
+                      }
+                    },
+                    borderRadius: BorderRadius.circular(10),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF0F1E2A),
+                        borderRadius: BorderRadius.circular(10),
+                        border: Border.all(color: const Color(0xFF0088CC).withValues(alpha: 0.35)),
+                      ),
+                      child: const Row(
+                        children: [
+                          Icon(Icons.send_rounded, color: Color(0xFF29B6F6), size: 17),
+                          SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Telegram',
+                              style: TextStyle(color: Color(0xFF29B6F6), fontWeight: FontWeight.bold, fontSize: 13),
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          Icon(Icons.open_in_new_rounded, color: Color(0xFF29B6F6), size: 16),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
           const SizedBox(height: 24),
