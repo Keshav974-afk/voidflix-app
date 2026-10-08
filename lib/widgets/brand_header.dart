@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../core/constants/theme_constants.dart';
 import '../providers/notification_provider.dart';
 import '../providers/profile_provider.dart';
+import '../screens/downloads_screen.dart';
 import 'notifications_sheet.dart';
 import 'profile_avatar.dart';
 import 'profile_switcher_sheet.dart';
@@ -36,54 +37,8 @@ class BrandHeader extends StatelessWidget implements PreferredSizeWidget {
   }
 
   void _openDownloads(BuildContext context) {
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: AppTheme.surfaceVariant,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (ctx) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.all(22),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 40,
-                height: 4,
-                decoration: BoxDecoration(
-                  color: Colors.white30,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ),
-              const SizedBox(height: 20),
-              const Icon(Icons.file_download_outlined, color: AppTheme.primaryRed, size: 48),
-              const SizedBox(height: 12),
-              const Text(
-                'Smart Downloads',
-                style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 8),
-              const Text(
-                'Downloaded movies and episodes are stored offline for instant playback anywhere.',
-                textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.white70, fontSize: 13),
-              ),
-              const SizedBox(height: 20),
-              ElevatedButton(
-                onPressed: () => Navigator.of(ctx).pop(),
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.white,
-                  foregroundColor: Colors.black,
-                  minimumSize: const Size.fromHeight(44),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                ),
-                child: const Text('OK', style: TextStyle(fontWeight: FontWeight.bold)),
-              ),
-            ],
-          ),
-        ),
-      ),
+    Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const DownloadsScreen()),
     );
   }
 

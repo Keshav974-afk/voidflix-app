@@ -8,8 +8,11 @@ import '../core/constants/api_constants.dart';
 import '../core/constants/theme_constants.dart';
 import '../core/network/api_service.dart';
 import '../models/media_detail.dart';
+import '../providers/download_provider.dart';
 import '../providers/history_provider.dart';
 import '../providers/watchlist_provider.dart';
+import '../widgets/netflix_season_picker.dart';
+import 'downloads_screen.dart';
 import 'player_screen.dart';
 
 class DetailScreen extends StatefulWidget {
@@ -137,18 +140,35 @@ class _DetailScreenState extends State<DetailScreen> {
     }
   }
 
-  void _playMedia({int season = 1, int episode = 1}) {
+  void _playMedia({
+    int season = 1,
+    int episode = 1,
+    String? localFilePath,
+    String? episodeTitle,
+  }) {
     if (_detail == null) return;
+    // Pause trailer so it never plays concurrently in the background
+    try {
+      _trailerWebController?.runJavaScript(
+        'var v = document.querySelector("video"); if (v) v.pause();',
+      );
+    } catch (_) {}
+
+    final title = _detail!.mediaType == 'tv' && episodeTitle != null
+        ? '${_detail!.title}: S${season}E$episode "$episodeTitle"'
+        : _detail!.title;
+
     Navigator.of(context).push(
       PageRouteBuilder(
         pageBuilder: (context, animation, secondaryAnimation) => PlayerScreen(
           mediaId: _detail!.id,
-          mediaTitle: _detail!.title,
+          mediaTitle: title,
           mediaType: _detail!.mediaType,
           season: season,
           episode: episode,
           posterPath: _detail!.posterPath,
           backdropPath: _detail!.backdropPath,
+          localFilePath: localFilePath,
         ),
         transitionsBuilder: (context, animation, secondaryAnimation, child) {
           return FadeTransition(
@@ -161,78 +181,16 @@ class _DetailScreenState extends State<DetailScreen> {
     );
   }
 
-  void _openSeasonPickerSheet(MediaDetail detail) {
-    showModalBottomSheet(
+  Future<void> _openSeasonPickerSheet(MediaDetail detail) async {
+    final newSeason = await NetflixSeasonPicker.show(
       context: context,
-      backgroundColor: const Color(0xFF16161D),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (sheetCtx) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Center(
-                child: Container(
-                  width: 40,
-                  height: 4,
-                  decoration: BoxDecoration(
-                    color: Colors.white30,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-              ),
-              const SizedBox(height: 16),
-              const Padding(
-                padding: EdgeInsets.symmetric(horizontal: 20, vertical: 4),
-                child: Text(
-                  'Seasons',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
-              ),
-              const Divider(color: AppTheme.border),
-              Expanded(
-                child: ListView.builder(
-                  shrinkWrap: true,
-                  itemCount: detail.seasons.length,
-                  itemBuilder: (ctx, idx) {
-                    final s = detail.seasons[idx];
-                    final isSel = s.seasonNumber == _selectedSeason;
-                    return ListTile(
-                      title: Text(
-                        'Season ${s.seasonNumber} (${s.episodeCount > 0 ? '${s.episodeCount} Episodes' : 'Episodes'})',
-                        style: TextStyle(
-                          color: isSel ? AppTheme.primaryRed : Colors.white,
-                          fontWeight: isSel ? FontWeight.bold : FontWeight.normal,
-                          fontSize: 16,
-                        ),
-                      ),
-                      trailing: isSel
-                          ? const Icon(Icons.check, color: AppTheme.primaryRed)
-                          : null,
-                      onTap: () {
-                        Navigator.of(sheetCtx).pop();
-                        setState(() {
-                          _selectedSeason = s.seasonNumber;
-                        });
-                        _loadSeasonEpisodes(s.seasonNumber);
-                      },
-                    );
-                  },
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
+      seasons: detail.seasons,
+      selectedSeason: _selectedSeason,
     );
+    if (newSeason != null && newSeason != _selectedSeason && mounted) {
+      setState(() => _selectedSeason = newSeason);
+      _loadSeasonEpisodes(newSeason);
+    }
   }
 
   @override
@@ -272,6 +230,7 @@ class _DetailScreenState extends State<DetailScreen> {
     final detail = _detail!;
     final backdropUrl = ApiConstants.getImageUrl(detail.backdropPath ?? detail.posterPath, size: 'original');
     final watchlistProvider = context.watch<WatchlistProvider>();
+    final downloadProvider = context.watch<DownloadProvider>();
     final inWatchlist = watchlistProvider.isInWatchlist(detail.id);
 
     final isTv = detail.mediaType == 'tv';
@@ -527,7 +486,18 @@ class _DetailScreenState extends State<DetailScreen> {
                         final saved = context.read<HistoryProvider>().getProgress(detail.id);
                         final s = saved?.season ?? _selectedSeason;
                         final e = saved?.episode ?? 1;
-                        _playMedia(season: s, episode: e);
+                        final offlineId = isTv
+                            ? DownloadProvider.generateId('tv', detail.id, season: s, episode: e)
+                            : DownloadProvider.generateId('movie', detail.id);
+                        final downloadProvider = context.read<DownloadProvider>();
+                        final offlineItem = downloadProvider.getItem(offlineId);
+                        final localFile = offlineItem?.status == 'completed' ? offlineItem?.localFilePath : null;
+
+                        _playMedia(
+                          season: s,
+                          episode: e,
+                          localFilePath: localFile,
+                        );
                       },
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.white,
@@ -544,31 +514,128 @@ class _DetailScreenState extends State<DetailScreen> {
                   ),
                   const SizedBox(height: 8),
 
-                  // Full-width Dark Button: ⤓ Download S1:E9 / Download (Screenshot 2 & 4)
-                  SizedBox(
-                    width: double.infinity,
-                    height: 44,
-                    child: ElevatedButton.icon(
-                      onPressed: () {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text('Downloading for ${detail.title}...'),
-                            backgroundColor: AppTheme.surfaceVariant,
+                  // Full-width Dark Button: Download / Downloading / Downloaded
+                  Consumer<DownloadProvider>(
+                    builder: (btnCtx, downloadProvider, _) {
+                      final firstEp = _episodes.isNotEmpty ? _episodes.first : null;
+                      final targetEpNum = firstEp?.episodeNumber ?? 1;
+                      final mainDownloadId = isTv
+                          ? DownloadProvider.generateId('tv', detail.id, season: _selectedSeason, episode: targetEpNum)
+                          : DownloadProvider.generateId('movie', detail.id);
+                      final isMainDownloaded = downloadProvider.isDownloaded(mainDownloadId);
+                      final isMainDownloading = downloadProvider.isDownloading(mainDownloadId);
+                      final mainProgress = downloadProvider.getProgress(mainDownloadId);
+                      final mainItem = downloadProvider.getItem(mainDownloadId);
+
+                      if (isMainDownloading) {
+                        return SizedBox(
+                          width: double.infinity,
+                          height: 44,
+                          child: ElevatedButton.icon(
+                            onPressed: () {
+                              Navigator.of(context).push(
+                                MaterialPageRoute(builder: (_) => const DownloadsScreen()),
+                              );
+                            },
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFF262626),
+                              foregroundColor: Colors.white,
+                              elevation: 0,
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                            ),
+                            icon: SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(
+                                value: mainProgress > 0 ? mainProgress : null,
+                                strokeWidth: 2.2,
+                                color: AppTheme.primaryRed,
+                              ),
+                            ),
+                            label: Text(
+                              'Downloading ${(mainProgress * 100).toInt()}%',
+                              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.white),
+                            ),
                           ),
                         );
-                      },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: const Color(0xFF262626),
-                        foregroundColor: Colors.white,
-                        elevation: 0,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-                      ),
-                      icon: const Icon(Icons.file_download_outlined, color: Colors.white, size: 22),
-                      label: Text(
-                        isTv ? 'Download S$_selectedSeason:E1' : 'Download',
-                        style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.white),
-                      ),
-                    ),
+                      }
+
+                      if (isMainDownloaded) {
+                        final mb = mainItem != null
+                            ? '${(mainItem.fileSizeBytes / (1024 * 1024)).toStringAsFixed(0)} MB'
+                            : 'HD';
+                        return SizedBox(
+                          width: double.infinity,
+                          height: 44,
+                          child: ElevatedButton.icon(
+                            onPressed: () {
+                              _playMedia(
+                                season: _selectedSeason,
+                                episode: targetEpNum,
+                                episodeTitle: firstEp?.name,
+                                localFilePath: mainItem?.localFilePath,
+                              );
+                            },
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFF262626),
+                              foregroundColor: Colors.white,
+                              elevation: 0,
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                            ),
+                            icon: const Icon(Icons.download_done_rounded, color: AppTheme.primaryRed, size: 22),
+                            label: Text(
+                              'Downloaded ($mb)',
+                              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.white),
+                            ),
+                          ),
+                        );
+                      }
+
+                      return SizedBox(
+                        width: double.infinity,
+                        height: 44,
+                        child: ElevatedButton.icon(
+                          onPressed: () {
+                            downloadProvider.startDownload(
+                              mediaId: detail.id,
+                              title: detail.title,
+                              mediaType: widget.mediaType,
+                              season: _selectedSeason,
+                              episode: targetEpNum,
+                              episodeTitle: firstEp?.name,
+                              posterPath: detail.posterPath,
+                              backdropPath: detail.backdropPath,
+                            );
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('Started download for ${detail.title}'),
+                                backgroundColor: const Color(0xFFE50914),
+                                action: SnackBarAction(
+                                  label: 'View',
+                                  textColor: Colors.white,
+                                  onPressed: () {
+                                    Navigator.of(context).push(
+                                      MaterialPageRoute(builder: (_) => const DownloadsScreen()),
+                                    );
+                                  },
+                                ),
+                              ),
+                            );
+                          },
+                          style: ElevatedButton.styleFrom(
+                            backgroundColor: const Color(0xFF262626),
+                            foregroundColor: Colors.white,
+                            elevation: 0,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                          ),
+                          icon: const Icon(Icons.file_download_outlined, color: Colors.white, size: 22),
+                          label: Text(
+                            isTv ? 'Download S$_selectedSeason:E$targetEpNum' : 'Download',
+                            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.white),
+                          ),
+                        ),
+                      );
+                    },
                   ),
                   const SizedBox(height: 14),
 
@@ -682,11 +749,64 @@ class _DetailScreenState extends State<DetailScreen> {
                         ),
                       ),
 
-                      // Download Season
+                      // Download Season (Batch download like in web DetailModal.tsx)
                       GestureDetector(
                         onTap: () {
+                          if (!isTv) {
+                            downloadProvider.startDownload(
+                              mediaId: detail.id,
+                              title: detail.title,
+                              mediaType: 'movie',
+                              posterPath: detail.posterPath,
+                              backdropPath: detail.backdropPath,
+                            );
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('Downloading ${detail.title}...'),
+                                backgroundColor: const Color(0xFFE50914),
+                              ),
+                            );
+                            return;
+                          }
+
+                          if (_episodes.isEmpty) {
+                            downloadProvider.startDownload(
+                              mediaId: detail.id,
+                              title: detail.title,
+                              mediaType: 'tv',
+                              season: _selectedSeason,
+                              episode: 1,
+                              posterPath: detail.posterPath,
+                              backdropPath: detail.backdropPath,
+                            );
+                          } else {
+                            for (final ep in _episodes) {
+                              downloadProvider.startDownload(
+                                mediaId: detail.id,
+                                title: detail.title,
+                                mediaType: 'tv',
+                                season: _selectedSeason,
+                                episode: ep.episodeNumber,
+                                episodeTitle: ep.name,
+                                posterPath: detail.posterPath,
+                                backdropPath: detail.backdropPath,
+                              );
+                            }
+                          }
                           ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(content: Text('Downloading Season $_selectedSeason...')),
+                            SnackBar(
+                              content: Text('Downloading Season $_selectedSeason (${_episodes.length} episodes)...'),
+                              backgroundColor: const Color(0xFFE50914),
+                              action: SnackBarAction(
+                                label: 'View',
+                                textColor: Colors.white,
+                                onPressed: () {
+                                  Navigator.of(context).push(
+                                    MaterialPageRoute(builder: (_) => const DownloadsScreen()),
+                                  );
+                                },
+                              ),
+                            ),
                           );
                         },
                         child: Column(
@@ -743,46 +863,66 @@ class _DetailScreenState extends State<DetailScreen> {
                   // TAB CONTENT
                   if (isTv && _activeTabIndex == 0) ...[
                     // EPISODES TAB
-                    // Season Selector Dropdown Pill (Screenshot 2 & 4 / Web Style)
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text(
-                          detail.title,
-                          style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.white,
-                          ),
-                        ),
-                        // Season Dropdown Pill
-                        GestureDetector(
-                          onTap: () => _openSeasonPickerSheet(detail),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF262626),
-                              borderRadius: BorderRadius.circular(6),
-                              border: Border.all(color: Colors.white24, width: 0.8),
-                            ),
-                            child: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Text(
-                                  'Season $_selectedSeason',
-                                  style: const TextStyle(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 13,
+                    // Season Selector Dropdown Pill + Info (Matching Web flowflix-web/src/components/DetailModal.tsx)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 14),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          GestureDetector(
+                            onTap: () => _openSeasonPickerSheet(detail),
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF2A2A2A),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Text(
+                                    'Season $_selectedSeason',
+                                    style: const TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 15,
+                                    ),
                                   ),
-                                ),
-                                const SizedBox(width: 4),
-                                const Icon(Icons.arrow_drop_down, color: Colors.white, size: 18),
-                              ],
+                                  const SizedBox(width: 8),
+                                  const Icon(Icons.keyboard_arrow_down, color: Colors.white, size: 20),
+                                ],
+                              ),
                             ),
                           ),
-                        ),
-                      ],
+                          GestureDetector(
+                            onTap: () {
+                              final sObj = detail.seasons.firstWhere(
+                                (s) => s.seasonNumber == _selectedSeason,
+                                orElse: () => detail.seasons.first,
+                              );
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  content: Text(
+                                    sObj.name.isNotEmpty
+                                        ? '${sObj.name} of ${detail.title}'
+                                        : 'Season $_selectedSeason of ${detail.title}',
+                                  ),
+                                  backgroundColor: const Color(0xFF262626),
+                                ),
+                              );
+                            },
+                            child: Container(
+                              width: 34,
+                              height: 34,
+                              decoration: const BoxDecoration(
+                                color: Color(0xFF2A2A2A),
+                                shape: BoxShape.circle,
+                              ),
+                              child: const Icon(Icons.info_outline, color: Colors.white70, size: 18),
+                            ),
+                          ),
+                        ],
+                      ),
                     ),
                     const SizedBox(height: 14),
 
@@ -813,6 +953,16 @@ class _DetailScreenState extends State<DetailScreen> {
                         itemBuilder: (c, idx) {
                           final ep = _episodes[idx];
                           final stillUrl = ApiConstants.getImageUrl(ep.stillPath ?? detail.backdropPath, size: 'w300');
+                          final epId = DownloadProvider.generateId(
+                            'tv',
+                            detail.id,
+                            season: _selectedSeason,
+                            episode: ep.episodeNumber,
+                          );
+                          final isEpDownloaded = downloadProvider.isDownloaded(epId);
+                          final isEpDownloading = downloadProvider.isDownloading(epId);
+                          final epProgress = downloadProvider.getProgress(epId);
+                          final epDownloadedItem = downloadProvider.getItem(epId);
 
                           return Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
@@ -822,7 +972,12 @@ class _DetailScreenState extends State<DetailScreen> {
                                 children: [
                                   // 16:9 Thumbnail with Play Overlay & Red Progress Bar
                                   GestureDetector(
-                                    onTap: () => _playMedia(season: _selectedSeason, episode: ep.episodeNumber),
+                                    onTap: () => _playMedia(
+                                      season: _selectedSeason,
+                                      episode: ep.episodeNumber,
+                                      episodeTitle: ep.name,
+                                      localFilePath: isEpDownloaded ? epDownloadedItem?.localFilePath : null,
+                                    ),
                                     child: Container(
                                       width: 125,
                                       height: 72,
@@ -907,19 +1062,86 @@ class _DetailScreenState extends State<DetailScreen> {
                                     ),
                                   ),
 
-                                  // Download Button (Screenshot 2 & 4)
-                                  IconButton(
-                                    icon: const Icon(
-                                      Icons.file_download_outlined,
-                                      color: Colors.white,
-                                      size: 24,
+                                  // Download Button / Status (Screenshot 2 & 4)
+                                  if (isEpDownloading)
+                                    SizedBox(
+                                      width: 40,
+                                      height: 40,
+                                      child: Stack(
+                                        alignment: Alignment.center,
+                                        children: [
+                                          CircularProgressIndicator(
+                                            value: epProgress > 0 ? epProgress : null,
+                                            strokeWidth: 2.5,
+                                            color: AppTheme.primaryRed,
+                                            backgroundColor: Colors.white12,
+                                          ),
+                                          IconButton(
+                                            padding: EdgeInsets.zero,
+                                            constraints: const BoxConstraints(),
+                                            icon: const Icon(Icons.stop_rounded, color: Colors.white, size: 16),
+                                            tooltip: 'Cancel Download',
+                                            onPressed: () {
+                                              downloadProvider.cancelDownload(epId);
+                                            },
+                                          ),
+                                        ],
+                                      ),
+                                    )
+                                  else if (isEpDownloaded)
+                                    IconButton(
+                                      icon: const Icon(
+                                        Icons.download_done_rounded,
+                                        color: AppTheme.primaryRed,
+                                        size: 24,
+                                      ),
+                                      tooltip: 'Downloaded - Play offline',
+                                      onPressed: () {
+                                        _playMedia(
+                                          season: _selectedSeason,
+                                          episode: ep.episodeNumber,
+                                          episodeTitle: ep.name,
+                                          localFilePath: epDownloadedItem?.localFilePath,
+                                        );
+                                      },
+                                    )
+                                  else
+                                    IconButton(
+                                      icon: const Icon(
+                                        Icons.file_download_outlined,
+                                        color: Colors.white,
+                                        size: 24,
+                                      ),
+                                      tooltip: 'Download Episode',
+                                      onPressed: () {
+                                        downloadProvider.startDownload(
+                                          mediaId: detail.id,
+                                          title: detail.title,
+                                          mediaType: 'tv',
+                                          season: _selectedSeason,
+                                          episode: ep.episodeNumber,
+                                          episodeTitle: ep.name,
+                                          posterPath: detail.posterPath,
+                                          backdropPath: detail.backdropPath,
+                                        );
+                                        ScaffoldMessenger.of(context).showSnackBar(
+                                          SnackBar(
+                                            content: Text('Downloading S$_selectedSeason:E${ep.episodeNumber} - ${ep.name}'),
+                                            backgroundColor: const Color(0xFFE50914),
+                                            duration: const Duration(seconds: 2),
+                                            action: SnackBarAction(
+                                              label: 'View',
+                                              textColor: Colors.white,
+                                              onPressed: () {
+                                                Navigator.of(context).push(
+                                                  MaterialPageRoute(builder: (_) => const DownloadsScreen()),
+                                                );
+                                              },
+                                            ),
+                                          ),
+                                        );
+                                      },
                                     ),
-                                    onPressed: () {
-                                      ScaffoldMessenger.of(context).showSnackBar(
-                                        SnackBar(content: Text('Downloading Episode ${ep.episodeNumber}...')),
-                                      );
-                                    },
-                                  ),
                                 ],
                               ),
                               const SizedBox(height: 8),

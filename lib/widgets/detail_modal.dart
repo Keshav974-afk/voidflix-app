@@ -7,10 +7,13 @@ import '../core/constants/theme_constants.dart';
 import '../core/network/api_service.dart';
 import '../models/media_item.dart';
 import '../models/media_detail.dart';
+import '../providers/download_provider.dart';
 import '../providers/history_provider.dart';
 import '../providers/watchlist_provider.dart';
+import '../screens/downloads_screen.dart';
 import '../screens/player_screen.dart';
 import 'media_card.dart';
+import 'netflix_season_picker.dart';
 
 class DetailModal extends StatefulWidget {
   final MediaItem item;
@@ -80,27 +83,51 @@ class _DetailModalState extends State<DetailModal> {
     }
   }
 
-  void _playMedia({int season = 1, int episode = 1}) {
+  void _playMedia({
+    int season = 1,
+    int episode = 1,
+    String? localFilePath,
+    String? episodeTitle,
+  }) {
     Navigator.of(context).pop(); // Dismiss modal
+    final title = widget.item.mediaType == 'tv' && episodeTitle != null
+        ? '${widget.item.title}: S${season}E$episode "$episodeTitle"'
+        : widget.item.title;
+
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => PlayerScreen(
           mediaId: widget.item.id,
-          mediaTitle: widget.item.title,
+          mediaTitle: title,
           mediaType: widget.item.mediaType,
           season: season,
           episode: episode,
           posterPath: widget.item.posterPath,
           backdropPath: widget.item.backdropPath,
+          localFilePath: localFilePath,
         ),
       ),
     );
+  }
+
+  Future<void> _openSeasonPicker() async {
+    if (_detail == null || _detail!.seasons.isEmpty) return;
+    final newSeason = await NetflixSeasonPicker.show(
+      context: context,
+      seasons: _detail!.seasons,
+      selectedSeason: _selectedSeason,
+    );
+    if (newSeason != null && newSeason != _selectedSeason && mounted) {
+      setState(() => _selectedSeason = newSeason);
+      _loadSeasonEpisodes(newSeason);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     final watchlistProvider = context.watch<WatchlistProvider>();
     final historyProvider = context.watch<HistoryProvider>();
+    final downloadProvider = context.watch<DownloadProvider>();
     final inList = watchlistProvider.isInWatchlist(widget.item.id);
     final savedProgress = historyProvider.getProgress(widget.item.id);
 
@@ -303,7 +330,13 @@ class _DetailModalState extends State<DetailModal> {
                             onPressed: () {
                               final s = savedProgress?.season ?? (isTv ? _selectedSeason : 1);
                               final e = savedProgress?.episode ?? 1;
-                              _playMedia(season: s, episode: e);
+                              final offlineId = isTv
+                                  ? DownloadProvider.generateId('tv', widget.item.id, season: s, episode: e)
+                                  : DownloadProvider.generateId('movie', widget.item.id);
+                              final offlineItem = downloadProvider.getItem(offlineId);
+                              final localFile = offlineItem?.status == 'completed' ? offlineItem?.localFilePath : null;
+
+                              _playMedia(season: s, episode: e, localFilePath: localFile);
                             },
                             style: ElevatedButton.styleFrom(
                               backgroundColor: Colors.white,
@@ -328,9 +361,134 @@ class _DetailModalState extends State<DetailModal> {
                             ),
                           ),
                         ),
+                        const SizedBox(height: 8),
+
+                        // Full-width Download Button (Site / Netflix Style)
+                        Builder(
+                          builder: (ctx) {
+                            final firstEp = _episodes.isNotEmpty ? _episodes.first : null;
+                            final targetEpNum = firstEp?.episodeNumber ?? 1;
+                            final mainDlId = isTv
+                                ? DownloadProvider.generateId('tv', widget.item.id, season: _selectedSeason, episode: targetEpNum)
+                                : DownloadProvider.generateId('movie', widget.item.id);
+                            final isDl = downloadProvider.isDownloaded(mainDlId);
+                            final isDownloading = downloadProvider.isDownloading(mainDlId);
+                            final progress = downloadProvider.getProgress(mainDlId);
+                            final dlItem = downloadProvider.getItem(mainDlId);
+
+                            if (isDownloading) {
+                              return SizedBox(
+                                width: double.infinity,
+                                height: 44,
+                                child: ElevatedButton.icon(
+                                  onPressed: () {
+                                    Navigator.of(context).push(
+                                      MaterialPageRoute(builder: (_) => const DownloadsScreen()),
+                                    );
+                                  },
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: const Color(0xFF262626),
+                                    foregroundColor: Colors.white,
+                                    elevation: 0,
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                                  ),
+                                  icon: SizedBox(
+                                    width: 18,
+                                    height: 18,
+                                    child: CircularProgressIndicator(
+                                      value: progress > 0 ? progress : null,
+                                      strokeWidth: 2.2,
+                                      color: AppTheme.primaryRed,
+                                    ),
+                                  ),
+                                  label: Text(
+                                    'Downloading ${(progress * 100).toInt()}%',
+                                    style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.white),
+                                  ),
+                                ),
+                              );
+                            }
+
+                            if (isDl) {
+                              final mb = dlItem != null
+                                  ? '${(dlItem.fileSizeBytes / (1024 * 1024)).toStringAsFixed(0)} MB'
+                                  : 'HD';
+                              return SizedBox(
+                                width: double.infinity,
+                                height: 44,
+                                child: ElevatedButton.icon(
+                                  onPressed: () {
+                                    _playMedia(
+                                      season: _selectedSeason,
+                                      episode: targetEpNum,
+                                      episodeTitle: firstEp?.name,
+                                      localFilePath: dlItem?.localFilePath,
+                                    );
+                                  },
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: const Color(0xFF262626),
+                                    foregroundColor: Colors.white,
+                                    elevation: 0,
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                                  ),
+                                  icon: const Icon(Icons.download_done_rounded, color: AppTheme.primaryRed, size: 22),
+                                  label: Text(
+                                    'Downloaded ($mb)',
+                                    style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.white),
+                                  ),
+                                ),
+                              );
+                            }
+
+                            return SizedBox(
+                              width: double.infinity,
+                              height: 44,
+                              child: ElevatedButton.icon(
+                                onPressed: () {
+                                  downloadProvider.startDownload(
+                                    mediaId: widget.item.id,
+                                    title: widget.item.title,
+                                    mediaType: widget.item.mediaType,
+                                    season: _selectedSeason,
+                                    episode: targetEpNum,
+                                    episodeTitle: firstEp?.name,
+                                    posterPath: widget.item.posterPath,
+                                    backdropPath: widget.item.backdropPath,
+                                  );
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text('Started download for ${widget.item.title}'),
+                                      backgroundColor: const Color(0xFFE50914),
+                                      action: SnackBarAction(
+                                        label: 'View',
+                                        textColor: Colors.white,
+                                        onPressed: () {
+                                          Navigator.of(context).push(
+                                            MaterialPageRoute(builder: (_) => const DownloadsScreen()),
+                                          );
+                                        },
+                                      ),
+                                    ),
+                                  );
+                                },
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: const Color(0xFF262626),
+                                  foregroundColor: Colors.white,
+                                  elevation: 0,
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                                ),
+                                icon: const Icon(Icons.file_download_outlined, color: Colors.white, size: 22),
+                                label: Text(
+                                  isTv ? 'Download S$_selectedSeason:E$targetEpNum' : 'Download',
+                                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.white),
+                                ),
+                              ),
+                            );
+                          },
+                        ),
                         const SizedBox(height: 14),
 
-                        // Action buttons row: [My List] [Rate] [Share]
+                        // Action buttons row: [My List] [Rate] [Share] [Download Season]
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceAround,
                           children: [
@@ -359,6 +517,53 @@ class _DetailModalState extends State<DetailModal> {
                                 );
                               },
                             ),
+                            if (isTv)
+                              _buildActionButton(
+                                icon: Icons.file_download_outlined,
+                                label: 'Download S$_selectedSeason',
+                                isActive: false,
+                                onTap: () {
+                                  if (_episodes.isEmpty) {
+                                    downloadProvider.startDownload(
+                                      mediaId: widget.item.id,
+                                      title: widget.item.title,
+                                      mediaType: 'tv',
+                                      season: _selectedSeason,
+                                      episode: 1,
+                                      posterPath: widget.item.posterPath,
+                                      backdropPath: widget.item.backdropPath,
+                                    );
+                                  } else {
+                                    for (final ep in _episodes) {
+                                      downloadProvider.startDownload(
+                                        mediaId: widget.item.id,
+                                        title: widget.item.title,
+                                        mediaType: 'tv',
+                                        season: _selectedSeason,
+                                        episode: ep.episodeNumber,
+                                        episodeTitle: ep.name,
+                                        posterPath: widget.item.posterPath,
+                                        backdropPath: widget.item.backdropPath,
+                                      );
+                                    }
+                                  }
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text('Downloading Season $_selectedSeason (${_episodes.length} episodes)...'),
+                                      backgroundColor: const Color(0xFFE50914),
+                                      action: SnackBarAction(
+                                        label: 'View',
+                                        textColor: Colors.white,
+                                        onPressed: () {
+                                          Navigator.of(context).push(
+                                            MaterialPageRoute(builder: (_) => const DownloadsScreen()),
+                                          );
+                                        },
+                                      ),
+                                    ),
+                                  );
+                                },
+                              ),
                           ],
                         ),
                         const SizedBox(height: 16),
@@ -419,43 +624,64 @@ class _DetailModalState extends State<DetailModal> {
                   ),
 
                   if (_selectedTab == 0) ...[
-                    // Season Picker Dropdown
+                    // Season Picker Dropdown Pill + Info (Web style)
                     if (_detail?.seasons != null && _detail!.seasons.isNotEmpty)
                       SliverToBoxAdapter(
                         child: Padding(
                           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                           child: Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 10),
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFF242424),
-                                  borderRadius: BorderRadius.circular(4),
-                                ),
-                                child: DropdownButton<int>(
-                                  value: _selectedSeason,
-                                  dropdownColor: const Color(0xFF242424),
-                                  underline: const SizedBox.shrink(),
-                                  icon: const Icon(Icons.arrow_drop_down, color: Colors.white),
-                                  items: _detail!.seasons.map((s) {
-                                    return DropdownMenuItem<int>(
-                                      value: s.seasonNumber,
-                                      child: Text(
-                                        s.name,
+                              GestureDetector(
+                                onTap: _openSeasonPicker,
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF2A2A2A),
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Text(
+                                        'Season $_selectedSeason',
                                         style: const TextStyle(
                                           color: Colors.white,
                                           fontWeight: FontWeight.bold,
-                                          fontSize: 13,
+                                          fontSize: 15,
                                         ),
                                       ),
-                                    );
-                                  }).toList(),
-                                  onChanged: (val) {
-                                    if (val != null) {
-                                      setState(() => _selectedSeason = val);
-                                      _loadSeasonEpisodes(val);
-                                    }
-                                  },
+                                      const SizedBox(width: 8),
+                                      const Icon(Icons.keyboard_arrow_down, color: Colors.white, size: 20),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                              GestureDetector(
+                                onTap: () {
+                                  final sObj = _detail?.seasons.firstWhere(
+                                    (s) => s.seasonNumber == _selectedSeason,
+                                    orElse: () => _detail!.seasons.first,
+                                  );
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    SnackBar(
+                                      content: Text(
+                                        sObj != null && sObj.name.isNotEmpty
+                                            ? '${sObj.name} of ${widget.item.title}'
+                                            : 'Season $_selectedSeason of ${widget.item.title}',
+                                      ),
+                                      backgroundColor: const Color(0xFF262626),
+                                    ),
+                                  );
+                                },
+                                child: Container(
+                                  width: 34,
+                                  height: 34,
+                                  decoration: const BoxDecoration(
+                                    color: Color(0xFF2A2A2A),
+                                    shape: BoxShape.circle,
+                                  ),
+                                  child: const Icon(Icons.info_outline, color: Colors.white70, size: 18),
                                 ),
                               ),
                             ],
@@ -479,77 +705,88 @@ class _DetailModalState extends State<DetailModal> {
                           (context, index) {
                             final ep = _episodes[index];
                             final stillUrl = ApiConstants.getImageUrl(ep.stillPath, size: 'w300');
+                            final epDlId = DownloadProvider.generateId(
+                              'tv',
+                              widget.item.id,
+                              season: _selectedSeason,
+                              episode: ep.episodeNumber,
+                            );
+                            final isEpDl = downloadProvider.isDownloaded(epDlId);
+                            final isEpDownloading = downloadProvider.isDownloading(epDlId);
+                            final epProg = downloadProvider.getProgress(epDlId);
+                            final epDlItem = downloadProvider.getItem(epDlId);
 
                             return InkWell(
                               onTap: () => _playMedia(
                                 season: _selectedSeason,
                                 episode: ep.episodeNumber,
+                                episodeTitle: ep.name,
+                                localFilePath: isEpDl ? epDlItem?.localFilePath : null,
                               ),
                               child: Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                                 decoration: const BoxDecoration(
                                   border: Border(bottom: BorderSide(color: Color(0xFF222222))),
                                 ),
-                                child: Row(
-                                  crossAxisAlignment: CrossAxisAlignment.center,
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
-                                    // Episode Still Thumbnail
-                                    ClipRRect(
-                                      borderRadius: BorderRadius.circular(6),
-                                      child: SizedBox(
-                                        width: 105,
-                                        height: 65,
-                                        child: Stack(
-                                          fit: StackFit.expand,
-                                          children: [
-                                            if (stillUrl.isNotEmpty)
-                                              CachedNetworkImage(
-                                                imageUrl: stillUrl,
-                                                fit: BoxFit.cover,
-                                              )
-                                            else
-                                              Container(color: const Color(0xFF2E2E2E)),
-                                            Center(
-                                              child: Container(
-                                                padding: const EdgeInsets.all(6),
-                                                decoration: BoxDecoration(
-                                                  shape: BoxShape.circle,
-                                                  color: Colors.black.withValues(alpha: 0.6),
-                                                ),
-                                                child: const Icon(
-                                                  Icons.play_arrow,
-                                                  color: Colors.white,
-                                                  size: 16,
-                                                ),
-                                              ),
-                                            ),
-                                          ],
-                                        ),
-                                      ),
-                                    ),
-                                    const SizedBox(width: 14),
-
-                                    // Episode Details
-                                    Expanded(
-                                      child: Column(
-                                        crossAxisAlignment: CrossAxisAlignment.start,
-                                        children: [
-                                          Row(
-                                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                            children: [
-                                              Expanded(
-                                                child: Text(
-                                                  '${ep.episodeNumber}. ${ep.name}',
-                                                  maxLines: 1,
-                                                  overflow: TextOverflow.ellipsis,
-                                                  style: const TextStyle(
-                                                    color: Colors.white,
-                                                    fontWeight: FontWeight.bold,
-                                                    fontSize: 13,
+                                    Row(
+                                      crossAxisAlignment: CrossAxisAlignment.center,
+                                      children: [
+                                        // Episode Still Thumbnail
+                                        ClipRRect(
+                                          borderRadius: BorderRadius.circular(6),
+                                          child: SizedBox(
+                                            width: 105,
+                                            height: 65,
+                                            child: Stack(
+                                              fit: StackFit.expand,
+                                              children: [
+                                                if (stillUrl.isNotEmpty)
+                                                  CachedNetworkImage(
+                                                    imageUrl: stillUrl,
+                                                    fit: BoxFit.cover,
+                                                  )
+                                                else
+                                                  Container(color: const Color(0xFF2E2E2E)),
+                                                Center(
+                                                  child: Container(
+                                                    padding: const EdgeInsets.all(6),
+                                                    decoration: BoxDecoration(
+                                                      shape: BoxShape.circle,
+                                                      color: Colors.black.withValues(alpha: 0.6),
+                                                    ),
+                                                    child: const Icon(
+                                                      Icons.play_arrow,
+                                                      color: Colors.white,
+                                                      size: 16,
+                                                    ),
                                                   ),
                                                 ),
+                                              ],
+                                            ),
+                                          ),
+                                        ),
+                                        const SizedBox(width: 14),
+
+                                        // Episode Details
+                                        Expanded(
+                                          child: Column(
+                                            crossAxisAlignment: CrossAxisAlignment.start,
+                                            children: [
+                                              Text(
+                                                '${ep.episodeNumber}. ${ep.name}',
+                                                maxLines: 2,
+                                                overflow: TextOverflow.ellipsis,
+                                                style: const TextStyle(
+                                                  color: Colors.white,
+                                                  fontWeight: FontWeight.bold,
+                                                  fontSize: 13,
+                                                ),
                                               ),
-                                              if (ep.runtime > 0)
+                                              if (ep.runtime > 0) ...[
+                                                const SizedBox(height: 2),
                                                 Text(
                                                   '${ep.runtime}m',
                                                   style: const TextStyle(
@@ -557,24 +794,94 @@ class _DetailModalState extends State<DetailModal> {
                                                     fontSize: 11,
                                                   ),
                                                 ),
+                                              ],
                                             ],
                                           ),
-                                          const SizedBox(height: 4),
-                                          Text(
-                                            ep.overview.isNotEmpty
-                                                ? ep.overview
-                                                : 'Episode ${ep.episodeNumber}',
-                                            maxLines: 2,
-                                            overflow: TextOverflow.ellipsis,
-                                            style: const TextStyle(
-                                              color: AppTheme.textSecondary,
-                                              fontSize: 11,
-                                              height: 1.3,
+                                        ),
+
+                                        // Episode Download Button / Status
+                                        if (isEpDownloading)
+                                          SizedBox(
+                                            width: 38,
+                                            height: 38,
+                                            child: Stack(
+                                              alignment: Alignment.center,
+                                              children: [
+                                                CircularProgressIndicator(
+                                                  value: epProg > 0 ? epProg : null,
+                                                  strokeWidth: 2.5,
+                                                  color: AppTheme.primaryRed,
+                                                  backgroundColor: Colors.white12,
+                                                ),
+                                                IconButton(
+                                                  padding: EdgeInsets.zero,
+                                                  constraints: const BoxConstraints(),
+                                                  icon: const Icon(Icons.stop_rounded, color: Colors.white, size: 16),
+                                                  tooltip: 'Cancel Download',
+                                                  onPressed: () => downloadProvider.cancelDownload(epDlId),
+                                                ),
+                                              ],
                                             ),
+                                          )
+                                        else if (isEpDl)
+                                          IconButton(
+                                            icon: const Icon(Icons.download_done_rounded, color: AppTheme.primaryRed, size: 24),
+                                            tooltip: 'Downloaded - Play offline',
+                                            onPressed: () => _playMedia(
+                                              season: _selectedSeason,
+                                              episode: ep.episodeNumber,
+                                              episodeTitle: ep.name,
+                                              localFilePath: epDlItem?.localFilePath,
+                                            ),
+                                          )
+                                        else
+                                          IconButton(
+                                            icon: const Icon(Icons.file_download_outlined, color: Colors.white, size: 24),
+                                            tooltip: 'Download Episode',
+                                            onPressed: () {
+                                              downloadProvider.startDownload(
+                                                mediaId: widget.item.id,
+                                                title: widget.item.title,
+                                                mediaType: 'tv',
+                                                season: _selectedSeason,
+                                                episode: ep.episodeNumber,
+                                                episodeTitle: ep.name,
+                                                posterPath: widget.item.posterPath,
+                                                backdropPath: widget.item.backdropPath,
+                                              );
+                                              ScaffoldMessenger.of(context).showSnackBar(
+                                                SnackBar(
+                                                  content: Text('Downloading S$_selectedSeason:E${ep.episodeNumber} - ${ep.name}'),
+                                                  backgroundColor: const Color(0xFFE50914),
+                                                  duration: const Duration(seconds: 2),
+                                                  action: SnackBarAction(
+                                                    label: 'View',
+                                                    textColor: Colors.white,
+                                                    onPressed: () {
+                                                      Navigator.of(context).push(
+                                                        MaterialPageRoute(builder: (_) => const DownloadsScreen()),
+                                                      );
+                                                    },
+                                                  ),
+                                                ),
+                                              );
+                                            },
                                           ),
-                                        ],
-                                      ),
+                                      ],
                                     ),
+                                    if (ep.overview.isNotEmpty) ...[
+                                      const SizedBox(height: 6),
+                                      Text(
+                                        ep.overview,
+                                        maxLines: 2,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          color: AppTheme.textSecondary,
+                                          fontSize: 11,
+                                          height: 1.3,
+                                        ),
+                                      ),
+                                    ],
                                   ],
                                 ),
                               ),

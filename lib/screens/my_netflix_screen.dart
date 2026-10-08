@@ -5,6 +5,7 @@ import 'package:share_plus/share_plus.dart';
 import '../core/constants/theme_constants.dart';
 import '../core/network/api_service.dart';
 import '../models/media_item.dart';
+import '../providers/download_provider.dart';
 import '../providers/history_provider.dart';
 import '../providers/media_provider.dart';
 import '../providers/notification_provider.dart';
@@ -14,6 +15,7 @@ import '../widgets/detail_modal.dart';
 import '../widgets/notifications_sheet.dart';
 import '../widgets/profile_avatar.dart';
 import '../widgets/profile_switcher_sheet.dart';
+import 'downloads_screen.dart';
 import 'player_screen.dart';
 import 'watchlist_screen.dart';
 
@@ -27,11 +29,13 @@ class MyVoidflixScreen extends StatelessWidget {
     final watchlistProvider = context.watch<WatchlistProvider>();
     final mediaProvider = context.watch<MediaProvider>();
     final notifProvider = context.watch<NotificationProvider>();
+    final downloadProvider = context.watch<DownloadProvider>();
 
     final activeProfile = profileProvider.activeProfile;
     final historyItems = historyProvider.history;
     final watchlistItems = watchlistProvider.watchlist;
     final likedItems = mediaProvider.trending.take(6).toList();
+    final downloadCount = downloadProvider.completedItems.length;
 
     return Scaffold(
       backgroundColor: Colors.black,
@@ -67,7 +71,11 @@ class MyVoidflixScreen extends StatelessWidget {
           IconButton(
             icon: const Icon(Icons.file_download_outlined, color: Colors.white, size: 24),
             tooltip: 'Downloads',
-            onPressed: () {},
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const DownloadsScreen()),
+              );
+            },
           ),
           Stack(
             alignment: Alignment.center,
@@ -116,46 +124,59 @@ class MyVoidflixScreen extends StatelessWidget {
           // 1. Downloads Box (Screenshot 5)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: const Color(0xFF16161E),
+            child: Material(
+              color: Colors.transparent,
+              child: InkWell(
+                onTap: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const DownloadsScreen()),
+                  );
+                },
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-              ),
-              child: Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: Colors.white.withValues(alpha: 0.08),
-                      shape: BoxShape.circle,
-                    ),
-                    child: const Icon(Icons.file_download_outlined, color: Colors.white, size: 22),
+                child: Container(
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF16161E),
+                    borderRadius: BorderRadius.circular(12),
+                    border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
                   ),
-                  const SizedBox(width: 14),
-                  const Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Downloads',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                          ),
+                  child: Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: Colors.white.withValues(alpha: 0.08),
+                          shape: BoxShape.circle,
                         ),
-                        SizedBox(height: 4),
-                        Text(
-                          'Movies and shows that you download appear here.',
-                          style: TextStyle(color: Colors.white54, fontSize: 12),
+                        child: const Icon(Icons.file_download_outlined, color: Colors.white, size: 22),
+                      ),
+                      const SizedBox(width: 14),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'Downloads',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              downloadCount > 0
+                                  ? '$downloadCount ${downloadCount == 1 ? 'item' : 'items'} available offline'
+                                  : 'Movies and shows that you download appear here.',
+                              style: const TextStyle(color: Colors.white54, fontSize: 12),
+                            ),
+                          ],
                         ),
-                      ],
-                    ),
+                      ),
+                      const Icon(Icons.chevron_right, color: Colors.white54),
+                    ],
                   ),
-                  const Icon(Icons.chevron_right, color: Colors.white54),
-                ],
+                ),
               ),
             ),
           ),
