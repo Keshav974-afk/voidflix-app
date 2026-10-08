@@ -24,8 +24,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   bool _isKids = false;
 
   static const int _totalPages = 4;
-  static const String _telegramChannelUrl = 'https://t.me/VoidFlixOrg';
-  static const String _telegramChatUrl = 'https://t.me/Voidflixchat';
 
   @override
   void dispose() {
@@ -34,18 +32,30 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
     super.dispose();
   }
 
-  Future<void> _openUrl(String url) async {
-    final uri = Uri.parse(url);
+  Future<void> _openTelegram(String username) async {
+    final tgUri = Uri.parse('tg://resolve?domain=$username');
+    final webUri = Uri.parse('https://t.me/$username');
+    bool launched = false;
     try {
-      if (await canLaunchUrl(uri)) {
-        await launchUrl(uri, mode: LaunchMode.externalApplication);
-      }
-    } catch (_) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not open link: $url')),
-        );
-      }
+      launched = await launchUrl(tgUri, mode: LaunchMode.externalApplication);
+    } catch (_) {}
+
+    if (!launched) {
+      try {
+        launched = await launchUrl(webUri, mode: LaunchMode.externalApplication);
+      } catch (_) {}
+    }
+
+    if (!launched) {
+      try {
+        launched = await launchUrl(webUri, mode: LaunchMode.platformDefault);
+      } catch (_) {}
+    }
+
+    if (!launched && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not open Telegram: https://t.me/$username')),
+      );
     }
   }
 
@@ -438,7 +448,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                         borderRadius: BorderRadius.circular(8),
                       ),
                     ),
-                    onPressed: () => _openUrl(_telegramChannelUrl),
+                    onPressed: () => _openTelegram('VoidFlixOrg'),
                     icon: const Icon(Icons.send_rounded, size: 16),
                     label: const Text(
                       'Join Telegram Channel (@VoidFlixOrg)',
@@ -458,7 +468,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                         borderRadius: BorderRadius.circular(8),
                       ),
                     ),
-                    onPressed: () => _openUrl(_telegramChatUrl),
+                    onPressed: () => _openTelegram('Voidflixchat'),
                     icon: const Icon(Icons.forum_outlined, size: 16, color: Color(0xFF29B6F6)),
                     label: const Text(
                       'Join Discussion Chat (@Voidflixchat)',

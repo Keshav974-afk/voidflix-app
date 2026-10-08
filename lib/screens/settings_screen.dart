@@ -32,8 +32,6 @@ class SettingsScreen extends StatefulWidget {
 }
 
 class _SettingsScreenState extends State<SettingsScreen> {
-  static const String _telegramChannelUrl = 'https://t.me/VoidFlixOrg';
-  static const String _telegramChatUrl = 'https://t.me/Voidflixchat';
   static const String _websiteUrl = 'https://voidflix.org';
 
   // Persisted state
@@ -118,18 +116,50 @@ class _SettingsScreenState extends State<SettingsScreen> {
     }
   }
 
+  Future<void> _openTelegram(String username) async {
+    final tgUri = Uri.parse('tg://resolve?domain=$username');
+    final webUri = Uri.parse('https://t.me/$username');
+    bool launched = false;
+    try {
+      launched = await launchUrl(tgUri, mode: LaunchMode.externalApplication);
+    } catch (_) {}
+
+    if (!launched) {
+      try {
+        launched = await launchUrl(webUri, mode: LaunchMode.externalApplication);
+      } catch (_) {}
+    }
+
+    if (!launched) {
+      try {
+        launched = await launchUrl(webUri, mode: LaunchMode.platformDefault);
+      } catch (_) {}
+    }
+
+    if (!launched && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not open Telegram: https://t.me/$username')),
+      );
+    }
+  }
+
   Future<void> _openUrl(String url) async {
     final uri = Uri.parse(url);
+    bool launched = false;
     try {
-      if (await canLaunchUrl(uri)) {
-        await launchUrl(uri, mode: LaunchMode.externalApplication);
-      }
-    } catch (_) {
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Could not open link: $url')),
-        );
-      }
+      launched = await launchUrl(uri, mode: LaunchMode.externalApplication);
+    } catch (_) {}
+
+    if (!launched) {
+      try {
+        launched = await launchUrl(uri, mode: LaunchMode.platformDefault);
+      } catch (_) {}
+    }
+
+    if (!launched && mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Could not open link: $url')),
+      );
     }
   }
 
@@ -767,7 +797,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     style: TextStyle(color: Color(0xFF29B6F6), fontSize: 12, fontWeight: FontWeight.w500),
                   ),
                   trailing: const Icon(Icons.open_in_new_rounded, color: Color(0xFF29B6F6), size: 18),
-                  onTap: () => _openUrl(_telegramChannelUrl),
+                  onTap: () => _openTelegram('VoidFlixOrg'),
                 ),
                 const Divider(height: 1, color: Color(0xFF242434)),
 
@@ -794,7 +824,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
                     style: TextStyle(color: Color(0xFF29B6F6), fontSize: 12, fontWeight: FontWeight.w500),
                   ),
                   trailing: const Icon(Icons.open_in_new_rounded, color: Color(0xFF29B6F6), size: 18),
-                  onTap: () => _openUrl(_telegramChatUrl),
+                  onTap: () => _openTelegram('Voidflixchat'),
                 ),
                 const Divider(height: 1, color: Color(0xFF242434)),
 
