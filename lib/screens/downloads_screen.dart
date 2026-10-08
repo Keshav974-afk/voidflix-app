@@ -139,6 +139,8 @@ class DownloadsScreen extends StatelessWidget {
                       onTap: () {
                         if (item.status == 'completed') {
                           _playOffline(context, item);
+                        } else if (item.status == 'failed') {
+                          _showFailedOptionsSheet(context, item, downloadProvider);
                         }
                       },
                       child: Container(
@@ -304,6 +306,13 @@ class DownloadsScreen extends StatelessWidget {
                                     posterPath: item.posterPath,
                                     backdropPath: item.backdropPath,
                                   );
+                                } else if (val == 'web_download') {
+                                  DownloadProvider.launchWebDownload(
+                                    mediaType: item.mediaType,
+                                    mediaId: item.mediaId,
+                                    season: item.season,
+                                    episode: item.episode,
+                                  );
                                 }
                               },
                               itemBuilder: (ctx) => [
@@ -318,7 +327,7 @@ class DownloadsScreen extends StatelessWidget {
                                       ],
                                     ),
                                   ),
-                                if (item.status == 'failed')
+                                if (item.status == 'failed') ...[
                                   const PopupMenuItem(
                                     value: 'retry',
                                     child: Row(
@@ -329,6 +338,17 @@ class DownloadsScreen extends StatelessWidget {
                                       ],
                                     ),
                                   ),
+                                  const PopupMenuItem(
+                                    value: 'web_download',
+                                    child: Row(
+                                      children: [
+                                        Icon(Icons.open_in_browser, color: Colors.lightBlueAccent, size: 20),
+                                        SizedBox(width: 8),
+                                        Text('Open Web Download', style: TextStyle(color: Colors.white)),
+                                      ],
+                                    ),
+                                  ),
+                                ],
                                 const PopupMenuItem(
                                   value: 'delete',
                                   child: Row(
@@ -349,6 +369,119 @@ class DownloadsScreen extends StatelessWidget {
                 }),
               ],
             ),
+    );
+  }
+
+  void _showFailedOptionsSheet(
+    BuildContext context,
+    DownloadedItem item,
+    DownloadProvider downloadProvider,
+  ) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF1B1B22),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 18),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Icon(Icons.error_outline_rounded, color: Colors.orangeAccent, size: 24),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Text(
+                      item.title,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Direct streaming server was busy or blocked chunk requests. You can retry in-app or open the web resolver to download directly in your browser.',
+                style: TextStyle(color: Colors.white70, fontSize: 13, height: 1.4),
+              ),
+              const SizedBox(height: 18),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: const BoxDecoration(
+                    color: Color(0xFF282832),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.refresh_rounded, color: Colors.white, size: 20),
+                ),
+                title: const Text('Retry In-App Download', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                subtitle: const Text('Attempt multi-source stream download again', style: TextStyle(color: Colors.white54, fontSize: 12)),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  downloadProvider.startDownload(
+                    mediaId: item.mediaId,
+                    title: item.title,
+                    mediaType: item.mediaType,
+                    season: item.season,
+                    episode: item.episode,
+                    episodeTitle: item.episodeTitle,
+                    posterPath: item.posterPath,
+                    backdropPath: item.backdropPath,
+                  );
+                },
+              ),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: const BoxDecoration(
+                    color: Color(0xFF282832),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.open_in_browser_rounded, color: Colors.lightBlueAccent, size: 20),
+                ),
+                title: const Text('Open Web Download Page', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                subtitle: const Text('Download .mp4 file directly using MovieBox/Voidflix web resolver', style: TextStyle(color: Colors.white54, fontSize: 12)),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  DownloadProvider.launchWebDownload(
+                    mediaType: item.mediaType,
+                    mediaId: item.mediaId,
+                    season: item.season,
+                    episode: item.episode,
+                  );
+                },
+              ),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: Container(
+                  padding: const EdgeInsets.all(8),
+                  decoration: const BoxDecoration(
+                    color: Color(0xFF282832),
+                    shape: BoxShape.circle,
+                  ),
+                  child: const Icon(Icons.delete_outline_rounded, color: AppTheme.primaryRed, size: 20),
+                ),
+                title: const Text('Remove from Downloads', style: TextStyle(color: AppTheme.primaryRed, fontWeight: FontWeight.bold)),
+                onTap: () {
+                  Navigator.of(ctx).pop();
+                  downloadProvider.deleteDownload(item.id);
+                },
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 

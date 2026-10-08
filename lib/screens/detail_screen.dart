@@ -53,23 +53,19 @@ class _DetailScreenState extends State<DetailScreen> {
   }
 
   void _updateTrailerPlayer(String key) {
-    if (key.isEmpty) return;
+    if (key.isEmpty || (key == _activeTrailerKey && _trailerWebController != null)) return;
     _activeTrailerKey = key;
 
-    late final WebViewController controller;
-    controller = WebViewController()
+    final controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setBackgroundColor(Colors.black)
-      ..setUserAgent('Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36')
+      ..setUserAgent(
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+      )
       ..setNavigationDelegate(
         NavigationDelegate(
-          onPageFinished: (url) {
-            controller.runJavaScript('''
-              document.body.style.backgroundColor = "#000";
-              document.body.style.margin = "0";
-              document.body.style.padding = "0";
-              document.body.style.overflow = "hidden";
-            ''');
+          onWebResourceError: (error) {
+            debugPrint('Trailer WebView error: ${error.description}');
           },
         ),
       );
@@ -79,8 +75,42 @@ class _DetailScreenState extends State<DetailScreen> {
       android.setMediaPlaybackRequiresUserGesture(false);
     }
 
-    final trailerUrl = 'https://www.youtube.com/embed/$key?autoplay=1&mute=${_isMuted ? 1 : 0}&controls=1&playsinline=1&rel=0&modestbranding=1&enablejsapi=1&origin=https://www.youtube.com';
-    controller.loadRequest(Uri.parse(trailerUrl));
+    final html = '''
+<!DOCTYPE html>
+<html>
+<head>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    html, body {
+      width: 100%;
+      height: 100%;
+      background-color: #000000;
+      overflow: hidden;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    iframe {
+      width: 100%;
+      height: 100%;
+      border: 0;
+      pointer-events: auto;
+    }
+  </style>
+</head>
+<body>
+  <iframe
+    id="trailer-frame"
+    src="https://www.youtube-nocookie.com/embed/$key?autoplay=1&mute=${_isMuted ? 1 : 0}&controls=1&playsinline=1&rel=0&modestbranding=1&enablejsapi=1&origin=https://www.youtube.com"
+    allow="autoplay; encrypted-media; fullscreen; picture-in-picture"
+    allowfullscreen>
+  </iframe>
+</body>
+</html>
+''';
+
+    controller.loadHtmlString(html, baseUrl: 'https://www.youtube.com');
 
     if (mounted) {
       setState(() {
@@ -88,6 +118,26 @@ class _DetailScreenState extends State<DetailScreen> {
         _showTrailerVideo = true;
       });
     }
+  }
+
+  void _toggleTrailerMute() {
+    setState(() => _isMuted = !_isMuted);
+    _trailerWebController?.runJavaScript('''
+      var iframe = document.getElementById("trailer-frame");
+      if (iframe && iframe.contentWindow) {
+        iframe.contentWindow.postMessage(JSON.stringify({
+          "event": "command",
+          "func": "${_isMuted ? "mute" : "unMute"}",
+          "args": []
+        }), "*");
+      }
+    ''');
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(_isMuted ? 'Muted' : 'Sound On'),
+        duration: const Duration(seconds: 1),
+      ),
+    );
   }
 
   Future<void> _loadDetail() async {
@@ -328,18 +378,7 @@ class _DetailScreenState extends State<DetailScreen> {
                     right: 14,
                     bottom: 14,
                     child: GestureDetector(
-                      onTap: () {
-                        setState(() => _isMuted = !_isMuted);
-                        if (_activeTrailerKey != null) {
-                          _updateTrailerPlayer(_activeTrailerKey!);
-                        }
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          SnackBar(
-                            content: Text(_isMuted ? 'Muted' : 'Sound On'),
-                            duration: const Duration(seconds: 1),
-                          ),
-                        );
-                      },
+                      onTap: _toggleTrailerMute,
                       child: Container(
                         padding: const EdgeInsets.all(7),
                         decoration: BoxDecoration(

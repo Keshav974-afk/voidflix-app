@@ -247,6 +247,114 @@ class StreamExtractor {
     }
   }
 
+  /// Extracts high-speed proxied streams directly from Voidflix API backend (same as flowflix-web)
+  static Future<ExtractedStream?> extractVoidflixBackend({
+    required String type, // 'movie' or 'tv'
+    required int tmdbId,
+    int season = 1,
+    int episode = 1,
+  }) async {
+    try {
+      final uri = Uri.parse(
+        'https://voidflix.org/api/public/extract?type=$type&id=$tmdbId&s=$season&e=$episode',
+      );
+      final res = await http.get(
+        uri,
+        headers: {
+          'User-Agent':
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+          'Accept': 'application/json, */*',
+        },
+      ).timeout(const Duration(seconds: 10));
+
+      if (res.statusCode != 200) return null;
+      final json = jsonDecode(res.body) as Map<String, dynamic>;
+      final rawHls = json['hls'] as String?;
+      if (rawHls == null || rawHls.isEmpty) return null;
+
+      String resolveUrl(String u) {
+        if (u.startsWith('http')) return u;
+        if (u.startsWith('/')) return 'https://voidflix.org$u';
+        return 'https://voidflix.org/$u';
+      }
+
+      final hlsUrl = resolveUrl(rawHls);
+      final kind = (json['kind'] as String?) ?? 'mp4';
+      final provider = (json['provider'] as String?) ?? 'Voidflix';
+
+      // Parse Qualities
+      final qualities = <StreamQuality>[];
+      final rawQualities = json['qualities'] as List<dynamic>?;
+      if (rawQualities != null) {
+        for (final q in rawQualities) {
+          if (q is Map<String, dynamic> && q['url'] != null) {
+            final qUrl = resolveUrl(q['url'] as String);
+            final label = (q['label'] as String?) ?? 'HD';
+            final height = (q['height'] as num?)?.toInt() ?? 0;
+            qualities.add(StreamQuality(label: label, height: height, url: qUrl));
+          }
+        }
+      }
+
+      // Parse Subtitles
+      final subs = <SubtitleTrack>[];
+      final rawSubs = json['subs'] as List<dynamic>?;
+      if (rawSubs != null) {
+        for (final s in rawSubs) {
+          if (s is Map<String, dynamic> && s['url'] != null) {
+            final sUrl = resolveUrl(s['url'] as String);
+            final label = (s['label'] as String?) ?? 'Sub';
+            final lang = (s['lang'] as String?) ?? label;
+            subs.add(SubtitleTrack(label: label, language: lang, url: sUrl));
+          }
+        }
+      }
+
+      return ExtractedStream(
+        url: hlsUrl,
+        type: kind,
+        sourceName: 'Voidflix ($provider)',
+        headers: {
+          'Referer': 'https://voidflix.org/',
+          'User-Agent':
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        },
+        qualityLabel: qualities.isNotEmpty ? qualities.first.label : 'HD',
+        qualities: qualities,
+        subtitles: subs,
+      );
+    } catch (e) {
+      debugPrint('Voidflix backend extraction error: $e');
+      return null;
+    }
+  }
+
+  /// Direct file resolver from Voidflix download API (Stremio/direct MP4 addon)
+  static Future<String?> extractDirectFileUrl({
+    required String type,
+    required int tmdbId,
+    int season = 1,
+    int episode = 1,
+  }) async {
+    try {
+      final uri = Uri.parse(
+        'https://voidflix.org/api/public/download?type=$type&id=$tmdbId&s=$season&e=$episode',
+      );
+      final res = await http.get(uri, headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      }).timeout(const Duration(seconds: 8));
+
+      if (res.statusCode == 200) {
+        final json = jsonDecode(res.body) as Map<String, dynamic>;
+        final url = json['url'] as String?;
+        if (url != null && url.isNotEmpty) {
+          return url;
+        }
+      }
+    } catch (_) {}
+    return null;
+  }
+
   /// Master extraction method that queries all direct stream extractors
   /// and aggregates audio sources, qualities, and all subtitle tracks.
   static Future<List<ExtractedStream>> extractAll({
@@ -258,7 +366,25 @@ class StreamExtractor {
     final results = <ExtractedStream>[];
     List<SubtitleTrack> sharedSubs = [];
 
-    // 1. Vidlink (High quality with complete multilingual subtitles)
+    // 1. Voidflix Backend (Fastest & identical to flowflix-web)
+    try {
+      final voidflixStream = await extractVoidflixBackend(
+        type: type,
+        tmdbId: tmdbId,
+        season: season,
+        episode: episode,
+      );
+      if (voidflixStream != null) {
+        results.add(voidflixStream);
+        if (voidflixStream.subtitles.isNotEmpty) {
+          sharedSubs = voidflixStream.subtitles;
+        }
+      }
+    } catch (e) {
+      debugPrint('Voidflix extractor error: $e');
+    }
+
+    // 2. Vidlink (High quality with complete multilingual subtitles)
     try {
       final vidlinkStream = await extractVidlink(
         type: type,
@@ -268,7 +394,7 @@ class StreamExtractor {
       );
       if (vidlinkStream != null) {
         results.add(vidlinkStream);
-        if (vidlinkStream.subtitles.isNotEmpty) {
+        if (vidlinkStream.subtitles.isNotEmpty && sharedSubs.isEmpty) {
           sharedSubs = vidlinkStream.subtitles;
         }
       }
@@ -276,7 +402,7 @@ class StreamExtractor {
       debugPrint('Vidlink extractor error: $e');
     }
 
-    // 2. Vidrock (VVID engine: Nova, Atlas, Orion - Ultra-fast CDN HLS)
+    // 3. Vidrock (VVID engine: Nova, Atlas, Orion - Ultra-fast CDN HLS)
     try {
       final vidrockStreams = await extractVidrock(
         type: type,

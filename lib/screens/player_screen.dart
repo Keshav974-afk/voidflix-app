@@ -2006,25 +2006,39 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                 onPressed: () => _seekRelative(-10),
                               ),
                               const SizedBox(width: 36),
-                              GestureDetector(
-                                onTap: _togglePlayPause,
-                                child: Container(
-                                  width: 68,
-                                  height: 68,
-                                  decoration: BoxDecoration(
-                                    color: AppTheme.primaryRed,
-                                    shape: BoxShape.circle,
-                                    boxShadow: [
-                                      BoxShadow(
-                                        color: AppTheme.primaryRed.withValues(alpha: 0.55),
-                                        blurRadius: 22,
+                              Material(
+                                color: Colors.transparent,
+                                shape: const CircleBorder(),
+                                child: InkWell(
+                                  onTap: _togglePlayPause,
+                                  customBorder: const CircleBorder(),
+                                  splashColor: Colors.white24,
+                                  highlightColor: Colors.white10,
+                                  child: Container(
+                                    width: 74,
+                                    height: 74,
+                                    decoration: BoxDecoration(
+                                      shape: BoxShape.circle,
+                                      color: Colors.black.withValues(alpha: 0.52),
+                                      border: Border.all(
+                                        color: Colors.white.withValues(alpha: 0.25),
+                                        width: 1.5,
                                       ),
-                                    ],
-                                  ),
-                                  child: Icon(
-                                    _isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
-                                    size: 42,
-                                    color: Colors.white,
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: Colors.black.withValues(alpha: 0.45),
+                                          blurRadius: 20,
+                                          spreadRadius: 2,
+                                        ),
+                                      ],
+                                    ),
+                                    child: Center(
+                                      child: Icon(
+                                        _isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                                        size: 46,
+                                        color: Colors.white,
+                                      ),
+                                    ),
                                   ),
                                 ),
                               ),
@@ -2050,6 +2064,18 @@ class _PlayerScreenState extends State<PlayerScreen> {
                               if (_isNativeMode && _totalDuration > Duration.zero)
                                 Row(
                                   children: [
+                                    IconButton(
+                                      icon: Icon(
+                                        _isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                                        color: Colors.white,
+                                        size: 22,
+                                      ),
+                                      padding: EdgeInsets.zero,
+                                      constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
+                                      tooltip: _isPlaying ? 'Pause' : 'Play',
+                                      onPressed: _togglePlayPause,
+                                    ),
+                                    const SizedBox(width: 6),
                                     Text(
                                       _formatDuration(_isDraggingSeekbar
                                           ? Duration(seconds: _dragPositionSec.toInt())
