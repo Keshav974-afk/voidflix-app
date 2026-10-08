@@ -118,6 +118,49 @@ class ApiService {
   Future<List<MediaItem>> getDocumentaries({int page = 1}) => discoverByGenre('movie', 99, page: page);
   Future<List<MediaItem>> getFamilyMovies({int page = 1}) => discoverByGenre('movie', 10751, page: page);
 
+  Future<List<MediaItem>> discoverByLanguage(String type, String langCode, {int page = 1}) async {
+    final data = await _get('/discover/$type', {
+      'page': '$page',
+      'with_original_language': langCode,
+      'sort_by': 'popularity.desc',
+    });
+    final results = data['results'] as List<dynamic>? ?? [];
+    return results.map((e) => MediaItem.fromJson(e as Map<String, dynamic>, defaultType: type)).toList();
+  }
+
+  Future<List<MediaItem>> discoverByGenreAndLanguage(String type, int genreId, {String? langCode, int page = 1}) async {
+    final params = {
+      'page': '$page',
+      'with_genres': '$genreId',
+      'sort_by': 'popularity.desc',
+    };
+    if (langCode != null && langCode.isNotEmpty) {
+      params['with_original_language'] = langCode;
+    }
+    final data = await _get('/discover/$type', params);
+    final results = data['results'] as List<dynamic>? ?? [];
+    return results.map((e) => MediaItem.fromJson(e as Map<String, dynamic>, defaultType: type)).toList();
+  }
+
+  Future<List<MediaItem>> searchPersonMedia(String personName) async {
+    try {
+      final data = await _get('/search/person', {
+        'query': personName,
+        'page': '1',
+      });
+      final results = data['results'] as List<dynamic>? ?? [];
+      if (results.isEmpty) return [];
+      final firstPerson = results.first as Map<String, dynamic>;
+      final knownFor = firstPerson['known_for'] as List<dynamic>? ?? [];
+      return knownFor
+          .map((e) => MediaItem.fromJson(e as Map<String, dynamic>))
+          .where((m) => m.posterPath != null)
+          .toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
   Future<MediaDetail> getDetails(String type, int id) async {
     final data = await _get('/$type/$id', {
       'append_to_response': 'credits,recommendations,videos,release_dates,content_ratings',

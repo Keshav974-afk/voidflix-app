@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../core/constants/theme_constants.dart';
+import '../providers/media_provider.dart';
 import '../providers/profile_provider.dart';
 import '../widgets/profile_avatar.dart';
 
@@ -19,6 +20,10 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   late bool _isKids;
   String? _pin;
   bool _autoplayNext = true;
+  late Set<String> _preferredLanguages;
+  late Set<int> _preferredGenres;
+  late Set<String> _favoriteActors;
+  late List<String> _favoriteTitles;
 
   @override
   void initState() {
@@ -27,6 +32,10 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     _selectedColorIndex = widget.profile.colorIndex;
     _isKids = widget.profile.isKids;
     _pin = widget.profile.pin;
+    _preferredLanguages = Set.from(widget.profile.preferredLanguages);
+    _preferredGenres = Set.from(widget.profile.preferredGenres);
+    _favoriteActors = Set.from(widget.profile.favoriteActors);
+    _favoriteTitles = List.from(widget.profile.favoriteTitles);
   }
 
   @override
@@ -39,7 +48,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     final name = _nameController.text.trim();
     if (name.isEmpty) return;
 
-    context.read<ProfileProvider>().updateProfile(
+    final profileProv = context.read<ProfileProvider>();
+    profileProv.updateProfile(
       widget.profile.id,
       name: name,
       colorIndex: _selectedColorIndex,
@@ -48,7 +58,156 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       clearPin: _pin == null || _pin!.isEmpty,
     );
 
+    profileProv.updateProfilePreferences(
+      widget.profile.id,
+      preferredLanguages: _preferredLanguages.toList(),
+      preferredGenres: _preferredGenres.toList(),
+      favoriteActors: _favoriteActors.toList(),
+      favoriteTitles: _favoriteTitles,
+    );
+
+    if (profileProv.activeProfile.id == widget.profile.id) {
+      context.read<MediaProvider>().fetchPersonalizedForProfile(
+        profileProv.activeProfile,
+        force: true,
+      );
+    }
+
     Navigator.of(context).pop();
+  }
+
+  void _showEditInterestsDialog() {
+    final availableLanguages = [
+      {'code': 'hi', 'name': 'Hindi & Bollywood', 'badge': '🇮🇳'},
+      {'code': 'en', 'name': 'English & Hollywood', 'badge': '🇺🇸'},
+      {'code': 'ja', 'name': 'Anime & Japanese', 'badge': '🇯🇵'},
+      {'code': 'ko', 'name': 'K-Drama & Korean', 'badge': '🇰🇷'},
+      {'code': 'te', 'name': 'South Indian Cinema', 'badge': '🇮🇳'},
+    ];
+
+    final availableGenres = [
+      {'id': 878, 'name': 'Sci-Fi'},
+      {'id': 28, 'name': 'Action'},
+      {'id': 16, 'name': 'Anime'},
+      {'id': 35, 'name': 'Comedy'},
+      {'id': 27, 'name': 'Horror'},
+      {'id': 53, 'name': 'Thriller'},
+      {'id': 10749, 'name': 'Romance'},
+      {'id': 14, 'name': 'Fantasy'},
+      {'id': 80, 'name': 'Crime'},
+      {'id': 99, 'name': 'Documentaries'},
+    ];
+
+    showModalBottomSheet(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: AppTheme.surfaceVariant,
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
+      builder: (sheetCtx) {
+        return StatefulBuilder(
+          builder: (ctx, setSheetState) {
+            return SafeArea(
+              child: Padding(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Center(
+                      child: Container(
+                        width: 40,
+                        height: 4,
+                        decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2)),
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    const Text(
+                      'Personalized Cinema Preferences',
+                      style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(height: 6),
+                    const Text(
+                      'Adjust your favored languages and genres for customized home feed recommendations:',
+                      style: TextStyle(color: Colors.white60, fontSize: 13),
+                    ),
+                    const SizedBox(height: 16),
+                    const Text('Languages', style: TextStyle(color: Colors.white70, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: availableLanguages.map((l) {
+                        final code = l['code'] as String;
+                        final isSel = _preferredLanguages.contains(code);
+                        return FilterChip(
+                          selected: isSel,
+                          backgroundColor: const Color(0xFF161622),
+                          selectedColor: AppTheme.primaryRed,
+                          label: Text('${l['badge']} ${l['name']}', style: const TextStyle(color: Colors.white, fontSize: 12)),
+                          onSelected: (sel) {
+                            setSheetState(() {
+                              setState(() {
+                                if (sel) {
+                                  _preferredLanguages.add(code);
+                                } else {
+                                  _preferredLanguages.remove(code);
+                                }
+                              });
+                            });
+                          },
+                        );
+                      }).toList(),
+                    ),
+                    const SizedBox(height: 16),
+                    const Text('Genres & Movie Types', style: TextStyle(color: Colors.white70, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: availableGenres.map((g) {
+                        final id = g['id'] as int;
+                        final isSel = _preferredGenres.contains(id);
+                        return FilterChip(
+                          selected: isSel,
+                          backgroundColor: const Color(0xFF161622),
+                          selectedColor: AppTheme.primaryRed,
+                          label: Text(g['name'] as String, style: const TextStyle(color: Colors.white, fontSize: 12)),
+                          onSelected: (sel) {
+                            setSheetState(() {
+                              setState(() {
+                                if (sel) {
+                                  _preferredGenres.add(id);
+                                } else {
+                                  _preferredGenres.remove(id);
+                                }
+                              });
+                            });
+                          },
+                        );
+                      }).toList(),
+                    ),
+                    const SizedBox(height: 24),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppTheme.primaryRed,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 12),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        ),
+                        onPressed: () => Navigator.pop(sheetCtx),
+                        child: const Text('Done', style: TextStyle(fontWeight: FontWeight.bold)),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
   }
 
   void _showColorPicker() {
@@ -294,6 +453,14 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
             title: 'Subtitle Appearance',
             subtitle: 'Change the way subtitles appear on phones and tablets.',
             onTap: () {},
+          ),
+          const SizedBox(height: 10),
+
+          _buildSettingsTile(
+            icon: Icons.auto_awesome,
+            title: 'Cinema Preferences & Feed',
+            subtitle: 'Tune favorite genres and languages tailored for this profile.',
+            onTap: _showEditInterestsDialog,
           ),
           const SizedBox(height: 10),
 

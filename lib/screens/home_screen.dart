@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../core/constants/theme_constants.dart';
 import '../providers/media_provider.dart';
+import '../providers/profile_provider.dart';
 import '../widgets/continue_watching_row.dart';
 import '../widgets/hero_banner.dart';
 import '../widgets/media_row.dart';
@@ -16,6 +17,18 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   String _selectedCategoryFilter = 'All'; // 'All', 'TV Shows', 'Movies'
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        final profileProv = context.read<ProfileProvider>();
+        final mediaProv = context.read<MediaProvider>();
+        mediaProv.fetchPersonalizedForProfile(profileProv.activeProfile);
+      }
+    });
+  }
 
   void _showCategoriesPicker(BuildContext context, MediaProvider mediaProvider) {
     final categories = [
@@ -136,7 +149,13 @@ class _HomeScreenState extends State<HomeScreen> {
         return RefreshIndicator(
           color: AppTheme.primaryRed,
           backgroundColor: AppTheme.surfaceVariant,
-          onRefresh: () => mediaProvider.fetchHomeData(),
+          onRefresh: () async {
+            final profileProv = context.read<ProfileProvider>();
+            await Future.wait([
+              mediaProvider.fetchHomeData(),
+              mediaProvider.fetchPersonalizedForProfile(profileProv.activeProfile, force: true),
+            ]);
+          },
           child: SingleChildScrollView(
             physics: const AlwaysScrollableScrollPhysics(),
             child: Column(
@@ -200,6 +219,19 @@ class _HomeScreenState extends State<HomeScreen> {
 
                 // 3. Continue Watching (isolated per active profile!)
                 const ContinueWatchingRow(),
+
+                // 3.5. Personalized Recommendations Curated For Active Profile
+                if (mediaProvider.personalizedSections.isNotEmpty) ...[
+                  for (final sec in mediaProvider.personalizedSections)
+                    if (_selectedCategoryFilter == 'All' ||
+                        (_selectedCategoryFilter == 'TV Shows' && sec.forceType == 'tv') ||
+                        (_selectedCategoryFilter == 'Movies' && sec.forceType == 'movie'))
+                      MediaRow(
+                        title: sec.title,
+                        items: sec.items,
+                        forceType: sec.forceType,
+                      ),
+                ],
 
                 // 4. Content Sections based on category filter
                 if (_selectedCategoryFilter == 'All' || _selectedCategoryFilter == 'TV Shows') ...[

@@ -5,6 +5,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import '../core/constants/theme_constants.dart';
 import '../core/network/api_service.dart';
 import '../models/media_item.dart';
+import '../providers/media_provider.dart';
 import '../providers/profile_provider.dart';
 import '../widgets/profile_avatar.dart';
 import 'edit_profile_screen.dart';
@@ -59,6 +60,8 @@ class _ProfileGateScreenState extends State<ProfileGateScreen> {
   void _selectProfileAndProceed(UserProfile profile) {
     final provider = context.read<ProfileProvider>();
     provider.setActiveProfile(profile);
+
+    context.read<MediaProvider>().fetchPersonalizedForProfile(profile, force: true);
 
     if (widget.canPop && Navigator.of(context).canPop()) {
       Navigator.of(context).pop();

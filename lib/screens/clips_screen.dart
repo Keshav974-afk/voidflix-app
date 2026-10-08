@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:webview_flutter/webview_flutter.dart';
+import 'package:webview_flutter_android/webview_flutter_android.dart';
 import '../core/constants/theme_constants.dart';
 import '../core/network/api_service.dart';
 import '../models/media_item.dart';
@@ -132,30 +133,36 @@ class _ClipPlayerTileState extends State<ClipPlayerTile> {
   }
 
   void _initWebController(String key) {
-    _webController = WebViewController()
+    if (key.isEmpty) return;
+    late final WebViewController controller;
+    controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setBackgroundColor(Colors.black)
-      ..loadHtmlString('''
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-          <style>
-            * { margin: 0; padding: 0; box-sizing: border-box; background-color: #000; overflow: hidden; }
-            html, body { width: 100%; height: 100%; }
-            iframe { width: 100%; height: 100%; border: 0; pointer-events: auto; }
-          </style>
-        </head>
-        <body>
-          <iframe
-            src="https://www.youtube-nocookie.com/embed/$key?autoplay=1&mute=${widget.isMuted ? 1 : 0}&controls=1&modestbranding=1&rel=0&playsinline=1&loop=1&playlist=$key"
-            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-            allowfullscreen>
-          </iframe>
-        </body>
-        </html>
-      ''');
-    if (mounted) setState(() {});
+      ..setUserAgent('Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36')
+      ..setNavigationDelegate(
+        NavigationDelegate(
+          onPageFinished: (url) {
+            controller.runJavaScript('''
+              document.body.style.backgroundColor = "#000";
+              document.body.style.margin = "0";
+              document.body.style.padding = "0";
+              document.body.style.overflow = "hidden";
+            ''');
+          },
+        ),
+      );
+
+    if (controller.platform is AndroidWebViewController) {
+      final android = controller.platform as AndroidWebViewController;
+      android.setMediaPlaybackRequiresUserGesture(false);
+    }
+
+    final trailerUrl = 'https://www.youtube.com/embed/$key?autoplay=1&mute=${widget.isMuted ? 1 : 0}&controls=1&playsinline=1&rel=0&modestbranding=1&enablejsapi=1&origin=https://www.youtube.com';
+    controller.loadRequest(Uri.parse(trailerUrl));
+
+    if (mounted) {
+      setState(() => _webController = controller);
+    }
   }
 
   @override

@@ -1,7 +1,10 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
 import '../core/constants/theme_constants.dart';
+import '../providers/profile_provider.dart';
+import 'onboarding_screen.dart';
 import 'profile_gate_screen.dart';
 
 class SplashScreen extends StatefulWidget {
@@ -90,9 +93,13 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
   void _goToProfileGate() {
     if (!mounted) return;
     _timer?.cancel();
+    final profileProv = context.read<ProfileProvider>();
+    final isFirstTime = !profileProv.globalOnboardingCompleted && !profileProv.hasProfiles;
+
     Navigator.of(context).pushReplacement(
       PageRouteBuilder(
-        pageBuilder: (context, animation, secondaryAnimation) => const ProfileGateScreen(),
+        pageBuilder: (context, animation, secondaryAnimation) =>
+            isFirstTime ? const OnboardingScreen() : const ProfileGateScreen(),
         transitionsBuilder: (context, animation, secondaryAnimation, child) {
           return FadeTransition(opacity: animation, child: child);
         },

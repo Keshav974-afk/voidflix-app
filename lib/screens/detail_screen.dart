@@ -3,6 +3,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:webview_flutter/webview_flutter.dart';
+import 'package:webview_flutter_android/webview_flutter_android.dart';
 import '../core/constants/api_constants.dart';
 import '../core/constants/theme_constants.dart';
 import '../core/network/api_service.dart';
@@ -49,31 +50,41 @@ class _DetailScreenState extends State<DetailScreen> {
   }
 
   void _updateTrailerPlayer(String key) {
+    if (key.isEmpty) return;
     _activeTrailerKey = key;
-    _trailerWebController = WebViewController()
+
+    late final WebViewController controller;
+    controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setBackgroundColor(Colors.black)
-      ..loadHtmlString('''
-        <!DOCTYPE html>
-        <html>
-        <head>
-          <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-          <style>
-            * { margin: 0; padding: 0; box-sizing: border-box; background-color: #000; overflow: hidden; }
-            html, body { width: 100%; height: 100%; }
-            iframe { width: 100%; height: 100%; border: 0; }
-          </style>
-        </head>
-        <body>
-          <iframe
-            src="https://www.youtube-nocookie.com/embed/$key?autoplay=1&mute=${_isMuted ? 1 : 0}&controls=1&modestbranding=1&rel=0&playsinline=1&loop=1&playlist=$key"
-            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
-            allowfullscreen>
-          </iframe>
-        </body>
-        </html>
-      ''');
-    if (mounted) setState(() => _showTrailerVideo = true);
+      ..setUserAgent('Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36')
+      ..setNavigationDelegate(
+        NavigationDelegate(
+          onPageFinished: (url) {
+            controller.runJavaScript('''
+              document.body.style.backgroundColor = "#000";
+              document.body.style.margin = "0";
+              document.body.style.padding = "0";
+              document.body.style.overflow = "hidden";
+            ''');
+          },
+        ),
+      );
+
+    if (controller.platform is AndroidWebViewController) {
+      final android = controller.platform as AndroidWebViewController;
+      android.setMediaPlaybackRequiresUserGesture(false);
+    }
+
+    final trailerUrl = 'https://www.youtube.com/embed/$key?autoplay=1&mute=${_isMuted ? 1 : 0}&controls=1&playsinline=1&rel=0&modestbranding=1&enablejsapi=1&origin=https://www.youtube.com';
+    controller.loadRequest(Uri.parse(trailerUrl));
+
+    if (mounted) {
+      setState(() {
+        _trailerWebController = controller;
+        _showTrailerVideo = true;
+      });
+    }
   }
 
   Future<void> _loadDetail() async {
@@ -129,8 +140,8 @@ class _DetailScreenState extends State<DetailScreen> {
   void _playMedia({int season = 1, int episode = 1}) {
     if (_detail == null) return;
     Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => PlayerScreen(
+      PageRouteBuilder(
+        pageBuilder: (context, animation, secondaryAnimation) => PlayerScreen(
           mediaId: _detail!.id,
           mediaTitle: _detail!.title,
           mediaType: _detail!.mediaType,
@@ -139,6 +150,13 @@ class _DetailScreenState extends State<DetailScreen> {
           posterPath: _detail!.posterPath,
           backdropPath: _detail!.backdropPath,
         ),
+        transitionsBuilder: (context, animation, secondaryAnimation, child) {
+          return FadeTransition(
+            opacity: CurvedAnimation(parent: animation, curve: Curves.easeInOutCubic),
+            child: child,
+          );
+        },
+        transitionDuration: const Duration(milliseconds: 300),
       ),
     );
   }
@@ -302,19 +320,23 @@ class _DetailScreenState extends State<DetailScreen> {
                   else
                     Container(color: AppTheme.surfaceVariant),
 
-                  // Gradient
-                  Container(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        stops: const [0.0, 0.4, 0.85, 1.0],
-                        colors: [
-                          Colors.black.withValues(alpha: 0.4),
-                          Colors.transparent,
-                          Colors.black.withValues(alpha: 0.4),
-                          AppTheme.background,
-                        ],
+                  // Gradient (IgnorePointer ensures touches reach YouTube video player)
+                  Positioned.fill(
+                    child: IgnorePointer(
+                      child: Container(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                            stops: const [0.0, 0.4, 0.85, 1.0],
+                            colors: [
+                              Colors.black.withValues(alpha: 0.4),
+                              Colors.transparent,
+                              Colors.black.withValues(alpha: 0.4),
+                              AppTheme.background,
+                            ],
+                          ),
+                        ),
                       ),
                     ),
                   ),

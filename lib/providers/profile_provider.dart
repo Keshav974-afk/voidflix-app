@@ -9,6 +9,11 @@ class UserProfile {
   final bool isKids;
   final String? pin;
   final String avatar;
+  final List<String> preferredLanguages;
+  final List<int> preferredGenres;
+  final List<String> favoriteActors;
+  final List<String> favoriteTitles;
+  final bool hasCompletedOnboarding;
 
   const UserProfile({
     required this.id,
@@ -17,6 +22,11 @@ class UserProfile {
     this.isKids = false,
     this.pin,
     this.avatar = '🍿',
+    this.preferredLanguages = const [],
+    this.preferredGenres = const [],
+    this.favoriteActors = const [],
+    this.favoriteTitles = const [],
+    this.hasCompletedOnboarding = false,
   });
 
   bool get isLocked => pin != null && pin!.trim().isNotEmpty;
@@ -28,6 +38,11 @@ class UserProfile {
     bool? isKids,
     String? pin,
     String? avatar,
+    List<String>? preferredLanguages,
+    List<int>? preferredGenres,
+    List<String>? favoriteActors,
+    List<String>? favoriteTitles,
+    bool? hasCompletedOnboarding,
     bool clearPin = false,
   }) {
     return UserProfile(
@@ -37,6 +52,11 @@ class UserProfile {
       isKids: isKids ?? this.isKids,
       pin: clearPin ? null : (pin ?? this.pin),
       avatar: avatar ?? this.avatar,
+      preferredLanguages: preferredLanguages ?? this.preferredLanguages,
+      preferredGenres: preferredGenres ?? this.preferredGenres,
+      favoriteActors: favoriteActors ?? this.favoriteActors,
+      favoriteTitles: favoriteTitles ?? this.favoriteTitles,
+      hasCompletedOnboarding: hasCompletedOnboarding ?? this.hasCompletedOnboarding,
     );
   }
 
@@ -48,6 +68,11 @@ class UserProfile {
       'isKids': isKids,
       'pin': pin,
       'avatar': avatar,
+      'preferredLanguages': preferredLanguages,
+      'preferredGenres': preferredGenres,
+      'favoriteActors': favoriteActors,
+      'favoriteTitles': favoriteTitles,
+      'hasCompletedOnboarding': hasCompletedOnboarding,
     };
   }
 
@@ -59,6 +84,11 @@ class UserProfile {
       isKids: json['isKids'] as bool? ?? false,
       pin: json['pin'] as String?,
       avatar: json['avatar'] as String? ?? '🍿',
+      preferredLanguages: (json['preferredLanguages'] as List<dynamic>?)?.map((e) => e.toString()).toList() ?? const [],
+      preferredGenres: (json['preferredGenres'] as List<dynamic>?)?.map((e) => (e as num).toInt()).toList() ?? const [],
+      favoriteActors: (json['favoriteActors'] as List<dynamic>?)?.map((e) => e.toString()).toList() ?? const [],
+      favoriteTitles: (json['favoriteTitles'] as List<dynamic>?)?.map((e) => e.toString()).toList() ?? const [],
+      hasCompletedOnboarding: json['hasCompletedOnboarding'] as bool? ?? false,
     );
   }
 }
@@ -67,6 +97,7 @@ class ProfileProvider extends ChangeNotifier {
   static const String _keyProfile = 'voidflix_active_profile';
   static const String _keyProfilesList = 'voidflix_profiles_list';
   static const String _keyServer = 'voidflix_active_server_index';
+  static const String _keyGlobalOnboarding = 'voidflix_global_onboarding_completed';
 
   static const List<List<Color>> avatarGradients = [
     [Color(0xFFE50914), Color(0xFF831010)], // 0: Red / Rose
@@ -85,12 +116,14 @@ class ProfileProvider extends ChangeNotifier {
   UserProfile? _activeProfile;
   int _selectedServerIndex = 0;
   bool _profileChosenInSession = false;
+  bool _globalOnboardingCompleted = false;
   bool _isLoaded = false;
 
   List<UserProfile> get profiles => List.unmodifiable(_profiles);
   List<UserProfile> get availableProfiles => profiles;
   bool get hasProfiles => _profiles.isNotEmpty;
   bool get isLoaded => _isLoaded;
+  bool get globalOnboardingCompleted => _globalOnboardingCompleted;
 
   UserProfile get activeProfile =>
       _activeProfile ??
@@ -108,6 +141,7 @@ class ProfileProvider extends ChangeNotifier {
 
   Future<void> _loadPreferences() async {
     final prefs = await SharedPreferences.getInstance();
+    _globalOnboardingCompleted = prefs.getBool(_keyGlobalOnboarding) ?? false;
 
     final savedListStr = prefs.getString(_keyProfilesList);
     if (savedListStr != null && savedListStr.isNotEmpty) {
@@ -258,6 +292,69 @@ class ProfileProvider extends ChangeNotifier {
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setInt(_keyServer, index);
+  }
+
+  Future<UserProfile> completeInitialOnboarding({
+    required String name,
+    required String avatar,
+    required int colorIndex,
+    required List<String> preferredLanguages,
+    required List<int> preferredGenres,
+    required List<String> favoriteActors,
+    required List<String> favoriteTitles,
+  }) async {
+    final newId = DateTime.now().millisecondsSinceEpoch.toString();
+    final profile = UserProfile(
+      id: newId,
+      name: name.trim().isEmpty ? 'Cinema Explorer' : name.trim(),
+      avatar: avatar,
+      colorIndex: colorIndex % avatarGradients.length,
+      isKids: false,
+      preferredLanguages: preferredLanguages,
+      preferredGenres: preferredGenres,
+      favoriteActors: favoriteActors,
+      favoriteTitles: favoriteTitles,
+      hasCompletedOnboarding: true,
+    );
+
+    _profiles = [profile];
+    _activeProfile = profile;
+    _profileChosenInSession = true;
+    _globalOnboardingCompleted = true;
+
+    await _saveProfilesList();
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString(_keyProfile, profile.id);
+    await prefs.setBool(_keyGlobalOnboarding, true);
+
+    notifyListeners();
+    return profile;
+  }
+
+  Future<void> updateProfilePreferences(
+    String id, {
+    List<String>? preferredLanguages,
+    List<int>? preferredGenres,
+    List<String>? favoriteActors,
+    List<String>? favoriteTitles,
+  }) async {
+    final idx = _profiles.indexWhere((p) => p.id == id);
+    if (idx != -1) {
+      final old = _profiles[idx];
+      final updated = old.copyWith(
+        preferredLanguages: preferredLanguages,
+        preferredGenres: preferredGenres,
+        favoriteActors: favoriteActors,
+        favoriteTitles: favoriteTitles,
+        hasCompletedOnboarding: true,
+      );
+      _profiles[idx] = updated;
+      if (_activeProfile?.id == id) {
+        _activeProfile = updated;
+      }
+      await _saveProfilesList();
+      notifyListeners();
+    }
   }
 
   Future<void> clearAllData() async {
