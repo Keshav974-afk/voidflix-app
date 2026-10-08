@@ -1,9 +1,8 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../core/constants/theme_constants.dart';
-import '../providers/profile_provider.dart';
 import 'onboarding_screen.dart';
 import 'profile_gate_screen.dart';
 
@@ -90,12 +89,18 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
     });
   }
 
-  void _goToProfileGate() {
+  Future<void> _goToProfileGate() async {
     if (!mounted) return;
     _timer?.cancel();
-    final profileProv = context.read<ProfileProvider>();
-    final isFirstTime = !profileProv.globalOnboardingCompleted && !profileProv.hasProfiles;
 
+    final prefs = await SharedPreferences.getInstance();
+    final bool alreadyDone = prefs.getBool('voidflix_global_onboarding_completed') ?? false;
+    final String? profilesList = prefs.getString('voidflix_profiles_list');
+    final bool hasProfiles = profilesList != null && profilesList.isNotEmpty && profilesList != '[]';
+
+    final bool isFirstTime = !alreadyDone && !hasProfiles;
+
+    if (!mounted) return;
     Navigator.of(context).pushReplacement(
       PageRouteBuilder(
         pageBuilder: (context, animation, secondaryAnimation) =>

@@ -161,6 +161,30 @@ class ApiService {
     }
   }
 
+  Future<List<Map<String, dynamic>>> getPopularPeople({int page = 1}) async {
+    try {
+      final data = await _get('/person/popular', {'page': '$page'});
+      final results = data['results'] as List<dynamic>? ?? [];
+      return results.map((e) => e as Map<String, dynamic>).toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<List<Map<String, dynamic>>> searchPeople(String query, {int page = 1}) async {
+    if (query.trim().isEmpty) return [];
+    try {
+      final data = await _get('/search/person', {
+        'query': query,
+        'page': '$page',
+      });
+      final results = data['results'] as List<dynamic>? ?? [];
+      return results.map((e) => e as Map<String, dynamic>).toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
   Future<MediaDetail> getDetails(String type, int id) async {
     final data = await _get('/$type/$id', {
       'append_to_response': 'credits,recommendations,videos,release_dates,content_ratings',

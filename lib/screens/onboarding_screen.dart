@@ -2,9 +2,13 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import '../core/constants/theme_constants.dart';
+import '../core/network/api_service.dart';
 import '../providers/media_provider.dart';
 import '../providers/profile_provider.dart';
+import '../widgets/profile_avatar.dart';
 import 'main_navigation_screen.dart';
 
 class OnboardingScreen extends StatefulWidget {
@@ -14,880 +18,804 @@ class OnboardingScreen extends StatefulWidget {
   State<OnboardingScreen> createState() => _OnboardingScreenState();
 }
 
-class _OnboardingScreenState extends State<OnboardingScreen> with SingleTickerProviderStateMixin {
-  int _currentStep = 0;
+class _OnboardingScreenState extends State<OnboardingScreen> {
+  int _step = 0;
   final TextEditingController _nameController = TextEditingController(text: 'Explorer');
-  final TextEditingController _customInterestController = TextEditingController();
+  final TextEditingController _actorSearchController = TextEditingController();
 
   int _selectedColorIndex = 0;
-  String _selectedAvatar = '🍿';
 
-  final Set<String> _selectedLanguages = {'hi', 'en'};
-  final Set<int> _selectedGenres = {878, 28};
-  final Set<String> _selectedActors = {'Christopher Nolan', 'Shah Rukh Khan'};
-  final List<String> _customFavorites = [];
+  // Selected sets
+  final Set<int> _selectedGenres = {};
+  final List<Map<String, dynamic>> _selectedActors = [];
+  final Set<String> _selectedLanguages = {};
 
-  bool _isSynthesizing = false;
-  int _synthesisProgress = 0;
-  Timer? _synthesisTimer;
+  // Actors state from TMDB
+  List<Map<String, dynamic>> _popularActors = [];
+  List<Map<String, dynamic>> _searchedActors = [];
+  bool _isLoadingActors = false;
+  Timer? _searchDebounce;
 
-  // Language options
-  final List<Map<String, dynamic>> _languages = [
-    {
-      'code': 'hi',
-      'label': 'Hindi & Bollywood',
-      'badge': '🇮🇳',
-      'subtitle': 'Hindi blockbusters, romance & OTT thrillers',
-    },
-    {
-      'code': 'en',
-      'label': 'English & Hollywood',
-      'badge': '🇺🇸',
-      'subtitle': 'Global blockbusters, franchises & series',
-    },
-    {
-      'code': 'ja',
-      'label': 'Anime & Japanese',
-      'badge': '🇯🇵',
-      'subtitle': 'Top anime series, shonen & Ghibli masterworks',
-    },
-    {
-      'code': 'ko',
-      'label': 'K-Drama & Korean',
-      'badge': '🇰🇷',
-      'subtitle': 'Korean romance, revenge & high-stakes dramas',
-    },
-    {
-      'code': 'te',
-      'label': 'South Indian Cinema',
-      'badge': '🇮🇳',
-      'subtitle': 'Tollywood & Kollywood action spectacles',
-    },
-    {
-      'code': 'es',
-      'label': 'Spanish & International',
-      'badge': '🇪🇸',
-      'subtitle': 'High-tension crime thrillers & European gems',
-    },
+  static const List<String> _stepTitles = [
+    'Profile',
+    'Genres',
+    'Actors',
+    'Languages',
   ];
 
-  // Genre options
-  final List<Map<String, dynamic>> _genres = [
-    {'id': 878, 'name': 'Sci-Fi & Cyberpunk', 'icon': Icons.rocket_launch, 'desc': 'Interstellar, Dune, Matrix'},
-    {'id': 28, 'name': 'High-Octane Action', 'icon': Icons.local_fire_department, 'desc': 'John Wick, Fast & Furious'},
-    {'id': 16, 'name': 'Anime & Animation', 'icon': Icons.auto_awesome, 'desc': 'Attack on Titan, Jujutsu Kaisen'},
-    {'id': 53, 'name': 'Edge-of-Seat Thrillers', 'icon': Icons.visibility, 'desc': 'Dark, Se7en, Gone Girl'},
-    {'id': 35, 'name': 'Laugh-Out Comedies', 'icon': Icons.sentiment_very_satisfied, 'desc': 'Sitcoms, standup & comfort watches'},
-    {'id': 27, 'name': 'Dark Horror & Spooky', 'icon': Icons.nights_stay, 'desc': 'Conjuring, Hereditary, Insidious'},
-    {'id': 10749, 'name': 'Romance & Drama', 'icon': Icons.favorite, 'desc': 'Love stories, emotional chemistry'},
-    {'id': 14, 'name': 'Mythic Fantasy & Lore', 'icon': Icons.shield, 'desc': 'Lord of the Rings, Game of Thrones'},
-    {'id': 80, 'name': 'Gritty Crime & Mafia', 'icon': Icons.fingerprint, 'desc': 'Godfather, Peaky Blinders'},
-    {'id': 99, 'name': 'Documentaries', 'icon': Icons.public, 'desc': 'True crime, cosmos & untold stories'},
+  // Exact 16 GENRE_CHOICES from the Voidflix web version
+  static const List<Map<String, dynamic>> _genreChoices = [
+    {'id': 28, 'name': 'Action', 'emoji': '💥'},
+    {'id': 35, 'name': 'Comedy', 'emoji': '😂'},
+    {'id': 18, 'name': 'Drama', 'emoji': '🎭'},
+    {'id': 27, 'name': 'Horror', 'emoji': '👻'},
+    {'id': 878, 'name': 'Sci-Fi', 'emoji': '🚀'},
+    {'id': 10749, 'name': 'Romance', 'emoji': '💕'},
+    {'id': 53, 'name': 'Thriller', 'emoji': '🔪'},
+    {'id': 16, 'name': 'Animation', 'emoji': '🎨'},
+    {'id': 14, 'name': 'Fantasy', 'emoji': '🐉'},
+    {'id': 80, 'name': 'Crime', 'emoji': '🕵️'},
+    {'id': 12, 'name': 'Adventure', 'emoji': '🗺️'},
+    {'id': 99, 'name': 'Documentary', 'emoji': '🎥'},
+    {'id': 10751, 'name': 'Family', 'emoji': '👨‍👩‍👧'},
+    {'id': 9648, 'name': 'Mystery', 'emoji': '🔍'},
+    {'id': 36, 'name': 'History', 'emoji': '🏛️'},
+    {'id': 10752, 'name': 'War', 'emoji': '⚔️'},
   ];
 
-  // Actor / Idol options
-  final List<String> _popularIdols = [
-    'Shah Rukh Khan',
-    'Christopher Nolan',
-    'Robert Downey Jr.',
-    'Leonardo DiCaprio',
-    'Cillian Murphy',
-    'Tom Cruise',
-    'Ryan Gosling',
-    'Prabhas',
-    'Salman Khan',
-    'Zendaya',
-    'Allu Arjun',
-    'Hrithik Roshan',
-    'Keanu Reeves',
-    'Quentin Tarantino',
-    'Christian Bale',
-    'Deepika Padukone',
+  // Exact 10 LANGUAGE_CHOICES from the Voidflix web version
+  static const List<Map<String, dynamic>> _languageChoices = [
+    {'code': 'en', 'label': 'Hollywood', 'flag': '🇺🇸'},
+    {'code': 'hi', 'label': 'Bollywood', 'flag': '🇮🇳'},
+    {'code': 'ko', 'label': 'Korean', 'flag': '🇰🇷'},
+    {'code': 'ja', 'label': 'Japanese / Anime', 'flag': '🇯🇵'},
+    {'code': 'es', 'label': 'Spanish', 'flag': '🇪🇸'},
+    {'code': 'fr', 'label': 'French', 'flag': '🇫🇷'},
+    {'code': 'tr', 'label': 'Turkish', 'flag': '🇹🇷'},
+    {'code': 'ta', 'label': 'Tamil', 'flag': '🎬'},
+    {'code': 'te', 'label': 'Telugu', 'flag': '🎞️'},
+    {'code': 'zh', 'label': 'Chinese', 'flag': '🇨🇳'},
   ];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPopularActors();
+  }
 
   @override
   void dispose() {
     _nameController.dispose();
-    _customInterestController.dispose();
-    _synthesisTimer?.cancel();
+    _actorSearchController.dispose();
+    _searchDebounce?.cancel();
     super.dispose();
   }
 
-  void _nextStep() {
-    if (_currentStep < 3) {
-      setState(() => _currentStep++);
-    } else {
-      _startSynthesis();
+  Future<void> _loadPopularActors() async {
+    setState(() => _isLoadingActors = true);
+    try {
+      final list = await ApiService().getPopularPeople();
+      if (mounted) {
+        setState(() {
+          _popularActors = list;
+          _isLoadingActors = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _isLoadingActors = false);
     }
   }
 
-  void _prevStep() {
-    if (_currentStep > 0) {
-      setState(() => _currentStep--);
+  void _onActorSearchChanged(String val) {
+    _searchDebounce?.cancel();
+    final query = val.trim();
+    if (query.length < 2) {
+      setState(() => _searchedActors = []);
+      return;
     }
+
+    _searchDebounce = Timer(const Duration(milliseconds: 300), () async {
+      final results = await ApiService().searchPeople(query);
+      if (mounted) {
+        setState(() => _searchedActors = results);
+      }
+    });
   }
 
-  void _startSynthesis() {
+  void _toggleGenre(int id) {
     setState(() {
-      _isSynthesizing = true;
-      _synthesisProgress = 0;
-    });
-
-    _synthesisTimer = Timer.periodic(const Duration(milliseconds: 300), (timer) {
-      if (!mounted) {
-        timer.cancel();
-        return;
-      }
-      if (_synthesisProgress < 100) {
-        setState(() => _synthesisProgress += 10);
+      if (_selectedGenres.contains(id)) {
+        _selectedGenres.remove(id);
       } else {
-        timer.cancel();
-        _finishOnboarding();
+        _selectedGenres.add(id);
       }
     });
   }
 
-  Future<void> _finishOnboarding() async {
-    final profileProvider = context.read<ProfileProvider>();
-    final mediaProvider = context.read<MediaProvider>();
+  void _toggleLanguage(String code) {
+    setState(() {
+      if (_selectedLanguages.contains(code)) {
+        _selectedLanguages.remove(code);
+      } else {
+        _selectedLanguages.add(code);
+      }
+    });
+  }
 
-    final finalName = _nameController.text.trim().isEmpty ? 'Cinema Explorer' : _nameController.text.trim();
+  void _toggleActor(Map<String, dynamic> actor) {
+    final id = actor['id'] as int;
+    final name = actor['name'] as String? ?? 'Actor';
+    final profilePath = actor['profile_path'] as String?;
 
-    final profile = await profileProvider.completeInitialOnboarding(
+    setState(() {
+      final exists = _selectedActors.any((a) => a['id'] == id);
+      if (exists) {
+        _selectedActors.removeWhere((a) => a['id'] == id);
+      } else {
+        if (_selectedActors.length < 8) {
+          _selectedActors.add({
+            'id': id,
+            'name': name,
+            'profile_path': profilePath,
+          });
+        }
+      }
+    });
+  }
+
+  Future<void> _finish({bool skipped = false}) async {
+    // 1. Immediately and permanently mark global onboarding as completed in SharedPreferences
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('voidflix_global_onboarding_completed', true);
+
+    if (!mounted) return;
+    final profileProv = context.read<ProfileProvider>();
+    final mediaProv = context.read<MediaProvider>();
+
+    final finalName = _nameController.text.trim().isEmpty ? 'Explorer' : _nameController.text.trim();
+
+    final profile = await profileProv.completeInitialOnboarding(
       name: finalName,
-      avatar: _selectedAvatar,
+      avatar: '😊',
       colorIndex: _selectedColorIndex,
-      preferredLanguages: _selectedLanguages.toList(),
-      preferredGenres: _selectedGenres.toList(),
-      favoriteActors: _selectedActors.toList(),
-      favoriteTitles: _customFavorites,
+      preferredLanguages: skipped ? ['en', 'hi'] : _selectedLanguages.toList(),
+      preferredGenres: skipped ? [28, 878] : _selectedGenres.toList(),
+      favoriteActors: skipped ? [] : _selectedActors.map((a) => a['name'] as String).toList(),
+      favoriteTitles: [],
     );
 
-    // Trigger personalized feed fetch
-    if (mounted) {
-      mediaProvider.fetchPersonalizedForProfile(profile, force: true);
+    // Refresh personalized rails
+    mediaProv.fetchPersonalizedForProfile(profile, force: true);
 
+    if (mounted) {
       Navigator.of(context).pushReplacement(
         PageRouteBuilder(
           pageBuilder: (context, animation, secondaryAnimation) => const MainNavigationScreen(),
           transitionsBuilder: (context, animation, secondaryAnimation, child) =>
               FadeTransition(opacity: animation, child: child),
-          transitionDuration: const Duration(milliseconds: 500),
+          transitionDuration: const Duration(milliseconds: 400),
         ),
       );
     }
   }
 
-  void _addCustomItem() {
-    final text = _customInterestController.text.trim();
-    if (text.isNotEmpty && !_customFavorites.contains(text)) {
-      setState(() {
-        _customFavorites.add(text);
-        _customInterestController.clear();
-      });
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
-    if (_isSynthesizing) {
-      return _buildSynthesisView();
-    }
+    final isLast = _step == _stepTitles.length - 1;
 
     return Scaffold(
-      backgroundColor: const Color(0xFF0D0D12),
+      backgroundColor: Colors.black.withValues(alpha: 0.90),
       body: SafeArea(
-        child: Column(
-          children: [
-            // Top Bar with Voidflix branding & progress bar
-            _buildTopBar(),
-
-            // Interactive Steps Body
-            Expanded(
-              child: AnimatedSwitcher(
-                duration: const Duration(milliseconds: 320),
-                switchInCurve: Curves.easeOutCubic,
-                switchOutCurve: Curves.easeInCubic,
-                child: _buildCurrentStepView(),
-              ),
-            ),
-
-            // Bottom Navigation & Continue Button
-            _buildBottomNav(),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildTopBar() {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-      child: Column(
-        children: [
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                    decoration: BoxDecoration(
-                      color: AppTheme.primaryRed,
-                      borderRadius: BorderRadius.circular(4),
-                    ),
-                    child: Text(
-                      'VOIDFLIX',
-                      style: GoogleFonts.bebasNeue(
-                        fontSize: 20,
-                        letterSpacing: 1.5,
-                        color: Colors.white,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  Text(
-                    'Step ${_currentStep + 1} of 4',
-                    style: const TextStyle(color: Colors.white54, fontSize: 13, fontWeight: FontWeight.bold),
-                  ),
-                ],
-              ),
-              if (_currentStep > 0)
-                TextButton(
-                  onPressed: _startSynthesis,
-                  child: const Text('Skip Setup', style: TextStyle(color: Colors.white38, fontSize: 13)),
-                ),
-            ],
-          ),
-          const SizedBox(height: 12),
-          // Step Progress Bar
-          ClipRRect(
-            borderRadius: BorderRadius.circular(4),
-            child: LinearProgressIndicator(
-              value: (_currentStep + 1) / 4.0,
-              backgroundColor: Colors.white12,
-              valueColor: const AlwaysStoppedAnimation<Color>(AppTheme.primaryRed),
-              minHeight: 4,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildCurrentStepView() {
-    switch (_currentStep) {
-      case 0:
-        return _buildStep1NameAndAvatar();
-      case 1:
-        return _buildStep2Languages();
-      case 2:
-        return _buildStep3Genres();
-      case 3:
-      default:
-        return _buildStep4ActorsAndTitles();
-    }
-  }
-
-  // STEP 1: Name & Avatar Selection
-  Widget _buildStep1NameAndAvatar() {
-    return SingleChildScrollView(
-      key: const ValueKey(0),
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: [
-          const SizedBox(height: 10),
-          Container(
-            padding: const EdgeInsets.all(14),
+        child: Center(
+          child: Container(
+            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            constraints: const BoxConstraints(maxWidth: 640),
             decoration: BoxDecoration(
-              color: AppTheme.primaryRed.withValues(alpha: 0.15),
-              shape: BoxShape.circle,
-              border: Border.all(color: AppTheme.primaryRed.withValues(alpha: 0.3)),
-            ),
-            child: const Icon(Icons.movie_creation_rounded, color: AppTheme.primaryRed, size: 40),
-          ),
-          const SizedBox(height: 18),
-          Text(
-            'Who is Entering the Void?',
-            textAlign: TextAlign.center,
-            style: GoogleFonts.inter(
-              fontSize: 24,
-              fontWeight: FontWeight.w900,
-              color: Colors.white,
-              letterSpacing: -0.5,
-            ),
-          ),
-          const SizedBox(height: 8),
-          const Text(
-            'Welcome to Voidflix! Tell us your name so we can personalize your cinematic feed.',
-            textAlign: TextAlign.center,
-            style: TextStyle(color: Colors.white60, fontSize: 14, height: 1.4),
-          ),
-          const SizedBox(height: 28),
-
-          // Active Avatar Preview
-          Container(
-            width: 90,
-            height: 90,
-            decoration: BoxDecoration(
-              gradient: LinearGradient(
-                colors: ProfileProvider.avatarGradients[_selectedColorIndex],
-                begin: Alignment.topLeft,
-                end: Alignment.bottomRight,
-              ),
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(color: Colors.white, width: 2.5),
+              color: const Color(0xFF14141E),
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: const Color(0xFF282836)),
               boxShadow: [
                 BoxShadow(
-                  color: ProfileProvider.avatarGradients[_selectedColorIndex].first.withValues(alpha: 0.5),
-                  blurRadius: 20,
+                  color: Colors.black.withValues(alpha: 0.8),
+                  blurRadius: 30,
                   spreadRadius: 2,
                 ),
               ],
             ),
-            child: Center(
-              child: Text(
-                _selectedAvatar,
-                style: const TextStyle(fontSize: 44),
-              ),
-            ),
-          ),
-          const SizedBox(height: 24),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Header (Exact 1:1 match of OnboardingModal.tsx)
+                _buildModalHeader(),
 
-          // Name Input
-          TextField(
-            controller: _nameController,
-            style: const TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
-            textAlign: TextAlign.center,
-            decoration: InputDecoration(
-              filled: true,
-              fillColor: const Color(0xFF191924),
-              hintText: 'Enter your name...',
-              hintStyle: const TextStyle(color: Colors.white30, fontSize: 16),
-              contentPadding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: const BorderSide(color: Color(0xFF2E2E3E)),
-              ),
-              enabledBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: const BorderSide(color: Color(0xFF2E2E3E)),
-              ),
-              focusedBorder: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(12),
-                borderSide: const BorderSide(color: AppTheme.primaryRed, width: 2),
-              ),
-            ),
-          ),
-          const SizedBox(height: 24),
-
-          // Choose Avatar Icon
-          Align(
-            alignment: Alignment.centerLeft,
-            child: Text(
-              'Pick Your Avatar',
-              style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.white70),
-            ),
-          ),
-          const SizedBox(height: 12),
-          SizedBox(
-            height: 52,
-            child: ListView.separated(
-              scrollDirection: Axis.horizontal,
-              itemCount: ProfileProvider.avatarIcons.length,
-              separatorBuilder: (context, index) => const SizedBox(width: 10),
-              itemBuilder: (context, idx) {
-                final icon = ProfileProvider.avatarIcons[idx];
-                final isSelected = icon == _selectedAvatar;
-                return GestureDetector(
-                  onTap: () => setState(() => _selectedAvatar = icon),
-                  child: Container(
-                    width: 50,
-                    height: 50,
-                    decoration: BoxDecoration(
-                      color: isSelected ? AppTheme.primaryRed.withValues(alpha: 0.25) : const Color(0xFF191924),
-                      borderRadius: BorderRadius.circular(12),
-                      border: Border.all(
-                        color: isSelected ? AppTheme.primaryRed : Colors.white12,
-                        width: isSelected ? 2 : 1,
-                      ),
-                    ),
-                    child: Center(
-                      child: Text(icon, style: const TextStyle(fontSize: 24)),
-                    ),
+                // Scrollable Content Body
+                Flexible(
+                  child: SingleChildScrollView(
+                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
+                    child: _buildStepContent(),
                   ),
-                );
-              },
-            ),
-          ),
-          const SizedBox(height: 20),
+                ),
 
-          // Choose Color Theme
-          Align(
-            alignment: Alignment.centerLeft,
-            child: Text(
-              'Pick Theme Accent',
-              style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.white70),
+                // Footer (Exact 1:1 match of OnboardingModal.tsx)
+                _buildModalFooter(isLast),
+              ],
             ),
           ),
-          const SizedBox(height: 12),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildModalHeader() {
+    return Container(
+      padding: const EdgeInsets.fromLTRB(20, 20, 20, 14),
+      decoration: const BoxDecoration(
+        border: Border(bottom: BorderSide(color: Color(0xFF282836))),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
           Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(Icons.auto_awesome, color: AppTheme.primaryRed, size: 24),
+                        const SizedBox(width: 8),
+                        Text(
+                          "Let's personalize Voidflix",
+                          style: GoogleFonts.inter(
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    const Text(
+                      "Answer a few quick questions and we'll build recommendation rows just for you.",
+                      style: TextStyle(color: Colors.white60, fontSize: 13),
+                    ),
+                  ],
+                ),
+              ),
+              IconButton(
+                icon: const Icon(Icons.close, color: Colors.white54, size: 20),
+                tooltip: 'Skip for now',
+                onPressed: () => _finish(skipped: true),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+
+          // Step Progress Pills (Matches web animated step pills)
+          Row(
+            children: [
+              for (int i = 0; i < _stepTitles.length; i++) ...[
+                AnimatedContainer(
+                  duration: const Duration(milliseconds: 200),
+                  height: 6,
+                  width: i == _step ? 32 : 16,
+                  decoration: BoxDecoration(
+                    color: i == _step
+                        ? AppTheme.primaryRed
+                        : i < _step
+                            ? AppTheme.primaryRed.withValues(alpha: 0.5)
+                            : const Color(0xFF282836),
+                    borderRadius: BorderRadius.circular(3),
+                  ),
+                ),
+                if (i < _stepTitles.length - 1) const SizedBox(width: 6),
+              ],
+              const SizedBox(width: 12),
+              Text(
+                'Step ${_step + 1} of ${_stepTitles.length} · ${_stepTitles[_step]}',
+                style: const TextStyle(color: Colors.white54, fontSize: 12, fontWeight: FontWeight.bold),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStepContent() {
+    switch (_step) {
+      case 0:
+        return _buildStepProfile();
+      case 1:
+        return _buildStepGenres();
+      case 2:
+        return _buildStepActors();
+      case 3:
+      default:
+        return _buildStepLanguages();
+    }
+  }
+
+  // STEP 1: Profile Name & Netflix Classic Smiley Face Avatar
+  Widget _buildStepProfile() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          "Who is watching?",
+          style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 4),
+        const Text(
+          "Pick your profile avatar color and enter your name.",
+          style: TextStyle(color: Colors.white54, fontSize: 12),
+        ),
+        const SizedBox(height: 20),
+
+        // Large Netflix Smiley Preview
+        Center(
+          child: ProfileAvatarTile(
+            name: _nameController.text,
+            gradientColors: ProfileProvider.avatarGradients[_selectedColorIndex],
+            size: 96,
+          ),
+        ),
+        const SizedBox(height: 20),
+
+        // Color Swatches (Featuring the classic Netflix Smiley Face)
+        Center(
+          child: Wrap(
+            spacing: 12,
+            runSpacing: 10,
             children: List.generate(ProfileProvider.avatarGradients.length, (idx) {
-              final isSelected = idx == _selectedColorIndex;
+              final isSel = idx == _selectedColorIndex;
               final grad = ProfileProvider.avatarGradients[idx];
               return GestureDetector(
                 onTap: () => setState(() => _selectedColorIndex = idx),
                 child: Container(
-                  width: 44,
-                  height: 44,
+                  width: 48,
+                  height: 48,
                   decoration: BoxDecoration(
                     gradient: LinearGradient(colors: grad),
-                    shape: BoxShape.circle,
+                    borderRadius: BorderRadius.circular(10),
                     border: Border.all(
-                      color: isSelected ? Colors.white : Colors.transparent,
+                      color: isSel ? Colors.white : Colors.transparent,
                       width: 2.5,
                     ),
                   ),
-                  child: isSelected ? const Icon(Icons.check, color: Colors.white, size: 20) : null,
+                  child: Center(
+                    child: ProfileAvatarTile(
+                      name: '',
+                      gradientColors: grad,
+                      size: 40,
+                    ),
+                  ),
                 ),
               );
             }),
           ),
-        ],
-      ),
+        ),
+        const SizedBox(height: 24),
+
+        // Name TextField
+        const Text(
+          "Profile Name",
+          style: TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 8),
+        TextField(
+          controller: _nameController,
+          style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold),
+          decoration: InputDecoration(
+            filled: true,
+            fillColor: const Color(0xFF191924),
+            hintText: 'e.g. Alex, Movie Lover...',
+            hintStyle: const TextStyle(color: Colors.white30, fontSize: 14),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: const BorderSide(color: Color(0xFF282836)),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: const BorderSide(color: Color(0xFF282836)),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: const BorderSide(color: AppTheme.primaryRed, width: 1.5),
+            ),
+          ),
+        ),
+      ],
     );
   }
 
-  // STEP 2: Language & Industry Preferences
-  Widget _buildStep2Languages() {
-    return SingleChildScrollView(
-      key: const ValueKey(1),
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'What Film Worlds Do You Watch?',
-            style: GoogleFonts.inter(fontSize: 22, fontWeight: FontWeight.w900, color: Colors.white),
+  // STEP 2: Genres (Exact clone of OnboardingModal.tsx Step 0)
+  Widget _buildStepGenres() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          "Which genres do you love?",
+          style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 4),
+        const Text(
+          "Pick as many as you like.",
+          style: TextStyle(color: Colors.white54, fontSize: 12),
+        ),
+        const SizedBox(height: 16),
+
+        // 2-column grid of all 16 GENRE_CHOICES from the site
+        GridView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          itemCount: _genreChoices.length,
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 2,
+            childAspectRatio: 3.2,
+            crossAxisSpacing: 10,
+            mainAxisSpacing: 10,
           ),
-          const SizedBox(height: 6),
-          const Text(
-            'Select your preferred cinema industries. We will feature these prominently in your feed.',
-            style: TextStyle(color: Colors.white60, fontSize: 13),
-          ),
-          const SizedBox(height: 20),
-          ..._languages.map((lang) {
-            final code = lang['code'] as String;
-            final isSelected = _selectedLanguages.contains(code);
+          itemBuilder: (context, index) {
+            final g = _genreChoices[index];
+            final id = g['id'] as int;
+            final isSelected = _selectedGenres.contains(id);
+
             return GestureDetector(
-              onTap: () {
-                setState(() {
-                  if (isSelected) {
-                    if (_selectedLanguages.length > 1) {
-                      _selectedLanguages.remove(code);
-                    }
-                  } else {
-                    _selectedLanguages.add(code);
-                  }
-                });
-              },
+              onTap: () => _toggleGenre(id),
               child: AnimatedContainer(
-                duration: const Duration(milliseconds: 200),
-                margin: const EdgeInsets.only(bottom: 12),
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                duration: const Duration(milliseconds: 150),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
                 decoration: BoxDecoration(
-                  color: isSelected ? const Color(0xFF1E1724) : const Color(0xFF15151E),
-                  borderRadius: BorderRadius.circular(12),
+                  color: isSelected ? AppTheme.primaryRed.withValues(alpha: 0.15) : const Color(0xFF161620),
+                  borderRadius: BorderRadius.circular(8),
                   border: Border.all(
-                    color: isSelected ? AppTheme.primaryRed : Colors.white12,
-                    width: isSelected ? 1.8 : 1,
+                    color: isSelected ? AppTheme.primaryRed : const Color(0xFF282836),
+                    width: isSelected ? 1.5 : 1,
                   ),
                 ),
                 child: Row(
                   children: [
-                    Text(lang['badge'] as String, style: const TextStyle(fontSize: 26)),
-                    const SizedBox(width: 14),
+                    Text(g['emoji'] as String, style: const TextStyle(fontSize: 16)),
+                    const SizedBox(width: 8),
                     Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            lang['label'] as String,
-                            style: TextStyle(
-                              color: isSelected ? Colors.white : Colors.white70,
-                              fontWeight: FontWeight.bold,
-                              fontSize: 15,
-                            ),
-                          ),
-                          const SizedBox(height: 2),
-                          Text(
-                            lang['subtitle'] as String,
-                            style: const TextStyle(color: Colors.white38, fontSize: 12),
-                          ),
-                        ],
+                      child: Text(
+                        g['name'] as String,
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 13,
+                          fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                       ),
                     ),
-                    Icon(
-                      isSelected ? Icons.check_circle : Icons.radio_button_unchecked,
-                      color: isSelected ? AppTheme.primaryRed : Colors.white24,
-                    ),
+                    if (isSelected)
+                      const Icon(Icons.check, color: AppTheme.primaryRed, size: 16),
                   ],
                 ),
               ),
             );
-          }),
-        ],
-      ),
+          },
+        ),
+      ],
     );
   }
 
-  // STEP 3: Genres Selection
-  Widget _buildStep3Genres() {
-    return SingleChildScrollView(
-      key: const ValueKey(2),
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'What Vibes Give You Chills?',
-            style: GoogleFonts.inter(fontSize: 22, fontWeight: FontWeight.w900, color: Colors.white),
+  // STEP 3: Actors (Exact clone of OnboardingModal.tsx Step 1 with TMDB Search & Popular list)
+  Widget _buildStepActors() {
+    final displayList = _searchedActors.isNotEmpty ? _searchedActors : _popularActors;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          "Who are your favorite actors?",
+          style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+        ),
+        const SizedBox(height: 4),
+        const Text(
+          "Pick up to 8 — we'll surface their movies for you.",
+          style: TextStyle(color: Colors.white54, fontSize: 12),
+        ),
+        const SizedBox(height: 14),
+
+        // Actor Search Input (Matches web search box)
+        TextField(
+          controller: _actorSearchController,
+          onChanged: _onActorSearchChanged,
+          style: const TextStyle(color: Colors.white, fontSize: 14),
+          decoration: InputDecoration(
+            hintText: 'Search any actor…',
+            hintStyle: const TextStyle(color: Colors.white38, fontSize: 13),
+            prefixIcon: const Icon(Icons.search, color: Colors.white54, size: 20),
+            suffixIcon: _actorSearchController.text.isNotEmpty
+                ? IconButton(
+                    icon: const Icon(Icons.close, color: Colors.white54, size: 16),
+                    onPressed: () {
+                      _actorSearchController.clear();
+                      setState(() => _searchedActors = []);
+                    },
+                  )
+                : null,
+            filled: true,
+            fillColor: const Color(0xFF191924),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: const BorderSide(color: Color(0xFF282836)),
+            ),
+            enabledBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: const BorderSide(color: Color(0xFF282836)),
+            ),
+            focusedBorder: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: const BorderSide(color: AppTheme.primaryRed, width: 1.5),
+            ),
           ),
-          const SizedBox(height: 6),
-          const Text(
-            'Choose your favorite genres to build your personalized homepage rows:',
-            style: TextStyle(color: Colors.white60, fontSize: 13),
-          ),
-          const SizedBox(height: 18),
+        ),
+        const SizedBox(height: 12),
+
+        // Selected Actors Tags Row
+        if (_selectedActors.isNotEmpty) ...[
           Wrap(
-            spacing: 10,
-            runSpacing: 10,
-            children: _genres.map((g) {
-              final id = g['id'] as int;
-              final isSelected = _selectedGenres.contains(id);
-              final icon = g['icon'] as IconData;
-              return GestureDetector(
-                onTap: () {
-                  setState(() {
-                    if (isSelected) {
-                      if (_selectedGenres.length > 1) {
-                        _selectedGenres.remove(id);
-                      }
-                    } else {
-                      _selectedGenres.add(id);
-                    }
-                  });
-                },
-                child: AnimatedContainer(
-                  duration: const Duration(milliseconds: 180),
-                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-                  decoration: BoxDecoration(
-                    color: isSelected ? AppTheme.primaryRed : const Color(0xFF161622),
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(
-                      color: isSelected ? AppTheme.primaryRed : Colors.white12,
-                    ),
-                    boxShadow: isSelected
-                        ? [
-                            BoxShadow(
-                              color: AppTheme.primaryRed.withValues(alpha: 0.4),
-                              blurRadius: 10,
-                              offset: const Offset(0, 3),
-                            ),
-                          ]
-                        : null,
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(icon, color: Colors.white, size: 16),
-                      const SizedBox(width: 8),
-                      Text(
-                        g['name'] as String,
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                          fontSize: 13,
-                        ),
-                      ),
-                      if (isSelected) ...[
-                        const SizedBox(width: 6),
-                        const Icon(Icons.check, color: Colors.white, size: 14),
-                      ],
-                    ],
-                  ),
-                ),
-              );
-            }).toList(),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // STEP 4: Actors, Directors, & Favorite Movies
-  Widget _buildStep4ActorsAndTitles() {
-    return SingleChildScrollView(
-      key: const ValueKey(3),
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            'Who Are Your Cinema Idols?',
-            style: GoogleFonts.inter(fontSize: 22, fontWeight: FontWeight.w900, color: Colors.white),
-          ),
-          const SizedBox(height: 6),
-          const Text(
-            'Select actors or directors whose work you never miss, or add your favorite movies:',
-            style: TextStyle(color: Colors.white60, fontSize: 13),
-          ),
-          const SizedBox(height: 18),
-
-          // Idols Selection Chips
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: _popularIdols.map((idol) {
-              final isSelected = _selectedActors.contains(idol);
-              return GestureDetector(
-                onTap: () {
-                  setState(() {
-                    if (isSelected) {
-                      _selectedActors.remove(idol);
-                    } else {
-                      _selectedActors.add(idol);
-                    }
-                  });
-                },
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                  decoration: BoxDecoration(
-                    color: isSelected ? const Color(0xFF261016) : const Color(0xFF161622),
-                    borderRadius: BorderRadius.circular(20),
-                    border: Border.all(
-                      color: isSelected ? AppTheme.primaryRed : Colors.white12,
-                      width: isSelected ? 1.5 : 1,
-                    ),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        isSelected ? Icons.star_rounded : Icons.star_border_rounded,
-                        color: isSelected ? AppTheme.primaryRed : Colors.white38,
-                        size: 16,
-                      ),
-                      const SizedBox(width: 6),
-                      Text(
-                        idol,
-                        style: TextStyle(
-                          color: isSelected ? Colors.white : Colors.white70,
-                          fontSize: 13,
-                          fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              );
-            }).toList(),
-          ),
-          const SizedBox(height: 24),
-
-          // Add custom favorite titles or actors
-          Text(
-            'Add Any Favorite Movie, Show, or Star',
-            style: GoogleFonts.inter(fontSize: 14, fontWeight: FontWeight.bold, color: Colors.white70),
-          ),
-          const SizedBox(height: 10),
-          Row(
-            children: [
-              Expanded(
-                child: TextField(
-                  controller: _customInterestController,
-                  style: const TextStyle(color: Colors.white, fontSize: 14),
-                  decoration: InputDecoration(
-                    hintText: 'e.g. Inception, Breaking Bad, Jawan...',
-                    hintStyle: const TextStyle(color: Colors.white30, fontSize: 13),
-                    filled: true,
-                    fillColor: const Color(0xFF191924),
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                    border: OutlineInputBorder(
-                      borderRadius: BorderRadius.circular(10),
-                      borderSide: const BorderSide(color: Color(0xFF2E2E3E)),
-                    ),
-                  ),
-                  onSubmitted: (_) => _addCustomItem(),
-                ),
-              ),
-              const SizedBox(width: 10),
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppTheme.primaryRed,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                ),
-                onPressed: _addCustomItem,
-                child: const Text('Add', style: TextStyle(fontWeight: FontWeight.bold)),
-              ),
-            ],
-          ),
-
-          if (_customFavorites.isNotEmpty) ...[
-            const SizedBox(height: 14),
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: _customFavorites.map((title) {
-                return Chip(
-                  backgroundColor: AppTheme.surfaceVariant,
-                  label: Text(title, style: const TextStyle(color: Colors.white, fontSize: 12)),
-                  deleteIcon: const Icon(Icons.close, size: 14, color: Colors.white54),
-                  onDeleted: () {
-                    setState(() => _customFavorites.remove(title));
-                  },
-                );
-              }).toList(),
-            ),
-          ],
-        ],
-      ),
-    );
-  }
-
-  // BOTTOM NAVIGATION BAR
-  Widget _buildBottomNav() {
-    return Container(
-      padding: const EdgeInsets.all(20),
-      decoration: const BoxDecoration(
-        color: Color(0xFF0F0F16),
-        border: Border(top: BorderSide(color: Color(0xFF20202E))),
-      ),
-      child: Row(
-        children: [
-          if (_currentStep > 0) ...[
-            OutlinedButton(
-              style: OutlinedButton.styleFrom(
-                foregroundColor: Colors.white70,
-                side: const BorderSide(color: Colors.white24),
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-              ),
-              onPressed: _prevStep,
-              child: const Text('Back'),
-            ),
-            const SizedBox(width: 12),
-          ],
-          Expanded(
-            child: ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppTheme.primaryRed,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                elevation: 4,
-                shadowColor: AppTheme.primaryRed.withValues(alpha: 0.5),
-              ),
-              onPressed: _nextStep,
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Text(
-                    _currentStep == 3 ? 'Launch Voidflix' : 'Next Step',
-                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(width: 8),
-                  Icon(
-                    _currentStep == 3 ? Icons.rocket_launch_rounded : Icons.arrow_forward_rounded,
-                    size: 18,
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // SYNTHESIS / PERSONALIZATION ANIMATION VIEW
-  Widget _buildSynthesisView() {
-    String statusText = 'Calibrating frequency for ${_nameController.text}...';
-    if (_synthesisProgress > 30) {
-      statusText = 'Assembling ${_selectedLanguages.join(', ').toUpperCase()} cinema pipelines...';
-    }
-    if (_synthesisProgress > 65) {
-      statusText = 'Synthesizing recommendations for ${_selectedActors.take(2).join(', ')}...';
-    }
-    if (_synthesisProgress > 90) {
-      statusText = 'Voidflix is ready!';
-    }
-
-    return Scaffold(
-      backgroundColor: Colors.black,
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.all(32),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Container(
-                width: 90,
-                height: 90,
+            spacing: 6,
+            runSpacing: 6,
+            children: _selectedActors.map((a) {
+              return Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                 decoration: BoxDecoration(
-                  shape: BoxShape.circle,
                   color: AppTheme.primaryRed.withValues(alpha: 0.15),
-                  border: Border.all(color: AppTheme.primaryRed, width: 2),
-                  boxShadow: [
-                    BoxShadow(
-                      color: AppTheme.primaryRed.withValues(alpha: 0.4),
-                      blurRadius: 30,
-                      spreadRadius: 4,
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: AppTheme.primaryRed.withValues(alpha: 0.4)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      a['name'] as String,
+                      style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+                    ),
+                    const SizedBox(width: 4),
+                    GestureDetector(
+                      onTap: () => _toggleActor(a),
+                      child: const Icon(Icons.close, color: Colors.white70, size: 14),
                     ),
                   ],
                 ),
-                child: const Center(
-                  child: CircularProgressIndicator(
-                    color: AppTheme.primaryRed,
-                    strokeWidth: 3,
-                  ),
-                ),
-              ),
-              const SizedBox(height: 32),
-              Text(
-                'BUILDING YOUR VOIDFLIX',
-                style: GoogleFonts.bebasNeue(
-                  fontSize: 28,
-                  letterSpacing: 2,
-                  color: Colors.white,
-                ),
-              ),
-              const SizedBox(height: 12),
-              Text(
-                statusText,
-                textAlign: TextAlign.center,
-                style: const TextStyle(color: Colors.white70, fontSize: 14),
-              ),
-              const SizedBox(height: 24),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(6),
-                child: SizedBox(
-                  width: 200,
-                  child: LinearProgressIndicator(
-                    value: _synthesisProgress / 100.0,
-                    backgroundColor: Colors.white12,
-                    valueColor: const AlwaysStoppedAnimation<Color>(AppTheme.primaryRed),
-                    minHeight: 6,
-                  ),
-                ),
-              ),
-            ],
+              );
+            }).toList(),
           ),
+          const SizedBox(height: 14),
+        ],
+
+        // Circular Photos Grid (Exact match of OnboardingModal.tsx)
+        if (_isLoadingActors && displayList.isEmpty)
+          const Center(
+            child: Padding(
+              padding: EdgeInsets.all(24.0),
+              child: CircularProgressIndicator(color: AppTheme.primaryRed),
+            ),
+          )
+        else
+          GridView.builder(
+            shrinkWrap: true,
+            physics: const NeverScrollableScrollPhysics(),
+            itemCount: displayList.length > 18 ? 18 : displayList.length,
+            gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+              crossAxisCount: 3,
+              childAspectRatio: 0.85,
+              crossAxisSpacing: 12,
+              mainAxisSpacing: 12,
+            ),
+            itemBuilder: (context, index) {
+              final actor = displayList[index];
+              final id = actor['id'] as int;
+              final name = actor['name'] as String? ?? 'Actor';
+              final profilePath = actor['profile_path'] as String?;
+              final isSelected = _selectedActors.any((a) => a['id'] == id);
+
+              return GestureDetector(
+                onTap: () => _toggleActor(actor),
+                child: Column(
+                  children: [
+                    Expanded(
+                      child: Stack(
+                        alignment: Alignment.center,
+                        children: [
+                          Container(
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              border: Border.all(
+                                color: isSelected ? AppTheme.primaryRed : Colors.transparent,
+                                width: 2.5,
+                              ),
+                            ),
+                            child: ClipOval(
+                              child: profilePath != null
+                                  ? CachedNetworkImage(
+                                      imageUrl: ApiService.getImageUrl(profilePath, size: 'w200'),
+                                      fit: BoxFit.cover,
+                                      width: double.infinity,
+                                      height: double.infinity,
+                                      errorWidget: (_, _, _) => Container(
+                                        color: const Color(0xFF1F1F2B),
+                                        child: Center(
+                                          child: Text(
+                                            name.isNotEmpty ? name[0] : '?',
+                                            style: const TextStyle(color: Colors.white54, fontSize: 20),
+                                          ),
+                                        ),
+                                      ),
+                                    )
+                                  : Container(
+                                      color: const Color(0xFF1F1F2B),
+                                      child: Center(
+                                        child: Text(
+                                          name.isNotEmpty ? name[0] : '?',
+                                          style: const TextStyle(color: Colors.white54, fontSize: 20),
+                                        ),
+                                      ),
+                                    ),
+                            ),
+                          ),
+                          if (isSelected)
+                            Container(
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: AppTheme.primaryRed.withValues(alpha: 0.45),
+                              ),
+                              child: const Center(
+                                child: Icon(Icons.check, color: Colors.white, size: 28),
+                              ),
+                            ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      name,
+                      style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.w500),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      textAlign: TextAlign.center,
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+      ],
+    );
+  }
+
+  // STEP 4: Languages / Industries (Exact clone of OnboardingModal.tsx Step 2)
+  Widget _buildStepLanguages() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          "What do you like watching?",
+          style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
         ),
+        const SizedBox(height: 4),
+        const Text(
+          "Pick the industries and languages you enjoy.",
+          style: TextStyle(color: Colors.white54, fontSize: 12),
+        ),
+        const SizedBox(height: 16),
+
+        // 2-column grid of all 10 LANGUAGE_CHOICES from the site
+        GridView.builder(
+          shrinkWrap: true,
+          physics: const NeverScrollableScrollPhysics(),
+          itemCount: _languageChoices.length,
+          gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
+            crossAxisCount: 2,
+            childAspectRatio: 3.2,
+            crossAxisSpacing: 10,
+            mainAxisSpacing: 10,
+          ),
+          itemBuilder: (context, index) {
+            final l = _languageChoices[index];
+            final code = l['code'] as String;
+            final isSelected = _selectedLanguages.contains(code);
+
+            return GestureDetector(
+              onTap: () => _toggleLanguage(code),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 150),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+                decoration: BoxDecoration(
+                  color: isSelected ? AppTheme.primaryRed.withValues(alpha: 0.15) : const Color(0xFF161620),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: isSelected ? AppTheme.primaryRed : const Color(0xFF282836),
+                    width: isSelected ? 1.5 : 1,
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Text(l['flag'] as String, style: const TextStyle(fontSize: 16)),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        l['label'] as String,
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 13,
+                          fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    if (isSelected)
+                      const Icon(Icons.check, color: AppTheme.primaryRed, size: 16),
+                  ],
+                ),
+              ),
+            );
+          },
+        ),
+      ],
+    );
+  }
+
+  // Footer (Matches web OnboardingModal.tsx footer exactly)
+  Widget _buildModalFooter(bool isLast) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+      decoration: const BoxDecoration(
+        border: Border(top: BorderSide(color: Color(0xFF282836))),
+      ),
+      child: Row(
+        children: [
+          TextButton(
+            onPressed: () => _finish(skipped: true),
+            child: const Text('Skip for now', style: TextStyle(color: Colors.white54, fontSize: 13)),
+          ),
+          const Spacer(),
+          if (_step > 0) ...[
+            OutlinedButton.icon(
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Colors.white70,
+                side: const BorderSide(color: Color(0xFF282836)),
+                padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+              ),
+              icon: const Icon(Icons.chevron_left, size: 18),
+              label: const Text('Back'),
+              onPressed: () => setState(() => _step--),
+            ),
+            const SizedBox(width: 10),
+          ],
+          ElevatedButton.icon(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: AppTheme.primaryRed,
+              foregroundColor: Colors.white,
+              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+            ),
+            icon: Icon(isLast ? Icons.check : Icons.chevron_right, size: 18),
+            label: Text(
+              isLast ? 'Build my recommendations' : 'Next',
+              style: const TextStyle(fontWeight: FontWeight.bold),
+            ),
+            onPressed: () {
+              if (isLast) {
+                _finish();
+              } else {
+                setState(() => _step++);
+              }
+            },
+          ),
+        ],
       ),
     );
   }
