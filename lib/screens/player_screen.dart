@@ -1924,36 +1924,37 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 ),
 
               // ---------------------------------------------------------------
-              // Layer 8: Screen Locked Pill
+              // Layer 8: Screen Locked Unlock Button (Icon Only, No Text)
               // ---------------------------------------------------------------
               if (_isNativeMode && _isLocked && _showLockPill)
                 Center(
-                  child: InkWell(
-                    onTap: _toggleScreenLock,
-                    borderRadius: BorderRadius.circular(30),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                      decoration: BoxDecoration(
-                        color: Colors.black.withValues(alpha: 0.85),
-                        borderRadius: BorderRadius.circular(30),
-                        border: Border.all(color: Colors.white30, width: 1.2),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.6),
-                            blurRadius: 15,
+                  child: Material(
+                    color: Colors.transparent,
+                    child: InkWell(
+                      onTap: _toggleScreenLock,
+                      borderRadius: BorderRadius.circular(36),
+                      child: Container(
+                        width: 68,
+                        height: 68,
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.85),
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.white38, width: 1.5),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.7),
+                              blurRadius: 18,
+                              offset: const Offset(0, 4),
+                            ),
+                          ],
+                        ),
+                        child: const Center(
+                          child: Icon(
+                            Icons.lock_open_rounded,
+                            color: Colors.white,
+                            size: 32,
                           ),
-                        ],
-                      ),
-                      child: const Row(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Icon(Icons.lock_open_rounded, color: Colors.white, size: 20),
-                          SizedBox(width: 8),
-                          Text(
-                            'Screen Locked • Tap to Unlock',
-                            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
-                          ),
-                        ],
+                        ),
                       ),
                     ),
                   ),
@@ -2045,12 +2046,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                           ),
                                         ],
                                       ),
-                                    ),
-                                    // Lock Screen button
-                                    IconButton(
-                                      icon: const Icon(Icons.lock_outline_rounded, color: Colors.white),
-                                      tooltip: 'Lock Screen',
-                                      onPressed: _toggleScreenLock,
                                     ),
                                     // Reload stream button
                                     IconButton(

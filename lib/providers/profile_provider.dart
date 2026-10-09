@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import '../services/avatar_service.dart';
 
 class UserProfile {
   final String id;
@@ -200,13 +201,14 @@ class ProfileProvider extends ChangeNotifier {
     String? avatar,
   }) async {
     final newId = DateTime.now().millisecondsSinceEpoch.toString();
+    final defaultAvatar = AvatarService.defaultFeatured[colorIndex % AvatarService.defaultFeatured.length].url;
     final newProfile = UserProfile(
       id: newId,
       name: name.trim().isEmpty ? 'Profile ${_profiles.length + 1}' : name.trim(),
       colorIndex: colorIndex % avatarGradients.length,
       isKids: isKids,
       pin: (pin != null && pin.trim().isNotEmpty) ? pin.trim() : null,
-      avatar: avatar ?? (isKids ? '🧸' : avatarIcons[colorIndex % avatarIcons.length]),
+      avatar: (avatar != null && avatar.trim().isNotEmpty) ? avatar.trim() : defaultAvatar,
     );
 
     _profiles.add(newProfile);

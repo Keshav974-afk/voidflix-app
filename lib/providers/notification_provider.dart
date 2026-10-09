@@ -1,4 +1,6 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../core/network/api_service.dart';
 import '../models/media_item.dart';
@@ -22,14 +24,19 @@ class AppNotification {
 }
 
 class NotificationProvider extends ChangeNotifier {
-  static const String _keySeenTimestamp = 'flowflix_last_seen_notif';
-  static const String _keyPushEnabled = 'flowflix_notifications_enabled';
+  static const String _keySeenTimestamp = 'voidflix_last_seen_notif';
+  static const String _keyPushEnabled = 'voidflix_notifications_enabled';
+  static const String _keyWelcomeSent = 'voidflix_welcome_notif_sent';
+  static const String _keyLastTrendingSent = 'voidflix_last_trending_notified';
 
   final ApiService _apiService = ApiService();
+  final FlutterLocalNotificationsPlugin _localNotifs = FlutterLocalNotificationsPlugin();
+
   List<AppNotification> _notifications = [];
   bool _isLoading = false;
   bool _notificationsEnabled = true;
   int _lastSeenEpoch = 0;
+  bool _localNotifsInitialized = false;
 
   List<AppNotification> get notifications => _notifications;
   bool get isLoading => _isLoading;
@@ -47,12 +54,66 @@ class NotificationProvider extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     _lastSeenEpoch = prefs.getInt(_keySeenTimestamp) ?? 0;
     _notificationsEnabled = prefs.getBool(_keyPushEnabled) ?? true;
+
+    await _initLocalNotifications();
     await fetchUpdates();
+  }
+
+  Future<void> _initLocalNotifications() async {
+    try {
+      const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
+      const initSettings = InitializationSettings(android: androidInit);
+      await _localNotifs.initialize(initSettings);
+
+      final androidImpl = _localNotifs.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
+      await androidImpl?.createNotificationChannel(
+        const AndroidNotificationChannel(
+          'voidflix_notifications',
+          'Voidflix Notifications',
+          description: 'Updates, premiere reminders and trending picks from Voidflix',
+          importance: Importance.high,
+        ),
+      );
+      _localNotifsInitialized = true;
+    } catch (e) {
+      debugPrint('Error initializing local notifications: $e');
+    }
+  }
+
+  /// Sends a real system notification that appears in the device status bar
+  Future<void> showDeviceNotification({
+    required int id,
+    required String title,
+    required String body,
+  }) async {
+    if (!_notificationsEnabled) return;
+
+    if (!_localNotifsInitialized) {
+      await _initLocalNotifications();
+    }
+
+    const androidDetails = AndroidNotificationDetails(
+      'voidflix_notifications',
+      'Voidflix Notifications',
+      channelDescription: 'Updates, premiere reminders and trending picks from Voidflix',
+      importance: Importance.max,
+      priority: Priority.high,
+      showWhen: true,
+    );
+    const details = NotificationDetails(android: androidDetails);
+
+    try {
+      await _localNotifs.show(id, title, body, details);
+    } catch (e) {
+      debugPrint('Error posting device notification: $e');
+    }
   }
 
   Future<void> fetchUpdates() async {
     _isLoading = true;
     notifyListeners();
+
+    final prefs = await SharedPreferences.getInstance();
 
     try {
       final upcoming = await _apiService.getUpcomingMovies();
@@ -80,16 +141,39 @@ class NotificationProvider extends ChangeNotifier {
       // Add trending top pick notification
       if (trending.isNotEmpty) {
         final top = trending.first;
+        final topId = 'top_${top.id}';
         list.insert(
           0,
           AppNotification(
-            id: 'top_${top.id}',
+            id: topId,
             title: '🔥 #1 Trending Today: ${top.title}',
-            message: 'Stream the most watched title right now on Flowflix with zero wait time.',
+            message: 'Stream the most watched title right now on Voidflix with zero wait time.',
             timestamp: DateTime.now(),
             mediaItem: top,
             isRead: false,
           ),
+        );
+
+        // Fire device status bar notification for new trending title
+        final lastTrendingNotif = prefs.getString(_keyLastTrendingSent);
+        if (lastTrendingNotif != topId) {
+          await prefs.setString(_keyLastTrendingSent, topId);
+          await showDeviceNotification(
+            id: top.id,
+            title: '🔥 #1 Trending on Voidflix: ${top.title}',
+            body: 'Stream now in 4K HDR on Voidflix with zero wait time.',
+          );
+        }
+      }
+
+      // Fire Welcome to Voidflix device status bar notification on first launch
+      final welcomeSent = prefs.getBool(_keyWelcomeSent) ?? false;
+      if (!welcomeSent) {
+        await prefs.setBool(_keyWelcomeSent, true);
+        await showDeviceNotification(
+          id: 1001,
+          title: '🎉 Welcome to Voidflix!',
+          body: 'Enjoy unlimited 4K Ultra HD movies, series & live IPTV channels with zero ads.',
         );
       }
 
@@ -99,12 +183,22 @@ class NotificationProvider extends ChangeNotifier {
       _notifications = [
         AppNotification(
           id: 'welcome',
-          title: '🎉 Welcome to Flowflix!',
-          message: 'Enjoy unlimited HD movies, TV shows, and Live IPTV channels.',
+          title: '🎉 Welcome to Voidflix!',
+          message: 'Enjoy unlimited HD movies, TV shows, and Live IPTV channels on Voidflix.',
           timestamp: DateTime.now(),
           isRead: false,
         ),
       ];
+
+      final welcomeSent = prefs.getBool(_keyWelcomeSent) ?? false;
+      if (!welcomeSent) {
+        await prefs.setBool(_keyWelcomeSent, true);
+        await showDeviceNotification(
+          id: 1001,
+          title: '🎉 Welcome to Voidflix!',
+          body: 'Enjoy unlimited HD movies, TV shows, and Live IPTV channels on Voidflix.',
+        );
+      }
     } finally {
       _isLoading = false;
       notifyListeners();
@@ -135,5 +229,13 @@ class NotificationProvider extends ChangeNotifier {
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setBool(_keyPushEnabled, enabled);
+
+    if (enabled) {
+      await showDeviceNotification(
+        id: 9999,
+        title: '🔔 Voidflix Notifications Active',
+        body: 'You will receive alerts for new 4K releases and trending shows.',
+      );
+    }
   }
 }

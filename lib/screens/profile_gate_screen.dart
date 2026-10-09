@@ -8,25 +8,33 @@ import '../models/media_item.dart';
 import '../providers/media_provider.dart';
 import '../providers/profile_provider.dart';
 import '../widgets/profile_avatar.dart';
+import '../services/avatar_service.dart';
+import 'choose_icon_screen.dart';
 import 'edit_profile_screen.dart';
 import 'main_navigation_screen.dart';
 
 class ProfileGateScreen extends StatefulWidget {
   final bool canPop;
+  final bool initialEditMode;
 
-  const ProfileGateScreen({super.key, this.canPop = false});
+  const ProfileGateScreen({
+    super.key,
+    this.canPop = false,
+    this.initialEditMode = false,
+  });
 
   @override
   State<ProfileGateScreen> createState() => _ProfileGateScreenState();
 }
 
 class _ProfileGateScreenState extends State<ProfileGateScreen> {
-  bool _isManaging = false;
+  late bool _isManaging;
   List<MediaItem> _trendingPosters = [];
 
   @override
   void initState() {
     super.initState();
+    _isManaging = widget.initialEditMode;
     _fetchTrendingPosters();
   }
 
@@ -214,13 +222,13 @@ class _ProfileGateScreenState extends State<ProfileGateScreen> {
   void _showAddProfileModal() {
     final nameController = TextEditingController();
     final pinController = TextEditingController();
-    int selectedColorIndex = 0;
+    String selectedAvatarUrl = AvatarService.defaultFeatured.first.url;
     bool isKids = false;
 
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: AppTheme.surfaceVariant,
+      backgroundColor: const Color(0xFF191920),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
@@ -234,136 +242,234 @@ class _ProfileGateScreenState extends State<ProfileGateScreen> {
                 top: 20,
                 bottom: MediaQuery.of(ctx).viewInsets.bottom + 24,
               ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: [
-                      Text(
-                        'Add Profile',
-                        style: GoogleFonts.inter(
-                          fontSize: 20,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white,
-                        ),
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.close, color: Colors.white60),
-                        onPressed: () => Navigator.of(bottomCtx).pop(),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 16),
-                  Center(
-                    child: ProfileAvatarTile(
-                      name: nameController.text.isEmpty ? 'New' : nameController.text,
-                      gradientColors: ProfileProvider.avatarGradients[selectedColorIndex],
-                      size: 90,
-                      isKids: isKids,
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-                  // Color picker palette
-                  const Text(
-                    'Avatar Color Theme',
-                    style: TextStyle(fontSize: 13, color: Colors.white70, fontWeight: FontWeight.w600),
-                  ),
-                  const SizedBox(height: 10),
-                  Row(
-                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                    children: List.generate(ProfileProvider.avatarGradients.length, (idx) {
-                      final isSelected = idx == selectedColorIndex;
-                      final colors = ProfileProvider.avatarGradients[idx];
-                      return GestureDetector(
-                        onTap: () => setModalState(() => selectedColorIndex = idx),
-                        child: Container(
-                          width: 42,
-                          height: 42,
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(colors: colors),
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(
-                              color: isSelected ? Colors.white : Colors.transparent,
-                              width: 2.5,
-                            ),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          'Add Profile',
+                          style: GoogleFonts.inter(
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
                           ),
-                          child: isSelected
-                              ? const Icon(Icons.check, color: Colors.white, size: 20)
-                              : null,
                         ),
-                      );
-                    }),
-                  ),
-                  const SizedBox(height: 20),
-                  TextField(
-                    controller: nameController,
-                    style: const TextStyle(color: Colors.white),
-                    decoration: InputDecoration(
-                      labelText: 'Profile Name',
-                      labelStyle: const TextStyle(color: Colors.white60),
-                      hintText: 'e.g. Alex, Family',
-                      hintStyle: const TextStyle(color: Colors.white24),
-                      filled: true,
-                      fillColor: AppTheme.cardColor,
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                        IconButton(
+                          icon: const Icon(Icons.close, color: Colors.white60),
+                          onPressed: () => Navigator.of(bottomCtx).pop(),
+                        ),
+                      ],
                     ),
-                    onChanged: (_) => setModalState(() {}),
-                  ),
-                  const SizedBox(height: 16),
-                  // Kids Mode Toggle
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('Kids Profile?', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
-                    subtitle: const Text('Filter content suitable for kids only', style: TextStyle(color: Colors.white54, fontSize: 12)),
-                    activeTrackColor: AppTheme.primaryRed,
-                    activeThumbColor: Colors.white,
-                    value: isKids,
-                    onChanged: (val) => setModalState(() => isKids = val),
-                  ),
-                  const SizedBox(height: 10),
-                  TextField(
-                    controller: pinController,
-                    keyboardType: TextInputType.number,
-                    maxLength: 4,
-                    obscureText: true,
-                    style: const TextStyle(color: Colors.white),
-                    decoration: InputDecoration(
-                      labelText: 'Profile Lock PIN (Optional)',
-                      labelStyle: const TextStyle(color: Colors.white60),
-                      hintText: '4-digit PIN',
-                      hintStyle: const TextStyle(color: Colors.white24),
-                      counterText: '',
-                      filled: true,
-                      fillColor: AppTheme.cardColor,
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-                  SizedBox(
-                    width: double.infinity,
-                    height: 48,
-                    child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppTheme.primaryRed,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    const SizedBox(height: 16),
+                    // Centered Selected Official Netflix Avatar (Tappable to pick from 976 avatars)
+                    Center(
+                      child: GestureDetector(
+                        onTap: () async {
+                          final tempProfile = UserProfile(
+                            id: 'temp',
+                            name: nameController.text.isEmpty ? 'New' : nameController.text,
+                            avatar: selectedAvatarUrl,
+                          );
+                          final newUrl = await Navigator.of(context).push<String>(
+                            MaterialPageRoute(
+                              builder: (_) => ChooseIconScreen(profile: tempProfile),
+                            ),
+                          );
+                          if (newUrl != null && newUrl.isNotEmpty) {
+                            setModalState(() {
+                              selectedAvatarUrl = newUrl;
+                            });
+                          }
+                        },
+                        child: Stack(
+                          clipBehavior: Clip.none,
+                          children: [
+                            Container(
+                              width: 96,
+                              height: 96,
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(16),
+                                border: Border.all(color: Colors.white24, width: 2),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withValues(alpha: 0.6),
+                                    blurRadius: 12,
+                                    offset: const Offset(0, 4),
+                                  ),
+                                ],
+                              ),
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(14),
+                                child: CachedNetworkImage(
+                                  imageUrl: selectedAvatarUrl,
+                                  fit: BoxFit.cover,
+                                  placeholder: (_, _) => Container(color: const Color(0xFF282828)),
+                                  errorWidget: (_, _, _) => const Icon(Icons.person, color: Colors.white),
+                                ),
+                              ),
+                            ),
+                            Positioned(
+                              bottom: -2,
+                              right: -2,
+                              child: Container(
+                                padding: const EdgeInsets.all(6),
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  shape: BoxShape.circle,
+                                  boxShadow: [
+                                    BoxShadow(
+                                      color: Colors.black.withValues(alpha: 0.5),
+                                      blurRadius: 6,
+                                    ),
+                                  ],
+                                ),
+                                child: const Icon(Icons.edit, color: Colors.black, size: 14),
+                              ),
+                            ),
+                          ],
+                        ),
                       ),
-                      onPressed: () {
-                        final name = nameController.text.trim();
-                        if (name.isEmpty) return;
-                        context.read<ProfileProvider>().addProfile(
-                              name: name,
-                              colorIndex: selectedColorIndex,
-                              isKids: isKids,
-                              pin: pinController.text.trim().isEmpty ? null : pinController.text.trim(),
-                            );
-                        Navigator.of(bottomCtx).pop();
-                      },
-                      child: const Text('Save Profile', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
                     ),
-                  ),
-                ],
+                    const SizedBox(height: 8),
+                    Center(
+                      child: TextButton.icon(
+                        icon: const Icon(Icons.grid_view_rounded, size: 15, color: Colors.white70),
+                        label: const Text('Choose Official Avatar (976 Available)', style: TextStyle(color: Colors.white70, fontSize: 13)),
+                        onPressed: () async {
+                          final tempProfile = UserProfile(
+                            id: 'temp',
+                            name: nameController.text.isEmpty ? 'New' : nameController.text,
+                            avatar: selectedAvatarUrl,
+                          );
+                          final newUrl = await Navigator.of(context).push<String>(
+                            MaterialPageRoute(
+                              builder: (_) => ChooseIconScreen(profile: tempProfile),
+                            ),
+                          );
+                          if (newUrl != null && newUrl.isNotEmpty) {
+                            setModalState(() {
+                              selectedAvatarUrl = newUrl;
+                            });
+                          }
+                        },
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    // Horizontal scroll of Featured Official Avatars
+                    const Text(
+                      'Featured Official PFPs',
+                      style: TextStyle(fontSize: 13, color: Colors.white70, fontWeight: FontWeight.w600),
+                    ),
+                    const SizedBox(height: 10),
+                    SizedBox(
+                      height: 56,
+                      child: ListView.separated(
+                        scrollDirection: Axis.horizontal,
+                        itemCount: AvatarService.defaultFeatured.length,
+                        separatorBuilder: (_, _) => const SizedBox(width: 10),
+                        itemBuilder: (ctx, idx) {
+                          final av = AvatarService.defaultFeatured[idx];
+                          final isSelected = av.url == selectedAvatarUrl;
+                          return GestureDetector(
+                            onTap: () => setModalState(() => selectedAvatarUrl = av.url),
+                            child: Container(
+                              width: 54,
+                              height: 54,
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(
+                                  color: isSelected ? Colors.white : Colors.transparent,
+                                  width: 2.5,
+                                ),
+                              ),
+                              child: ClipRRect(
+                                borderRadius: BorderRadius.circular(8),
+                                child: CachedNetworkImage(
+                                  imageUrl: av.url,
+                                  fit: BoxFit.cover,
+                                  placeholder: (_, _) => Container(color: const Color(0xFF282828)),
+                                  errorWidget: (_, _, _) => const Icon(Icons.person, color: Colors.white),
+                                ),
+                              ),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                    const SizedBox(height: 18),
+                    TextField(
+                      controller: nameController,
+                      style: const TextStyle(color: Colors.white),
+                      decoration: InputDecoration(
+                        labelText: 'Profile Name',
+                        labelStyle: const TextStyle(color: Colors.white60),
+                        hintText: 'e.g. Alex, Family',
+                        hintStyle: const TextStyle(color: Colors.white24),
+                        filled: true,
+                        fillColor: AppTheme.cardColor,
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                      ),
+                      onChanged: (_) => setModalState(() {}),
+                    ),
+                    const SizedBox(height: 14),
+                    // Kids Mode Toggle
+                    SwitchListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: const Text('Kids Profile?', style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600)),
+                      subtitle: const Text('Filter content suitable for kids only', style: TextStyle(color: Colors.white54, fontSize: 12)),
+                      activeTrackColor: AppTheme.primaryRed,
+                      activeThumbColor: Colors.white,
+                      value: isKids,
+                      onChanged: (val) => setModalState(() => isKids = val),
+                    ),
+                    const SizedBox(height: 10),
+                    TextField(
+                      controller: pinController,
+                      keyboardType: TextInputType.number,
+                      maxLength: 4,
+                      obscureText: true,
+                      style: const TextStyle(color: Colors.white, letterSpacing: 4),
+                      decoration: InputDecoration(
+                        labelText: 'Profile Lock PIN (Optional)',
+                        labelStyle: const TextStyle(color: Colors.white60),
+                        hintText: '4-digit PIN',
+                        hintStyle: const TextStyle(color: Colors.white24, letterSpacing: 1),
+                        counterText: '',
+                        filled: true,
+                        fillColor: AppTheme.cardColor,
+                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    SizedBox(
+                      width: double.infinity,
+                      height: 48,
+                      child: ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppTheme.primaryRed,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        ),
+                        onPressed: () {
+                          final name = nameController.text.trim();
+                          if (name.isEmpty) return;
+                          context.read<ProfileProvider>().addProfile(
+                                name: name,
+                                colorIndex: 0,
+                                isKids: isKids,
+                                pin: pinController.text.trim().isEmpty ? null : pinController.text.trim(),
+                                avatar: selectedAvatarUrl,
+                              );
+                          Navigator.of(bottomCtx).pop();
+                        },
+                        child: const Text('Save Profile', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
+                      ),
+                    ),
+                  ],
+                ),
               ),
             );
           },

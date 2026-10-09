@@ -1,4 +1,5 @@
-<svg fill="none" height="100%" width="100%" viewBox="0 0 512 512" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns="http://www.w3.org/2000/svg">
+// Generated file containing authentic VOIDFLIX logo swoop SVG
+const String voidflixSwoopSvg = r'''<svg fill="none" height="100%" width="100%" viewBox="0 0 512 512" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns="http://www.w3.org/2000/svg">
 <defs>
   <filter filterUnits="userSpaceOnUse" height="200%" width="200%" y="-50%" x="-50%" id="f0">
     <feGaussianBlur result="blur0" stdDeviation="35" in="SourceGraphic" />
@@ -91,3 +92,4 @@
   </g>
 </g>
 </svg>
+''';
