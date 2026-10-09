@@ -1,6 +1,6 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_local_notifications/flutter_local_notifications.dart';
+import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../core/network/api_service.dart';
 import '../models/media_item.dart';
@@ -28,15 +28,14 @@ class NotificationProvider extends ChangeNotifier {
   static const String _keyPushEnabled = 'voidflix_notifications_enabled';
   static const String _keyWelcomeSent = 'voidflix_welcome_notif_sent';
   static const String _keyLastTrendingSent = 'voidflix_last_trending_notified';
+  static const MethodChannel _nativeChannel = MethodChannel('org.voidflix/notifications');
 
   final ApiService _apiService = ApiService();
-  final FlutterLocalNotificationsPlugin _localNotifs = FlutterLocalNotificationsPlugin();
 
   List<AppNotification> _notifications = [];
   bool _isLoading = false;
   bool _notificationsEnabled = true;
   int _lastSeenEpoch = 0;
-  bool _localNotifsInitialized = false;
 
   List<AppNotification> get notifications => _notifications;
   bool get isLoading => _isLoading;
@@ -55,29 +54,7 @@ class NotificationProvider extends ChangeNotifier {
     _lastSeenEpoch = prefs.getInt(_keySeenTimestamp) ?? 0;
     _notificationsEnabled = prefs.getBool(_keyPushEnabled) ?? true;
 
-    await _initLocalNotifications();
     await fetchUpdates();
-  }
-
-  Future<void> _initLocalNotifications() async {
-    try {
-      const androidInit = AndroidInitializationSettings('@mipmap/ic_launcher');
-      const initSettings = InitializationSettings(android: androidInit);
-      await _localNotifs.initialize(initSettings);
-
-      final androidImpl = _localNotifs.resolvePlatformSpecificImplementation<AndroidFlutterLocalNotificationsPlugin>();
-      await androidImpl?.createNotificationChannel(
-        const AndroidNotificationChannel(
-          'voidflix_notifications',
-          'Voidflix Notifications',
-          description: 'Updates, premiere reminders and trending picks from Voidflix',
-          importance: Importance.high,
-        ),
-      );
-      _localNotifsInitialized = true;
-    } catch (e) {
-      debugPrint('Error initializing local notifications: $e');
-    }
   }
 
   /// Sends a real system notification that appears in the device status bar
@@ -88,24 +65,14 @@ class NotificationProvider extends ChangeNotifier {
   }) async {
     if (!_notificationsEnabled) return;
 
-    if (!_localNotifsInitialized) {
-      await _initLocalNotifications();
-    }
-
-    const androidDetails = AndroidNotificationDetails(
-      'voidflix_notifications',
-      'Voidflix Notifications',
-      channelDescription: 'Updates, premiere reminders and trending picks from Voidflix',
-      importance: Importance.max,
-      priority: Priority.high,
-      showWhen: true,
-    );
-    const details = NotificationDetails(android: androidDetails);
-
     try {
-      await _localNotifs.show(id, title, body, details);
+      await _nativeChannel.invokeMethod('showNotification', {
+        'id': id,
+        'title': title,
+        'body': body,
+      });
     } catch (e) {
-      debugPrint('Error posting device notification: $e');
+      debugPrint('Error posting native device notification: $e');
     }
   }
 
