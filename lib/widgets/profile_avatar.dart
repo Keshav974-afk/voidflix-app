@@ -1,8 +1,10 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import '../providers/profile_provider.dart';
 
 class ProfileAvatarTile extends StatelessWidget {
   final String name;
+  final String? avatarUrl;
   final List<Color> gradientColors;
   final double size;
   final bool isKids;
@@ -12,6 +14,7 @@ class ProfileAvatarTile extends StatelessWidget {
   const ProfileAvatarTile({
     super.key,
     required this.name,
+    this.avatarUrl,
     required this.gradientColors,
     this.size = 80,
     this.isKids = false,
@@ -31,6 +34,7 @@ class ProfileAvatarTile extends StatelessWidget {
     return ProfileAvatarTile(
       key: key,
       name: profile.name,
+      avatarUrl: profile.avatar.startsWith('http') ? profile.avatar : null,
       gradientColors: colors,
       size: size,
       isKids: profile.isKids,
@@ -62,11 +66,28 @@ class ProfileAvatarTile extends StatelessWidget {
       child: Stack(
         alignment: Alignment.center,
         children: [
-          // Netflix Classic Smiley Custom Painter
-          CustomPaint(
-            size: Size(size * 0.65, size * 0.65),
-            painter: _VoidflixSmileyPainter(),
-          ),
+          // If network avatar is selected, render real Netflix icon
+          if (avatarUrl != null && avatarUrl!.isNotEmpty)
+            Positioned.fill(
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(size * 0.14),
+                child: CachedNetworkImage(
+                  imageUrl: avatarUrl!,
+                  fit: BoxFit.cover,
+                  placeholder: (c, u) => Container(color: gradientColors.first),
+                  errorWidget: (c, u, e) => CustomPaint(
+                    size: Size(size * 0.65, size * 0.65),
+                    painter: _VoidflixSmileyPainter(),
+                  ),
+                ),
+              ),
+            )
+          else
+            // Netflix Classic Smiley Custom Painter
+            CustomPaint(
+              size: Size(size * 0.65, size * 0.65),
+              painter: _VoidflixSmileyPainter(),
+            ),
 
           // Lock badge at top-right if PIN locked
           if (isLocked)

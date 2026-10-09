@@ -7,6 +7,7 @@ import 'package:webview_flutter_android/webview_flutter_android.dart';
 import '../core/constants/api_constants.dart';
 import '../core/constants/theme_constants.dart';
 import '../core/network/api_service.dart';
+import '../core/services/youtube_service.dart';
 import '../models/media_detail.dart';
 import '../providers/download_provider.dart';
 import '../providers/history_provider.dart';
@@ -60,7 +61,7 @@ class _DetailScreenState extends State<DetailScreen> {
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
       ..setBackgroundColor(Colors.black)
       ..setUserAgent(
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+        'Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36',
       )
       ..setNavigationDelegate(
         NavigationDelegate(
@@ -73,44 +74,13 @@ class _DetailScreenState extends State<DetailScreen> {
     if (controller.platform is AndroidWebViewController) {
       final android = controller.platform as AndroidWebViewController;
       android.setMediaPlaybackRequiresUserGesture(false);
+      android.setMixedContentMode(MixedContentMode.alwaysAllow);
+      android.setAllowContentAccess(true);
+      android.setAllowFileAccess(true);
     }
 
-    final html = '''
-<!DOCTYPE html>
-<html>
-<head>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    html, body {
-      width: 100%;
-      height: 100%;
-      background-color: #000000;
-      overflow: hidden;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-    iframe {
-      width: 100%;
-      height: 100%;
-      border: 0;
-      pointer-events: auto;
-    }
-  </style>
-</head>
-<body>
-  <iframe
-    id="trailer-frame"
-    src="https://www.youtube-nocookie.com/embed/$key?autoplay=1&mute=${_isMuted ? 1 : 0}&controls=1&playsinline=1&rel=0&modestbranding=1&enablejsapi=1&origin=https://www.youtube.com"
-    allow="autoplay; encrypted-media; fullscreen; picture-in-picture"
-    allowfullscreen>
-  </iframe>
-</body>
-</html>
-''';
-
-    controller.loadHtmlString(html, baseUrl: 'https://www.youtube.com');
+    final html = YoutubeService.buildTrailerEmbedHtml(key, isMuted: _isMuted);
+    controller.loadHtmlString(html, baseUrl: 'https://voidflix.org');
 
     if (mounted) {
       setState(() {

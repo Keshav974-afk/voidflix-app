@@ -1,3 +1,4 @@
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
@@ -7,6 +8,7 @@ import '../core/constants/theme_constants.dart';
 import '../providers/media_provider.dart';
 import '../providers/profile_provider.dart';
 import '../widgets/profile_avatar.dart';
+import 'choose_icon_screen.dart';
 import 'main_navigation_screen.dart';
 
 class OnboardingScreen extends StatefulWidget {
@@ -20,10 +22,84 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
   final PageController _pageController = PageController();
   final TextEditingController _nameController = TextEditingController(text: 'Explorer');
   int _currentPage = 0;
-  int _selectedColorIndex = 0;
+  final int _selectedColorIndex = 0;
   bool _isKids = false;
 
+  static const List<Map<String, String>> _netflixPfpOptions = [
+    {
+      'name': 'Scarlet Chilleez',
+      'url': 'https://occ-0-4873-3647.1.nflxso.net/dnm/api/v6/SO2HoVCx33X8phZh2pZZmQ4QgNY/AAAABTk6nphithdqaDreuMsv-yBIzn5xmqqPyz35rHfxkU78C5oD_iRonk_v4jEoZq0U5XFq2c8Qn3phI_uchLj9PKfzFWHgA_QaHw.png?r=201',
+    },
+    {
+      'name': 'Sunny Chilleez',
+      'url': 'https://occ-0-8782-2219.1.nflxso.net/dnm/api/v6/vN7bi_My87NPKvsBoib006Llxzg/AAAABaB4hP-03hFOdIwXeYrc_Fb0P-QukEb4sV2BnOlJKVG1dpjJpL7aUOu4VFZenH1zr20DMYE6e8Fa6E7L9BnCvKlDzZEd25S_Ew.png?r=7c7',
+    },
+    {
+      'name': 'Robin Chilleez',
+      'url': 'https://occ-0-8782-2219.1.nflxso.net/dnm/api/v6/vN7bi_My87NPKvsBoib006Llxzg/AAAABTzykXqE0IgG15a8RLZ7okU8HrL3PU7kuNVL91w9HjwJXRswlPVKSVvVdYUSoea9F1CONTUIZyRzxpgZFd0XC94v-svyKCQpXA.png?r=b39',
+    },
+    {
+      'name': 'Dusty Chilleez',
+      'url': 'https://occ-0-8782-2219.1.nflxso.net/dnm/api/v6/vN7bi_My87NPKvsBoib006Llxzg/AAAABfV378_nLCLJYYUS14ujtntA1bLSp4VseVCuahmhQGGoWVOwxuuqGAmICG3H5L-24Fvh8Ezkj6Fik4F9jMGbFitqsfnFrDVh6Q.png?r=6a6',
+    },
+    {
+      'name': 'Dalí Mask',
+      'url': 'https://occ-0-8782-2219.1.nflxso.net/dnm/api/v6/vN7bi_My87NPKvsBoib006Llxzg/AAAABQPQcU0ckecAwbr6vEDlu2l5UawW6M82K7Sgx2dgpj9XIUW9sSJosAXvp2l_1hTdCxCEs9uFwyfYXgW-BrN-qDBNtTND3rmrlw.png?r=d0a',
+    },
+    {
+      'name': 'The Professor',
+      'url': 'https://occ-0-8782-2219.1.nflxso.net/dnm/api/v6/vN7bi_My87NPKvsBoib006Llxzg/AAAABYqQWXH98Pzf8msDpV2poLCKqSG4BOt4NoHMH-R6s0HYdbbXbUelr9AjwvYRiLT6p9bNQQNeIICa3d-Hsgyr663l-9aQaR1VTg.png?r=b38',
+    },
+    {
+      'name': 'Tokyo',
+      'url': 'https://occ-0-8782-2219.1.nflxso.net/dnm/api/v6/vN7bi_My87NPKvsBoib006Llxzg/AAAABZIN5ALWTmxTEQzWlyqBhHzRBeBtVN-FpWudf6fgrghnio_-XZIbS3jdQ0abnzMFN1VwaKHm8j4Wj3G7iw-_s2VOuzI0rmTfig.png?r=852',
+    },
+    {
+      'name': 'Berlin',
+      'url': 'https://occ-0-8782-2219.1.nflxso.net/dnm/api/v6/vN7bi_My87NPKvsBoib006Llxzg/AAAABXJL5OiMgZqLIwU3q4Xs8tsbDieQ4SyZ59Rpo1PCa3128dbRl5hIISzxENmDsYaBOy9y_Xvu9H5hPcL1uDNzuuYGGc1XMauFXg.png?r=cf8',
+    },
+    {
+      'name': 'Eleven',
+      'url': 'https://occ-0-8782-2219.1.nflxso.net/dnm/api/v6/vN7bi_My87NPKvsBoib006Llxzg/AAAABTXzu7xECGCa9z4eCqIeE0swz7mk86sF7IGahya6fYok4wqRGpm2oO_uMKwL6zNYhI37ljISGDe5iF__eGTncUToQxQ-atNbDA.png?r=1bb',
+    },
+    {
+      'name': 'Dustin',
+      'url': 'https://occ-0-8782-2219.1.nflxso.net/dnm/api/v6/vN7bi_My87NPKvsBoib006Llxzg/AAAABYlk619kRF7q9TiQTwALJJRQhiwjuO7dIUZIQignWt6UaFXYyvNrUVB-0Cb_0oRxfyQUbteWQ9SPtmTJJFA2zhV5oGzoJDSVog.png?r=f60',
+    },
+    {
+      'name': 'Eddie',
+      'url': 'https://occ-0-8782-2219.1.nflxso.net/dnm/api/v6/vN7bi_My87NPKvsBoib006Llxzg/AAAABT80pSdtOL8qzdrRtJISys90D3h5NbTpPmaR472mHDPiku5h2D4HDG6j1vl-A4h0_Ycb-4LXlbhKn9wqhQc0rrmypevjsiqHRQ.png?r=c31',
+    },
+    {
+      'name': 'Front Man',
+      'url': 'https://occ-0-8782-2219.1.nflxso.net/dnm/api/v6/vN7bi_My87NPKvsBoib006Llxzg/AAAABYi8u2Nz9dp3EF_xcUQoW4TbnDi672S6usNUHhola5qHBSVEhNnIG8FadHiWs_L985TvUX7ST9m7CijuBJqeoO5oHirnkPkNYw.png?r=66c',
+    },
+    {
+      'name': 'Young-hee Doll',
+      'url': 'https://occ-0-8782-2219.1.nflxso.net/dnm/api/v6/vN7bi_My87NPKvsBoib006Llxzg/AAAABWVoYzlSivjXDh16yJtaZ2BJ11T4Tnjuu2ODGqzGHaMvGliRQgaQrroMgVMDfXtlp9QKPYSKIWHIGjU83kcCpksI43rFWcus8g.png?r=83b',
+    },
+    {
+      'name': 'Wednesday',
+      'url': 'https://occ-0-8782-2219.1.nflxso.net/dnm/api/v6/vN7bi_My87NPKvsBoib006Llxzg/AAAABS_fCAimFcSuIgnyvchWA3eNUjEsCsciKhhXfklGV3idvRbG7qu7YwPOCIyNrZNjkteloppY2M-9rXnuvUYXPqTIXh5GB9Ri_Q.png?r=02d',
+    },
+    {
+      'name': 'Luffy',
+      'url': 'https://occ-0-8782-2219.1.nflxso.net/dnm/api/v6/vN7bi_My87NPKvsBoib006Llxzg/AAAABc-963K_PIXK-o0mRr2QiuMS8-Q8HQZWqaRGwtx3mrzM-p23gjyOD-QRxjXtQWgxM2yVp0eKnTKRIW-8J43NWL0xzlEDsoxqOQ.png?r=0a4',
+    },
+    {
+      'name': 'Jinx',
+      'url': 'https://occ-0-8782-2219.1.nflxso.net/dnm/api/v6/vN7bi_My87NPKvsBoib006Llxzg/AAAABaSX2NqfYXqDB_Z33yOHnpIiTcBqMDAEzIl4lYXzhlFB16oLyY4P0Vy0IdAZgSH926Z7vwuXhWa3U2ZeutsSPpEYfX2LyyGtOg.png?r=87b',
+    },
+  ];
+
+  late String _selectedAvatarUrl;
   static const int _totalPages = 4;
+
+  @override
+  void initState() {
+    super.initState();
+    _selectedAvatarUrl = _netflixPfpOptions.first['url']!;
+  }
 
   @override
   void dispose() {
@@ -72,7 +148,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
     final profile = await profileProv.completeInitialOnboarding(
       name: finalName,
-      avatar: '😊',
+      avatar: _selectedAvatarUrl,
       colorIndex: _selectedColorIndex,
       isKids: _isKids,
       preferredLanguages: ['en', 'hi'],
@@ -557,51 +633,161 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             'Create your profile with the classic Netflix avatar.',
             style: TextStyle(color: Colors.white70, fontSize: 13),
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: 20),
 
-          // Netflix classic smiley avatar
-          ProfileAvatarTile(
-            name: _nameController.text.trim().isEmpty ? 'Explorer' : _nameController.text.trim(),
-            gradientColors: gradient,
-            size: 96,
-            isKids: _isKids,
-          ),
-          const SizedBox(height: 18),
-
-          // Avatar Color Palette Selector
-          Row(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: List.generate(ProfileProvider.avatarGradients.length, (idx) {
-              final isSelected = idx == _selectedColorIndex;
-              final colors = ProfileProvider.avatarGradients[idx];
-
-              return GestureDetector(
-                onTap: () => setState(() => _selectedColorIndex = idx),
-                child: Container(
-                  margin: const EdgeInsets.symmetric(horizontal: 5),
-                  width: 32,
-                  height: 32,
+          // Netflix Official Avatar Live Preview
+          GestureDetector(
+            onTap: () async {
+              final fakeProfile = UserProfile(
+                id: 'temp',
+                name: _nameController.text.trim().isEmpty ? 'Explorer' : _nameController.text.trim(),
+                avatar: _selectedAvatarUrl,
+              );
+              final res = await Navigator.push<AvatarItem>(
+                context,
+                MaterialPageRoute(builder: (_) => ChooseIconScreen(profile: fakeProfile)),
+              );
+              if (res != null && res.imageUrl != null) {
+                setState(() => _selectedAvatarUrl = res.imageUrl!);
+              }
+            },
+            child: Stack(
+              clipBehavior: Clip.none,
+              children: [
+                Container(
+                  width: 96,
+                  height: 96,
                   decoration: BoxDecoration(
-                    gradient: LinearGradient(colors: colors),
-                    shape: BoxShape.circle,
-                    border: Border.all(
-                      color: isSelected ? Colors.white : Colors.transparent,
-                      width: 2.5,
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(color: AppTheme.primaryRed, width: 2.5),
+                    boxShadow: [
+                      BoxShadow(
+                        color: AppTheme.primaryRed.withValues(alpha: 0.5),
+                        blurRadius: 18,
+                        spreadRadius: 2,
+                      ),
+                    ],
+                  ),
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(11),
+                    child: CachedNetworkImage(
+                      imageUrl: _selectedAvatarUrl,
+                      fit: BoxFit.cover,
+                      placeholder: (c, u) => Container(color: const Color(0xFF1A1A24)),
+                      errorWidget: (c, u, e) => ProfileAvatarTile(
+                        name: _nameController.text,
+                        gradientColors: gradient,
+                        size: 96,
+                      ),
                     ),
-                    boxShadow: isSelected
-                        ? [
-                            BoxShadow(
-                              color: colors.first.withValues(alpha: 0.7),
-                              blurRadius: 8,
-                            ),
-                          ]
-                        : null,
                   ),
                 ),
-              );
-            }),
+                Positioned(
+                  bottom: -2,
+                  right: -2,
+                  child: Container(
+                    padding: const EdgeInsets.all(5),
+                    decoration: const BoxDecoration(
+                      color: Colors.white,
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(Icons.edit, size: 13, color: Colors.black),
+                  ),
+                ),
+              ],
+            ),
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: 20),
+
+          // Header for Avatar Picker + More Icons Button
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Text(
+                'OFFICIAL NETFLIX ICONS',
+                style: TextStyle(
+                  color: Colors.white70,
+                  fontSize: 12,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 1.0,
+                ),
+              ),
+              GestureDetector(
+                onTap: () async {
+                  final fakeProfile = UserProfile(
+                    id: 'temp',
+                    name: _nameController.text,
+                    avatar: _selectedAvatarUrl,
+                  );
+                  final res = await Navigator.push<AvatarItem>(
+                    context,
+                    MaterialPageRoute(builder: (_) => ChooseIconScreen(profile: fakeProfile)),
+                  );
+                  if (res != null && res.imageUrl != null) {
+                    setState(() => _selectedAvatarUrl = res.imageUrl!);
+                  }
+                },
+                child: const Text(
+                  'See all >',
+                  style: TextStyle(
+                    color: AppTheme.primaryRed,
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+
+          // Horizontal list of official Netflix avatars
+          SizedBox(
+            height: 72,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: _netflixPfpOptions.length,
+              separatorBuilder: (_, _) => const SizedBox(width: 10),
+              itemBuilder: (ctx, idx) {
+                final opt = _netflixPfpOptions[idx];
+                final isSelected = _selectedAvatarUrl == opt['url'];
+                return GestureDetector(
+                  onTap: () => setState(() => _selectedAvatarUrl = opt['url']!),
+                  child: Container(
+                    width: 64,
+                    height: 64,
+                    decoration: BoxDecoration(
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                        color: isSelected ? Colors.white : Colors.white24,
+                        width: isSelected ? 2.5 : 1.0,
+                      ),
+                      boxShadow: isSelected
+                          ? [
+                              BoxShadow(
+                                color: Colors.white.withValues(alpha: 0.35),
+                                blurRadius: 8,
+                              )
+                            ]
+                          : null,
+                    ),
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(8),
+                      child: CachedNetworkImage(
+                        imageUrl: opt['url']!,
+                        fit: BoxFit.cover,
+                        placeholder: (c, u) => Container(color: const Color(0xFF1E1E24)),
+                        errorWidget: (c, u, e) => Container(
+                          color: const Color(0xFF1E1E24),
+                          child: const Icon(Icons.person, color: Colors.white38),
+                        ),
+                      ),
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+          const SizedBox(height: 20),
 
           // Profile Name input
           Container(

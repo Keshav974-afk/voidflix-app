@@ -6,6 +6,7 @@ import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
 import '../core/constants/theme_constants.dart';
 import '../core/network/api_service.dart';
+import '../core/services/youtube_service.dart';
 import '../models/media_item.dart';
 import '../providers/media_provider.dart';
 import '../providers/watchlist_provider.dart';
@@ -155,10 +156,13 @@ class _ClipPlayerTileState extends State<ClipPlayerTile> {
     if (controller.platform is AndroidWebViewController) {
       final android = controller.platform as AndroidWebViewController;
       android.setMediaPlaybackRequiresUserGesture(false);
+      android.setMixedContentMode(MixedContentMode.alwaysAllow);
+      android.setAllowContentAccess(true);
+      android.setAllowFileAccess(true);
     }
 
-    final trailerUrl = 'https://www.youtube.com/embed/$key?autoplay=1&mute=${widget.isMuted ? 1 : 0}&controls=1&playsinline=1&rel=0&modestbranding=1&enablejsapi=1&origin=https://www.youtube.com';
-    controller.loadRequest(Uri.parse(trailerUrl));
+    final html = YoutubeService.buildTrailerEmbedHtml(key, isMuted: widget.isMuted);
+    controller.loadHtmlString(html, baseUrl: 'https://voidflix.org');
 
     if (mounted) {
       setState(() => _webController = controller);

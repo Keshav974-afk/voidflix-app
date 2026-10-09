@@ -6,6 +6,7 @@ import 'package:video_player/video_player.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
 
 import 'dart:io';
 
@@ -127,6 +128,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
     ]);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
 
+    // Keep screen awake while watching video
+    WakelockPlus.enable();
+
     _loadMedia();
     _recordWatchProgress();
 
@@ -145,6 +149,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _doubleTapTimer?.cancel();
     _autoplayTimer?.cancel();
     _disposeVideoController();
+
+    // Release screen wakelock
+    WakelockPlus.disable();
 
     // Restore portrait orientation and standard edge-to-edge UI
     SystemChrome.setPreferredOrientations([
@@ -386,6 +393,17 @@ class _PlayerScreenState extends State<PlayerScreen> {
     if (controller == null || !mounted) return;
 
     final val = controller.value;
+    if (val.hasError) {
+      debugPrint('Native playback error: ${val.errorDescription}');
+      if (_selectedStreamIndex + 1 < _directStreams.length) {
+        _selectedStreamIndex++;
+        _initNativePlayer(_directStreams[_selectedStreamIndex], startPosition: _currentPosition, autoPlay: true);
+      } else {
+        _switchToEmbedFallback();
+      }
+      return;
+    }
+
     if (!_isDraggingSeekbar) {
       setState(() {
         _currentPosition = val.position;
@@ -450,6 +468,16 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   void _initWebView() {
     final url = _buildCurrentEmbedUrl();
+
+    // Ensure webview loading screen dismisses promptly within 4 seconds
+    Timer(const Duration(seconds: 4), () {
+      if (mounted && _isWebViewLoading) {
+        setState(() {
+          _isLoading = false;
+          _isWebViewLoading = false;
+        });
+      }
+    });
 
     final controller = WebViewController()
       ..setJavaScriptMode(JavaScriptMode.unrestricted)
@@ -700,6 +728,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _cancelAutoplayTimer();
     _hideControlsTimer?.cancel();
     _disposeVideoController();
+    WakelockPlus.disable();
 
     // Cleanly restore portrait orientation
     await SystemChrome.setPreferredOrientations([
@@ -1412,29 +1441,51 @@ class _PlayerScreenState extends State<PlayerScreen> {
                           style: TextStyle(color: AppTheme.primaryRed, fontSize: 11, fontWeight: FontWeight.bold),
                         ),
                       ),
-                      ...List.generate(_directStreams.length, (idx) {
-                        final s = _directStreams[idx];
-                        final isSel = _isNativeMode && idx == _selectedStreamIndex;
-                        return ListTile(
+                      if (_directStreams.isNotEmpty)
+                        ...List.generate(_directStreams.length, (idx) {
+                          final s = _directStreams[idx];
+                          final isSel = _isNativeMode && idx == _selectedStreamIndex;
+                          return ListTile(
+                            dense: true,
+                            leading: Icon(
+                              isSel ? Icons.radio_button_checked : Icons.radio_button_off,
+                              color: isSel ? AppTheme.primaryRed : Colors.white54,
+                            ),
+                            title: Text(
+                              '${s.sourceName} • ${s.language}',
+                              style: TextStyle(
+                                color: isSel ? Colors.white : Colors.white70,
+                                fontWeight: isSel ? FontWeight.bold : FontWeight.normal,
+                              ),
+                            ),
+                            subtitle: Text('Direct ${s.type.toUpperCase()} stream', style: const TextStyle(fontSize: 11, color: Colors.white38)),
+                            onTap: () {
+                              Navigator.pop(ctx);
+                              _selectAudioSource(idx);
+                            },
+                          );
+                        })
+                      else
+                        ListTile(
                           dense: true,
                           leading: Icon(
-                            isSel ? Icons.radio_button_checked : Icons.radio_button_off,
-                            color: isSel ? AppTheme.primaryRed : Colors.white54,
+                            _isNativeMode ? Icons.radio_button_checked : Icons.radio_button_off,
+                            color: _isNativeMode ? AppTheme.primaryRed : Colors.white54,
                           ),
-                          title: Text(
-                            '${s.sourceName} • ${s.language}',
-                            style: TextStyle(
-                              color: isSel ? Colors.white : Colors.white70,
-                              fontWeight: isSel ? FontWeight.bold : FontWeight.normal,
-                            ),
+                          title: const Text(
+                            'VoidDirect (Try Native Stream)',
+                            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
                           ),
-                          subtitle: Text('Direct ${s.type.toUpperCase()} stream', style: const TextStyle(fontSize: 11, color: Colors.white38)),
+                          subtitle: const Text('Attempt multi-source direct extraction', style: TextStyle(fontSize: 11, color: Colors.white38)),
                           onTap: () {
                             Navigator.pop(ctx);
-                            _selectAudioSource(idx);
+                            setState(() {
+                              _selectedServerIndex = 0;
+                              _isNativeMode = true;
+                            });
+                            _loadDirectStream();
                           },
-                        );
-                      }),
+                        ),
                       const Divider(color: Colors.white12),
                       // Embed Fallbacks
                       const Padding(
@@ -1727,35 +1778,37 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
               // ---------------------------------------------------------------
               // Layer 3: Gesture Detectors (Tap, Double Tap, Vertical Drag Brightness)
+              // Only active in Native Mode so WebView receives direct touches in Web Mode
               // ---------------------------------------------------------------
-              Positioned.fill(
-                child: GestureDetector(
-                  behavior: HitTestBehavior.translucent,
-                  onTap: _toggleControls,
-                  onVerticalDragUpdate: (details) {
-                    final screenWidth = MediaQuery.of(context).size.width;
-                    if (details.globalPosition.dx < screenWidth * 0.3) {
-                      _adjustBrightness(-details.primaryDelta! / 250);
-                    }
-                  },
-                  onDoubleTapDown: (details) {
-                    if (_isLocked) return;
-                    final width = MediaQuery.of(context).size.width;
-                    if (details.localPosition.dx < width / 2) {
-                      _seekRelative(-10);
-                    } else {
-                      _seekRelative(10);
-                    }
-                  },
+              if (_isNativeMode)
+                Positioned.fill(
+                  child: GestureDetector(
+                    behavior: HitTestBehavior.translucent,
+                    onTap: _toggleControls,
+                    onVerticalDragUpdate: (details) {
+                      final screenWidth = MediaQuery.of(context).size.width;
+                      if (details.globalPosition.dx < screenWidth * 0.3) {
+                        _adjustBrightness(-details.primaryDelta! / 250);
+                      }
+                    },
+                    onDoubleTapDown: (details) {
+                      if (_isLocked) return;
+                      final width = MediaQuery.of(context).size.width;
+                      if (details.localPosition.dx < width / 2) {
+                        _seekRelative(-10);
+                      } else {
+                        _seekRelative(10);
+                      }
+                    },
+                  ),
                 ),
-              ),
 
               // ---------------------------------------------------------------
               // Layer 4: Loading & Buffering Overlays
               // ---------------------------------------------------------------
               if (_isLoading)
                 Container(
-                  color: Colors.black,
+                  color: _isNativeMode ? Colors.black : Colors.black87,
                   child: Center(
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
@@ -1765,7 +1818,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                         Text(
                           _isExtracting
                               ? 'Extracting multi-audio direct stream...'
-                              : 'Connecting to stream...',
+                              : (_isNativeMode ? 'Connecting to stream...' : 'Loading web player...'),
                           style: const TextStyle(color: Colors.white70, fontSize: 13),
                         ),
                         const SizedBox(height: 14),
@@ -1784,7 +1837,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                   ),
                 ),
 
-              if (!_isLoading && _isBuffering)
+              if (!_isLoading && _isBuffering && _isNativeMode)
                 const Center(
                   child: CircularProgressIndicator(color: AppTheme.primaryRed),
                 ),
@@ -1792,28 +1845,30 @@ class _PlayerScreenState extends State<PlayerScreen> {
               // ---------------------------------------------------------------
               // Layer 5: Live Subtitles Display (Netflix Typography)
               // ---------------------------------------------------------------
-              if (_activeCueText != null && _activeCueText!.isNotEmpty)
+              if (_isNativeMode && _activeCueText != null && _activeCueText!.isNotEmpty)
                 Positioned(
                   left: 32,
                   right: 32,
                   bottom: _showControls ? 88 : 28,
-                  child: Center(
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-                      decoration: BoxDecoration(
-                        color: Colors.black.withValues(alpha: 0.78),
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: Text(
-                        _activeCueText!,
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 16,
-                          fontWeight: FontWeight.w600,
-                          shadows: [
-                            Shadow(color: Colors.black, blurRadius: 6),
-                          ],
+                  child: IgnorePointer(
+                    child: Center(
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.78),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          _activeCueText!,
+                          textAlign: TextAlign.center,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                            shadows: [
+                              Shadow(color: Colors.black, blurRadius: 6),
+                            ],
+                          ),
                         ),
                       ),
                     ),
@@ -1823,7 +1878,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
               // ---------------------------------------------------------------
               // Layer 6: Double Tap Seek Feedback Ripple
               // ---------------------------------------------------------------
-              if (_doubleTapSeekSeconds != null)
+              if (_isNativeMode && _doubleTapSeekSeconds != null)
                 Positioned.fill(
                   child: IgnorePointer(
                     child: Align(
@@ -1858,18 +1913,20 @@ class _PlayerScreenState extends State<PlayerScreen> {
               // ---------------------------------------------------------------
               // Layer 7: Brightness HUD
               // ---------------------------------------------------------------
-              if (_showBrightnessHud)
+              if (_isNativeMode && _showBrightnessHud)
                 Positioned(
                   left: 36,
                   top: 0,
                   bottom: 0,
-                  child: _buildBrightnessHud(),
+                  child: IgnorePointer(
+                    child: _buildBrightnessHud(),
+                  ),
                 ),
 
               // ---------------------------------------------------------------
               // Layer 8: Screen Locked Pill
               // ---------------------------------------------------------------
-              if (_isLocked && _showLockPill)
+              if (_isNativeMode && _isLocked && _showLockPill)
                 Center(
                   child: InkWell(
                     onTap: _toggleScreenLock,
@@ -1903,316 +1960,489 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 ),
 
               // ---------------------------------------------------------------
-              // Layer 9: Netflix Player Chrome Controls
+              // Layer 9: Player Chrome Controls
               // ---------------------------------------------------------------
-              if (_showControls && !_isLocked)
-                Positioned.fill(
-                  child: Container(
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [
-                          Colors.black.withValues(alpha: 0.85),
-                          Colors.transparent,
-                          Colors.black.withValues(alpha: 0.92),
-                        ],
-                        stops: const [0.0, 0.42, 1.0],
-                      ),
-                    ),
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        // --- Top Bar ---
-                        Padding(
-                          padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
-                          child: Row(
-                            children: [
-                              IconButton(
-                                icon: const Icon(Icons.arrow_back_rounded, color: Colors.white, size: 26),
-                                onPressed: _handleSmoothBack,
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  mainAxisSize: MainAxisSize.min,
+              if (_isNativeMode) ...[
+                // --- NATIVE MODE: Netflix Player Controls ---
+                if (_showControls && !_isLocked)
+                  Positioned.fill(
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: _toggleControls,
+                      onVerticalDragUpdate: (details) {
+                        final screenWidth = MediaQuery.of(context).size.width;
+                        if (details.globalPosition.dx < screenWidth * 0.3) {
+                          _adjustBrightness(-details.primaryDelta! / 250);
+                        }
+                      },
+                      child: Container(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topCenter,
+                            end: Alignment.bottomCenter,
+                            colors: [
+                              Colors.black.withValues(alpha: 0.85),
+                              Colors.transparent,
+                              Colors.black.withValues(alpha: 0.92),
+                            ],
+                            stops: const [0.0, 0.42, 1.0],
+                          ),
+                        ),
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            // --- Top Bar (absorbs internal taps) ---
+                            GestureDetector(
+                              behavior: HitTestBehavior.opaque,
+                              onTap: () {},
+                              child: Padding(
+                                padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+                                child: Row(
                                   children: [
-                                    Text(
-                                      widget.mediaTitle,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 16,
-                                        fontWeight: FontWeight.bold,
-                                      ),
+                                    IconButton(
+                                      icon: const Icon(Icons.arrow_back_rounded, color: Colors.white, size: 26),
+                                      onPressed: _handleSmoothBack,
                                     ),
-                                    Row(
-                                      children: [
-                                        if (widget.mediaType == 'tv')
+                                    const SizedBox(width: 8),
+                                    Expanded(
+                                      child: Column(
+                                        crossAxisAlignment: CrossAxisAlignment.start,
+                                        mainAxisSize: MainAxisSize.min,
+                                        children: [
                                           Text(
-                                            'Season $_currentSeason • Episode $_currentEpisode  •  ',
-                                            style: const TextStyle(color: Colors.white70, fontSize: 12),
-                                          ),
-                                        Container(
-                                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
-                                          decoration: BoxDecoration(
-                                            color: AppTheme.primaryRed.withValues(alpha: 0.2),
-                                            borderRadius: BorderRadius.circular(4),
-                                          ),
-                                          child: Text(
-                                            activeServerLabel,
+                                            widget.mediaTitle,
+                                            maxLines: 1,
+                                            overflow: TextOverflow.ellipsis,
                                             style: const TextStyle(
-                                              color: AppTheme.primaryRed,
-                                              fontSize: 10,
+                                              color: Colors.white,
+                                              fontSize: 16,
                                               fontWeight: FontWeight.bold,
                                             ),
                                           ),
-                                        ),
-                                      ],
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              // Lock Screen button
-                              IconButton(
-                                icon: const Icon(Icons.lock_outline_rounded, color: Colors.white),
-                                tooltip: 'Lock Screen',
-                                onPressed: _toggleScreenLock,
-                              ),
-                              // Reload stream button
-                              IconButton(
-                                icon: const Icon(Icons.refresh_rounded, color: Colors.white),
-                                tooltip: 'Reload',
-                                onPressed: () {
-                                  _startHideControlsTimer();
-                                  _loadMedia();
-                                },
-                              ),
-                            ],
-                          ),
-                        ),
-
-                        // --- Center Controls (10s Rewind, Big Play/Pause, 10s Forward) ---
-                        if (_isNativeMode)
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.center,
-                            children: [
-                              IconButton(
-                                iconSize: 46,
-                                icon: const Icon(Icons.replay_10_rounded, color: Colors.white),
-                                tooltip: 'Rewind 10s',
-                                onPressed: () => _seekRelative(-10),
-                              ),
-                              const SizedBox(width: 36),
-                              Material(
-                                color: Colors.transparent,
-                                shape: const CircleBorder(),
-                                child: InkWell(
-                                  onTap: _togglePlayPause,
-                                  customBorder: const CircleBorder(),
-                                  splashColor: Colors.white24,
-                                  highlightColor: Colors.white10,
-                                  child: Container(
-                                    width: 74,
-                                    height: 74,
-                                    decoration: BoxDecoration(
-                                      shape: BoxShape.circle,
-                                      color: Colors.black.withValues(alpha: 0.52),
-                                      border: Border.all(
-                                        color: Colors.white.withValues(alpha: 0.25),
-                                        width: 1.5,
-                                      ),
-                                      boxShadow: [
-                                        BoxShadow(
-                                          color: Colors.black.withValues(alpha: 0.45),
-                                          blurRadius: 20,
-                                          spreadRadius: 2,
-                                        ),
-                                      ],
-                                    ),
-                                    child: Center(
-                                      child: Icon(
-                                        _isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
-                                        size: 46,
-                                        color: Colors.white,
+                                          Row(
+                                            children: [
+                                              if (widget.mediaType == 'tv')
+                                                Text(
+                                                  'Season $_currentSeason • Episode $_currentEpisode  •  ',
+                                                  style: const TextStyle(color: Colors.white70, fontSize: 12),
+                                                ),
+                                              Container(
+                                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+                                                decoration: BoxDecoration(
+                                                  color: AppTheme.primaryRed.withValues(alpha: 0.2),
+                                                  borderRadius: BorderRadius.circular(4),
+                                                ),
+                                                child: Text(
+                                                  activeServerLabel,
+                                                  style: const TextStyle(
+                                                    color: AppTheme.primaryRed,
+                                                    fontSize: 10,
+                                                    fontWeight: FontWeight.bold,
+                                                  ),
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ],
                                       ),
                                     ),
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 36),
-                              IconButton(
-                                iconSize: 46,
-                                icon: const Icon(Icons.forward_10_rounded, color: Colors.white),
-                                tooltip: 'Forward 10s',
-                                onPressed: () => _seekRelative(10),
-                              ),
-                            ],
-                          )
-                        else
-                          const SizedBox.shrink(),
-
-                        // --- Bottom Controls (Scrubber + Netflix Action Row) ---
-                        Padding(
-                          padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
-                          child: Column(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              // Timeline Scrubber
-                              if (_isNativeMode && _totalDuration > Duration.zero)
-                                Row(
-                                  children: [
+                                    // Lock Screen button
                                     IconButton(
-                                      icon: Icon(
-                                        _isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
-                                        color: Colors.white,
-                                        size: 22,
-                                      ),
-                                      padding: EdgeInsets.zero,
-                                      constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
-                                      tooltip: _isPlaying ? 'Pause' : 'Play',
-                                      onPressed: _togglePlayPause,
+                                      icon: const Icon(Icons.lock_outline_rounded, color: Colors.white),
+                                      tooltip: 'Lock Screen',
+                                      onPressed: _toggleScreenLock,
                                     ),
-                                    const SizedBox(width: 6),
-                                    Text(
-                                      _formatDuration(_isDraggingSeekbar
-                                          ? Duration(seconds: _dragPositionSec.toInt())
-                                          : _currentPosition),
-                                      style: const TextStyle(
-                                        color: Colors.white70,
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.bold,
-                                      ),
-                                    ),
-                                    Expanded(
-                                      child: SliderTheme(
-                                        data: SliderTheme.of(context).copyWith(
-                                          activeTrackColor: AppTheme.primaryRed,
-                                          inactiveTrackColor: Colors.white24,
-                                          thumbColor: AppTheme.primaryRed,
-                                          trackHeight: 3.5,
-                                          thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
-                                        ),
-                                        child: Slider(
-                                          value: (_isDraggingSeekbar
-                                                  ? _dragPositionSec
-                                                  : _currentPosition.inSeconds.toDouble())
-                                              .clamp(0.0, _totalDuration.inSeconds.toDouble()),
-                                          min: 0.0,
-                                          max: _totalDuration.inSeconds.toDouble(),
-                                          onChangeStart: (val) {
-                                            _hideControlsTimer?.cancel();
-                                            setState(() {
-                                              _isDraggingSeekbar = true;
-                                              _dragPositionSec = val;
-                                            });
-                                          },
-                                          onChanged: (val) {
-                                            setState(() => _dragPositionSec = val);
-                                          },
-                                          onChangeEnd: (val) {
-                                            setState(() => _isDraggingSeekbar = false);
-                                            _videoPlayerController?.seekTo(Duration(seconds: val.toInt()));
-                                            _startHideControlsTimer();
-                                          },
-                                        ),
-                                      ),
-                                    ),
-                                    Text(
-                                      _formatRemaining(
-                                        _isDraggingSeekbar
-                                            ? Duration(seconds: _dragPositionSec.toInt())
-                                            : _currentPosition,
-                                        _totalDuration,
-                                      ),
-                                      style: const TextStyle(
-                                        color: Colors.white70,
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.bold,
-                                      ),
+                                    // Reload stream button
+                                    IconButton(
+                                      icon: const Icon(Icons.refresh_rounded, color: Colors.white),
+                                      tooltip: 'Reload',
+                                      onPressed: () {
+                                        _startHideControlsTimer();
+                                        _loadMedia();
+                                      },
                                     ),
                                   ],
                                 ),
-
-                              // Netflix Bottom Actions Row
-                              Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
-                                children: [
-                                  // Lock
-                                  _NetflixBarButton(
-                                    icon: Icons.lock_outline_rounded,
-                                    label: 'Lock',
-                                    onTap: _toggleScreenLock,
-                                  ),
-
-                                  // Speed
-                                  _NetflixBarButton(
-                                    icon: Icons.speed_rounded,
-                                    label: 'Speed (${_playbackSpeed == 1.0 ? '1x' : '${_playbackSpeed}x'})',
-                                    onTap: _openSpeedSheet,
-                                  ),
-
-                                  // Quality
-                                  if (_availableQualities.isNotEmpty)
-                                    _NetflixBarButton(
-                                      icon: Icons.tune_rounded,
-                                      label: 'Quality (${_availableQualities[_selectedQualityIndex].label})',
-                                      onTap: _openQualitySheet,
-                                    ),
-
-                                  // Audio & Subtitles
-                                  _NetflixBarButton(
-                                    icon: Icons.subtitles_rounded,
-                                    label: 'Audio & Subtitles',
-                                    onTap: _openAudioAndSubtitlesSheet,
-                                  ),
-
-                                  // Episodes (TV)
-                                  if (widget.mediaType == 'tv')
-                                    _NetflixBarButton(
-                                      icon: Icons.grid_view_rounded,
-                                      label: 'Episodes',
-                                      onTap: _openEpisodesSheet,
-                                    ),
-
-                                  // Prev Ep (TV)
-                                  if (widget.mediaType == 'tv' && _currentEpisode > 1)
-                                    _NetflixBarButton(
-                                      icon: Icons.skip_previous_rounded,
-                                      label: 'Prev Ep.',
-                                      onTap: _prevEpisode,
-                                    ),
-
-                                  // Next Ep (TV)
-                                  if (widget.mediaType == 'tv')
-                                    _NetflixBarButton(
-                                      icon: Icons.skip_next_rounded,
-                                      label: 'Next Ep.',
-                                      onTap: _nextEpisode,
-                                    ),
-
-                                  // Server
-                                  _NetflixBarButton(
-                                    icon: Icons.dns_rounded,
-                                    label: 'Server',
-                                    onTap: _openServerPicker,
-                                  ),
-                                ],
                               ),
-                            ],
-                          ),
+                            ),
+
+                            // --- Center Controls (10s Rewind, Big Play/Pause, 10s Forward) ---
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                IconButton(
+                                  iconSize: 46,
+                                  icon: const Icon(Icons.replay_10_rounded, color: Colors.white),
+                                  tooltip: 'Rewind 10s',
+                                  onPressed: () => _seekRelative(-10),
+                                ),
+                                const SizedBox(width: 36),
+                                Material(
+                                  color: Colors.transparent,
+                                  shape: const CircleBorder(),
+                                  child: InkWell(
+                                    onTap: _togglePlayPause,
+                                    customBorder: const CircleBorder(),
+                                    splashColor: Colors.white24,
+                                    highlightColor: Colors.white10,
+                                    child: Container(
+                                      width: 74,
+                                      height: 74,
+                                      decoration: BoxDecoration(
+                                        shape: BoxShape.circle,
+                                        color: Colors.black.withValues(alpha: 0.52),
+                                        border: Border.all(
+                                          color: Colors.white.withValues(alpha: 0.25),
+                                          width: 1.5,
+                                        ),
+                                        boxShadow: [
+                                          BoxShadow(
+                                            color: Colors.black.withValues(alpha: 0.45),
+                                            blurRadius: 20,
+                                            spreadRadius: 2,
+                                          ),
+                                        ],
+                                      ),
+                                      child: Center(
+                                        child: Icon(
+                                          _isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                                          size: 46,
+                                          color: Colors.white,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                                const SizedBox(width: 36),
+                                IconButton(
+                                  iconSize: 46,
+                                  icon: const Icon(Icons.forward_10_rounded, color: Colors.white),
+                                  tooltip: 'Forward 10s',
+                                  onPressed: () => _seekRelative(10),
+                                ),
+                              ],
+                            ),
+
+                            // --- Bottom Controls (absorbs internal taps) ---
+                            GestureDetector(
+                              behavior: HitTestBehavior.opaque,
+                              onTap: () {},
+                              child: Padding(
+                                padding: const EdgeInsets.fromLTRB(16, 0, 16, 10),
+                                child: Column(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    // Timeline Scrubber
+                                    if (_totalDuration > Duration.zero)
+                                      Row(
+                                        children: [
+                                          IconButton(
+                                            icon: Icon(
+                                              _isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                                              color: Colors.white,
+                                              size: 22,
+                                            ),
+                                            padding: EdgeInsets.zero,
+                                            constraints: const BoxConstraints(minWidth: 30, minHeight: 30),
+                                            tooltip: _isPlaying ? 'Pause' : 'Play',
+                                            onPressed: _togglePlayPause,
+                                          ),
+                                          const SizedBox(width: 6),
+                                          Text(
+                                            _formatDuration(_isDraggingSeekbar
+                                                ? Duration(seconds: _dragPositionSec.toInt())
+                                                : _currentPosition),
+                                            style: const TextStyle(
+                                              color: Colors.white70,
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                          ),
+                                          Expanded(
+                                            child: SliderTheme(
+                                              data: SliderTheme.of(context).copyWith(
+                                                activeTrackColor: AppTheme.primaryRed,
+                                                inactiveTrackColor: Colors.white24,
+                                                thumbColor: AppTheme.primaryRed,
+                                                trackHeight: 3.5,
+                                                thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
+                                              ),
+                                              child: Slider(
+                                                value: (_isDraggingSeekbar
+                                                        ? _dragPositionSec
+                                                        : _currentPosition.inSeconds.toDouble())
+                                                    .clamp(0.0, _totalDuration.inSeconds.toDouble()),
+                                                min: 0.0,
+                                                max: _totalDuration.inSeconds.toDouble(),
+                                                onChangeStart: (val) {
+                                                  _hideControlsTimer?.cancel();
+                                                  setState(() {
+                                                    _isDraggingSeekbar = true;
+                                                    _dragPositionSec = val;
+                                                  });
+                                                },
+                                                onChanged: (val) {
+                                                  setState(() => _dragPositionSec = val);
+                                                },
+                                                onChangeEnd: (val) {
+                                                  setState(() => _isDraggingSeekbar = false);
+                                                  _videoPlayerController?.seekTo(Duration(seconds: val.toInt()));
+                                                  _startHideControlsTimer();
+                                                },
+                                              ),
+                                            ),
+                                          ),
+                                          Text(
+                                            _formatRemaining(
+                                              _isDraggingSeekbar
+                                                  ? Duration(seconds: _dragPositionSec.toInt())
+                                                  : _currentPosition,
+                                              _totalDuration,
+                                            ),
+                                            style: const TextStyle(
+                                              color: Colors.white70,
+                                              fontSize: 12,
+                                              fontWeight: FontWeight.bold,
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+
+                                    // Netflix Bottom Actions Row
+                                    Row(
+                                      mainAxisAlignment: MainAxisAlignment.spaceEvenly,
+                                      children: [
+                                        // Lock
+                                        _NetflixBarButton(
+                                          icon: Icons.lock_outline_rounded,
+                                          label: 'Lock',
+                                          onTap: _toggleScreenLock,
+                                        ),
+
+                                        // Speed
+                                        _NetflixBarButton(
+                                          icon: Icons.speed_rounded,
+                                          label: 'Speed (${_playbackSpeed == 1.0 ? '1x' : '${_playbackSpeed}x'})',
+                                          onTap: _openSpeedSheet,
+                                        ),
+
+                                        // Quality
+                                        if (_availableQualities.isNotEmpty)
+                                          _NetflixBarButton(
+                                            icon: Icons.tune_rounded,
+                                            label: 'Quality (${_availableQualities[_selectedQualityIndex].label})',
+                                            onTap: _openQualitySheet,
+                                          ),
+
+                                        // Audio & Subtitles
+                                        _NetflixBarButton(
+                                          icon: Icons.subtitles_rounded,
+                                          label: 'Audio & Subtitles',
+                                          onTap: _openAudioAndSubtitlesSheet,
+                                        ),
+
+                                        // Episodes (TV)
+                                        if (widget.mediaType == 'tv')
+                                          _NetflixBarButton(
+                                            icon: Icons.grid_view_rounded,
+                                            label: 'Episodes',
+                                            onTap: _openEpisodesSheet,
+                                          ),
+
+                                        // Prev Ep (TV)
+                                        if (widget.mediaType == 'tv' && _currentEpisode > 1)
+                                          _NetflixBarButton(
+                                            icon: Icons.skip_previous_rounded,
+                                            label: 'Prev Ep.',
+                                            onTap: _prevEpisode,
+                                          ),
+
+                                        // Next Ep (TV)
+                                        if (widget.mediaType == 'tv')
+                                          _NetflixBarButton(
+                                            icon: Icons.skip_next_rounded,
+                                            label: 'Next Ep.',
+                                            onTap: _nextEpisode,
+                                          ),
+
+                                        // Server
+                                        _NetflixBarButton(
+                                          icon: Icons.dns_rounded,
+                                          label: 'Server',
+                                          onTap: _openServerPicker,
+                                        ),
+                                      ],
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ],
                         ),
-                      ],
+                      ),
                     ),
                   ),
-                ),
+              ] else ...[
+                // --- WEB EMBED MODE: Completely Unobstructed Direct Web Playback ---
+                // (Zero center overlay so web play button is 100% clickable)
+                if (_showControls)
+                  Positioned(
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    child: Container(
+                      padding: const EdgeInsets.fromLTRB(16, 10, 16, 12),
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [
+                            Colors.black.withValues(alpha: 0.9),
+                            Colors.black.withValues(alpha: 0.0),
+                          ],
+                        ),
+                      ),
+                      child: Row(
+                        children: [
+                          IconButton(
+                            icon: const Icon(Icons.arrow_back_rounded, color: Colors.white, size: 26),
+                            onPressed: _handleSmoothBack,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Text(
+                                  widget.mediaTitle,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 16,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                Row(
+                                  children: [
+                                    if (widget.mediaType == 'tv')
+                                      Text(
+                                        'Season $_currentSeason • Episode $_currentEpisode • ',
+                                        style: const TextStyle(color: Colors.white70, fontSize: 12),
+                                      ),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                      decoration: BoxDecoration(
+                                        color: Colors.blueAccent.withValues(alpha: 0.25),
+                                        borderRadius: BorderRadius.circular(4),
+                                        border: Border.all(color: Colors.blueAccent.withValues(alpha: 0.4), width: 0.8),
+                                      ),
+                                      child: Text(
+                                        'Web Player: ${currentServer.name}',
+                                        style: const TextStyle(
+                                          color: Colors.lightBlueAccent,
+                                          fontSize: 11,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                          if (widget.mediaType == 'tv')
+                            IconButton(
+                              icon: const Icon(Icons.grid_view_rounded, color: Colors.white),
+                              tooltip: 'Episodes',
+                              onPressed: _openEpisodesSheet,
+                            ),
+                          ElevatedButton.icon(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: AppTheme.primaryRed,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                            ),
+                            icon: const Icon(Icons.dns_rounded, size: 15),
+                            label: const Text('Change Server', style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold)),
+                            onPressed: _openServerPicker,
+                          ),
+                          const SizedBox(width: 6),
+                          IconButton(
+                            icon: const Icon(Icons.refresh_rounded, color: Colors.white),
+                            tooltip: 'Reload',
+                            onPressed: () {
+                              _startHideControlsTimer();
+                              _webViewController?.reload();
+                            },
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.close_rounded, color: Colors.white70),
+                            tooltip: 'Hide Bar',
+                            onPressed: () {
+                              setState(() => _showControls = false);
+                            },
+                          ),
+                        ],
+                      ),
+                    ),
+                  )
+                else
+                  Positioned(
+                    top: 12,
+                    left: 12,
+                    child: Container(
+                      decoration: BoxDecoration(
+                        color: Colors.black.withValues(alpha: 0.65),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: Colors.white24, width: 0.8),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.5),
+                            blurRadius: 8,
+                          ),
+                        ],
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          IconButton(
+                            icon: const Icon(Icons.arrow_back_rounded, color: Colors.white, size: 20),
+                            constraints: const BoxConstraints(minWidth: 36, minHeight: 36),
+                            padding: const EdgeInsets.all(8),
+                            tooltip: 'Back',
+                            onPressed: _handleSmoothBack,
+                          ),
+                          InkWell(
+                            onTap: () {
+                              setState(() => _showControls = true);
+                              _startHideControlsTimer();
+                            },
+                            borderRadius: const BorderRadius.horizontal(right: Radius.circular(20)),
+                            child: const Padding(
+                              padding: EdgeInsets.fromLTRB(4, 8, 12, 8),
+                              child: Row(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Icon(Icons.tune_rounded, color: Colors.white70, size: 16),
+                                  SizedBox(width: 5),
+                                  Text('Controls', style: TextStyle(color: Colors.white70, fontSize: 11, fontWeight: FontWeight.bold)),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+              ],
 
               // ---------------------------------------------------------------
               // Layer 10: Autoplay Next Countdown Card
               // ---------------------------------------------------------------
-              if (_showAutoplayCard)
+              if (_isNativeMode && _showAutoplayCard)
                 Positioned(
                   bottom: 24,
                   right: 20,

@@ -1,9 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:cached_network_image/cached_network_image.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../core/constants/theme_constants.dart';
-import '../providers/media_provider.dart';
 import '../providers/profile_provider.dart';
 import '../widgets/profile_avatar.dart';
+import 'choose_icon_screen.dart';
+import 'subtitle_appearance_screen.dart';
 
 class EditProfileScreen extends StatefulWidget {
   final UserProfile profile;
@@ -17,25 +20,47 @@ class EditProfileScreen extends StatefulWidget {
 class _EditProfileScreenState extends State<EditProfileScreen> {
   late TextEditingController _nameController;
   late int _selectedColorIndex;
+  late String _avatar;
   late bool _isKids;
   String? _pin;
+  String _gameHandle = '';
+  String _maturityRating = 'No restrictions';
+  String _displayLanguage = 'English';
+  String _audioLanguages = 'English, Original';
   bool _autoplayNext = true;
-  late Set<String> _preferredLanguages;
-  late Set<int> _preferredGenres;
-  late Set<String> _favoriteActors;
-  late List<String> _favoriteTitles;
+  bool _autoplayPreviews = true;
 
   @override
   void initState() {
     super.initState();
     _nameController = TextEditingController(text: widget.profile.name);
     _selectedColorIndex = widget.profile.colorIndex;
+    _avatar = widget.profile.avatar;
     _isKids = widget.profile.isKids;
     _pin = widget.profile.pin;
-    _preferredLanguages = Set.from(widget.profile.preferredLanguages);
-    _preferredGenres = Set.from(widget.profile.preferredGenres);
-    _favoriteActors = Set.from(widget.profile.favoriteActors);
-    _favoriteTitles = List.from(widget.profile.favoriteTitles);
+    _loadExtraSettings();
+  }
+
+  Future<void> _loadExtraSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    setState(() {
+      _gameHandle = prefs.getString('profile_${widget.profile.id}_game_handle') ?? '';
+      _maturityRating = prefs.getString('profile_${widget.profile.id}_maturity') ?? (_isKids ? 'Kids (TV-Y, TV-G)' : 'No restrictions');
+      _displayLanguage = prefs.getString('profile_${widget.profile.id}_lang') ?? 'English';
+      _audioLanguages = prefs.getString('profile_${widget.profile.id}_audio_lang') ?? 'English, Original';
+      _autoplayNext = prefs.getBool('profile_${widget.profile.id}_autoplay_next') ?? true;
+      _autoplayPreviews = prefs.getBool('profile_${widget.profile.id}_autoplay_previews') ?? true;
+    });
+  }
+
+  Future<void> _saveExtraSettings() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setString('profile_${widget.profile.id}_game_handle', _gameHandle);
+    await prefs.setString('profile_${widget.profile.id}_maturity', _maturityRating);
+    await prefs.setString('profile_${widget.profile.id}_lang', _displayLanguage);
+    await prefs.setString('profile_${widget.profile.id}_audio_lang', _audioLanguages);
+    await prefs.setBool('profile_${widget.profile.id}_autoplay_next', _autoplayNext);
+    await prefs.setBool('profile_${widget.profile.id}_autoplay_previews', _autoplayPreviews);
   }
 
   @override
@@ -44,7 +69,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     super.dispose();
   }
 
-  void _saveProfile() {
+  void _saveProfile() async {
     final name = _nameController.text.trim();
     if (name.isEmpty) return;
 
@@ -53,212 +78,136 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       widget.profile.id,
       name: name,
       colorIndex: _selectedColorIndex,
+      avatar: _avatar,
       isKids: _isKids,
       pin: _pin,
       clearPin: _pin == null || _pin!.isEmpty,
     );
 
-    profileProv.updateProfilePreferences(
-      widget.profile.id,
-      preferredLanguages: _preferredLanguages.toList(),
-      preferredGenres: _preferredGenres.toList(),
-      favoriteActors: _favoriteActors.toList(),
-      favoriteTitles: _favoriteTitles,
-    );
+    await _saveExtraSettings();
 
-    if (profileProv.activeProfile.id == widget.profile.id) {
-      context.read<MediaProvider>().fetchPersonalizedForProfile(
-        profileProv.activeProfile,
-        force: true,
-      );
+    if (mounted) {
+      Navigator.of(context).pop();
     }
-
-    Navigator.of(context).pop();
   }
 
-  void _showEditInterestsDialog() {
-    final availableLanguages = [
-      {'code': 'hi', 'name': 'Hindi & Bollywood', 'badge': '🇮🇳'},
-      {'code': 'en', 'name': 'English & Hollywood', 'badge': '🇺🇸'},
-      {'code': 'ja', 'name': 'Anime & Japanese', 'badge': '🇯🇵'},
-      {'code': 'ko', 'name': 'K-Drama & Korean', 'badge': '🇰🇷'},
-      {'code': 'te', 'name': 'South Indian Cinema', 'badge': '🇮🇳'},
-    ];
+  void _openChooseIcon() async {
+    final selected = await Navigator.of(context).push<AvatarItem>(
+      MaterialPageRoute(
+        builder: (_) => ChooseIconScreen(profile: widget.profile),
+      ),
+    );
 
-    final availableGenres = [
-      {'id': 878, 'name': 'Sci-Fi'},
-      {'id': 28, 'name': 'Action'},
-      {'id': 16, 'name': 'Anime'},
-      {'id': 35, 'name': 'Comedy'},
-      {'id': 27, 'name': 'Horror'},
-      {'id': 53, 'name': 'Thriller'},
-      {'id': 10749, 'name': 'Romance'},
-      {'id': 14, 'name': 'Fantasy'},
-      {'id': 80, 'name': 'Crime'},
-      {'id': 99, 'name': 'Documentaries'},
-    ];
+    if (selected != null && mounted) {
+      setState(() {
+        if (selected.colorIndex != null) {
+          _selectedColorIndex = selected.colorIndex!;
+          _avatar = selected.name;
+        } else if (selected.imageUrl != null) {
+          _avatar = selected.imageUrl!;
+        }
+      });
+    }
+  }
 
-    showModalBottomSheet(
+  void _showGameHandleDialog() {
+    final ctl = TextEditingController(text: _gameHandle);
+    showDialog(
       context: context,
-      isScrollControlled: true,
-      backgroundColor: AppTheme.surfaceVariant,
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(20))),
-      builder: (sheetCtx) {
-        return StatefulBuilder(
-          builder: (ctx, setSheetState) {
-            return SafeArea(
-              child: Padding(
-                padding: const EdgeInsets.all(20),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Center(
-                      child: Container(
-                        width: 40,
-                        height: 4,
-                        decoration: BoxDecoration(color: Colors.white24, borderRadius: BorderRadius.circular(2)),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    const Text(
-                      'Personalized Cinema Preferences',
-                      style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold),
-                    ),
-                    const SizedBox(height: 6),
-                    const Text(
-                      'Adjust your favored languages and genres for customized home feed recommendations:',
-                      style: TextStyle(color: Colors.white60, fontSize: 13),
-                    ),
-                    const SizedBox(height: 16),
-                    const Text('Languages', style: TextStyle(color: Colors.white70, fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 8),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: availableLanguages.map((l) {
-                        final code = l['code'] as String;
-                        final isSel = _preferredLanguages.contains(code);
-                        return FilterChip(
-                          selected: isSel,
-                          backgroundColor: const Color(0xFF161622),
-                          selectedColor: AppTheme.primaryRed,
-                          label: Text('${l['badge']} ${l['name']}', style: const TextStyle(color: Colors.white, fontSize: 12)),
-                          onSelected: (sel) {
-                            setSheetState(() {
-                              setState(() {
-                                if (sel) {
-                                  _preferredLanguages.add(code);
-                                } else {
-                                  _preferredLanguages.remove(code);
-                                }
-                              });
-                            });
-                          },
-                        );
-                      }).toList(),
-                    ),
-                    const SizedBox(height: 16),
-                    const Text('Genres & Movie Types', style: TextStyle(color: Colors.white70, fontWeight: FontWeight.bold)),
-                    const SizedBox(height: 8),
-                    Wrap(
-                      spacing: 8,
-                      runSpacing: 8,
-                      children: availableGenres.map((g) {
-                        final id = g['id'] as int;
-                        final isSel = _preferredGenres.contains(id);
-                        return FilterChip(
-                          selected: isSel,
-                          backgroundColor: const Color(0xFF161622),
-                          selectedColor: AppTheme.primaryRed,
-                          label: Text(g['name'] as String, style: const TextStyle(color: Colors.white, fontSize: 12)),
-                          onSelected: (sel) {
-                            setSheetState(() {
-                              setState(() {
-                                if (sel) {
-                                  _preferredGenres.add(id);
-                                } else {
-                                  _preferredGenres.remove(id);
-                                }
-                              });
-                            });
-                          },
-                        );
-                      }).toList(),
-                    ),
-                    const SizedBox(height: 24),
-                    SizedBox(
-                      width: double.infinity,
-                      child: ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: AppTheme.primaryRed,
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(vertical: 12),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                        ),
-                        onPressed: () => Navigator.pop(sheetCtx),
-                        child: const Text('Done', style: TextStyle(fontWeight: FontWeight.bold)),
-                      ),
-                    ),
-                  ],
-                ),
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1E1E28),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Row(
+          children: [
+            Icon(Icons.sports_esports_rounded, color: AppTheme.primaryRed),
+            SizedBox(width: 10),
+            Text('Game Handle', style: TextStyle(color: Colors.white, fontSize: 18, fontWeight: FontWeight.bold)),
+          ],
+        ),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'Your unique gaming nickname on Voidflix.',
+              style: TextStyle(color: Colors.white70, fontSize: 13),
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: ctl,
+              style: const TextStyle(color: Colors.white),
+              decoration: InputDecoration(
+                hintText: 'e.g. ShadowHunter',
+                hintStyle: const TextStyle(color: Colors.white30),
+                filled: true,
+                fillColor: const Color(0xFF14141E),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
               ),
-            );
-          },
-        );
-      },
+            ),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: const Text('Cancel', style: TextStyle(color: Colors.white60)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryRed),
+            onPressed: () {
+              setState(() => _gameHandle = ctl.text.trim());
+              Navigator.pop(ctx);
+            },
+            child: const Text('Save', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
     );
   }
 
-  void _showColorPicker() {
+  void _showMaturityDialog() {
+    final ratings = [
+      'No restrictions',
+      'Teens (13+)',
+      'Kids (7+)',
+      'Little Kids (All Ages)',
+      'Adults Only (18+)',
+    ];
     showModalBottomSheet(
       context: context,
-      backgroundColor: AppTheme.surfaceVariant,
+      backgroundColor: const Color(0xFF1E1E28),
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
-      builder: (ctx) {
-        return Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const Text(
-                'Choose Avatar Color',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(20, 16, 20, 10),
+              child: Text(
+                'Viewing Restrictions',
+                style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.bold),
               ),
-              const SizedBox(height: 20),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: List.generate(ProfileProvider.avatarGradients.length, (idx) {
-                  final isSelected = idx == _selectedColorIndex;
-                  final colors = ProfileProvider.avatarGradients[idx];
-                  return GestureDetector(
-                    onTap: () {
-                      setState(() => _selectedColorIndex = idx);
-                      Navigator.of(ctx).pop();
-                    },
-                    child: Container(
-                      width: 44,
-                      height: 44,
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(colors: colors),
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(
-                          color: isSelected ? Colors.white : Colors.transparent,
-                          width: 2.5,
-                        ),
-                      ),
-                      child: isSelected ? const Icon(Icons.check, color: Colors.white, size: 22) : null,
-                    ),
-                  );
-                }),
-              ),
-            ],
-          ),
-        );
-      },
+            ),
+            const Divider(color: Colors.white12),
+            ...ratings.map((r) {
+              final isSel = _maturityRating == r;
+              return ListTile(
+                title: Text(r, style: TextStyle(color: isSel ? Colors.white : Colors.white70, fontWeight: isSel ? FontWeight.bold : FontWeight.normal)),
+                trailing: isSel ? const Icon(Icons.check, color: AppTheme.primaryRed) : null,
+                onTap: () {
+                  setState(() {
+                    _maturityRating = r;
+                    _isKids = r.contains('Kids');
+                  });
+                  Navigator.pop(ctx);
+                },
+              );
+            }),
+          ],
+        ),
+      ),
     );
   }
 
@@ -266,62 +215,139 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     final pinCtl = TextEditingController(text: _pin ?? '');
     showDialog(
       context: context,
-      builder: (ctx) {
-        return AlertDialog(
-          backgroundColor: AppTheme.surfaceVariant,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: const Text('Profile Lock PIN', style: TextStyle(color: Colors.white)),
-          content: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text(
-                'Require a 4-digit PIN to access this profile.',
-                style: TextStyle(color: Colors.white70, fontSize: 13),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: pinCtl,
-                keyboardType: TextInputType.number,
-                maxLength: 4,
-                obscureText: true,
-                autofocus: true,
-                textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 24, letterSpacing: 10, color: Colors.white),
-                decoration: InputDecoration(
-                  hintText: '••••',
-                  counterText: '',
-                  filled: true,
-                  fillColor: AppTheme.cardColor,
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                ),
-              ),
-            ],
-          ),
-          actions: [
-            if (_pin != null && _pin!.isNotEmpty)
-              TextButton(
-                onPressed: () {
-                  setState(() => _pin = null);
-                  Navigator.of(ctx).pop();
-                },
-                child: const Text('Remove PIN', style: TextStyle(color: Colors.redAccent)),
-              ),
-            TextButton(
-              onPressed: () => Navigator.of(ctx).pop(),
-              child: const Text('Cancel', style: TextStyle(color: Colors.white60)),
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF1E1E28),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Text('Profile Lock PIN', style: TextStyle(color: Colors.white)),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Text(
+              'Require a 4-digit PIN to access this profile.',
+              style: TextStyle(color: Colors.white70, fontSize: 13),
             ),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryRed),
-              onPressed: () {
-                final text = pinCtl.text.trim();
-                setState(() => _pin = text.isEmpty ? null : text);
-                Navigator.of(ctx).pop();
-              },
-              child: const Text('Save PIN', style: TextStyle(color: Colors.white)),
+            const SizedBox(height: 16),
+            TextField(
+              controller: pinCtl,
+              keyboardType: TextInputType.number,
+              maxLength: 4,
+              obscureText: true,
+              autofocus: true,
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontSize: 24, letterSpacing: 10, color: Colors.white),
+              decoration: InputDecoration(
+                hintText: '••••',
+                counterText: '',
+                filled: true,
+                fillColor: const Color(0xFF14141E),
+                border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+              ),
             ),
           ],
-        );
-      },
+        ),
+        actions: [
+          if (_pin != null && _pin!.isNotEmpty)
+            TextButton(
+              onPressed: () {
+                setState(() => _pin = null);
+                Navigator.of(ctx).pop();
+              },
+              child: const Text('Remove PIN', style: TextStyle(color: Colors.redAccent)),
+            ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Cancel', style: TextStyle(color: Colors.white60)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryRed),
+            onPressed: () {
+              final text = pinCtl.text.trim();
+              setState(() => _pin = text.isEmpty ? null : text);
+              Navigator.of(ctx).pop();
+            },
+            child: const Text('Save PIN', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showLanguageDialog() {
+    final languages = ['English', 'Español', 'Français', 'Deutsch', 'Italiano', 'Hindi', '日本語', '한국어', 'Português'];
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF1E1E28),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(20, 16, 20, 10),
+              child: Text(
+                'Display Language',
+                style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.bold),
+              ),
+            ),
+            const Divider(color: Colors.white12),
+            ...languages.map((l) {
+              final isSel = _displayLanguage == l;
+              return ListTile(
+                title: Text(l, style: TextStyle(color: isSel ? Colors.white : Colors.white70, fontWeight: isSel ? FontWeight.bold : FontWeight.normal)),
+                trailing: isSel ? const Icon(Icons.check, color: AppTheme.primaryRed) : null,
+                onTap: () {
+                  setState(() => _displayLanguage = l);
+                  Navigator.pop(ctx);
+                },
+              );
+            }),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showAudioLanguagesDialog() {
+    final audioOptions = [
+      'English, Original',
+      'Hindi, English',
+      'Japanese, English',
+      'Korean, English',
+      'Spanish, English',
+      'All Languages (Multi-Audio)',
+    ];
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF1E1E28),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
+      builder: (ctx) => SafeArea(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(20, 16, 20, 10),
+              child: Text(
+                'Audio & Subtitle Languages',
+                style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.bold),
+              ),
+            ),
+            const Divider(color: Colors.white12),
+            ...audioOptions.map((opt) {
+              final isSel = _audioLanguages == opt;
+              return ListTile(
+                title: Text(opt, style: TextStyle(color: isSel ? Colors.white : Colors.white70, fontWeight: isSel ? FontWeight.bold : FontWeight.normal)),
+                trailing: isSel ? const Icon(Icons.check, color: AppTheme.primaryRed) : null,
+                onTap: () {
+                  setState(() => _audioLanguages = opt);
+                  Navigator.pop(ctx);
+                },
+              );
+            }),
+          ],
+        ),
+      ),
     );
   }
 
@@ -340,7 +366,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         ),
         title: const Text(
           'Edit Profile',
-          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18),
+          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 20),
         ),
         actions: [
           TextButton(
@@ -355,17 +381,30 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       body: ListView(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         children: [
-          // Profile Avatar with Pencil badge (Screenshot 4)
+          // 1. Profile Avatar with Pencil badge (Screenshot 5)
           Center(
             child: GestureDetector(
-              onTap: _showColorPicker,
+              onTap: _openChooseIcon,
               child: Stack(
                 children: [
-                  ProfileAvatarTile(
-                    name: _nameController.text,
-                    gradientColors: ProfileProvider.avatarGradients[_selectedColorIndex],
-                    size: 96,
-                    isKids: _isKids,
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: SizedBox(
+                      width: 96,
+                      height: 96,
+                      child: _avatar.startsWith('http')
+                          ? CachedNetworkImage(
+                              imageUrl: _avatar,
+                              fit: BoxFit.cover,
+                            )
+                          : ProfileAvatarTile(
+                              name: _nameController.text,
+                              gradientColors: ProfileProvider.avatarGradients[
+                                  _selectedColorIndex % ProfileProvider.avatarGradients.length],
+                              size: 96,
+                              isKids: _isKids,
+                            ),
+                    ),
                   ),
                   Positioned(
                     bottom: 0,
@@ -375,6 +414,12 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                       decoration: BoxDecoration(
                         color: Colors.white,
                         borderRadius: BorderRadius.circular(8),
+                        boxShadow: [
+                          BoxShadow(
+                            color: Colors.black.withValues(alpha: 0.5),
+                            blurRadius: 4,
+                          ),
+                        ],
                       ),
                       child: const Icon(Icons.edit, size: 16, color: Colors.black),
                     ),
@@ -385,7 +430,7 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
           ),
           const SizedBox(height: 20),
 
-          // Name Input Box (Screenshot 4)
+          // 2. Profile Name Input (Screenshot 5)
           Container(
             decoration: BoxDecoration(
               color: const Color(0xFF1E1E24),
@@ -398,30 +443,32 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
               decoration: const InputDecoration(
                 contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                 border: InputBorder.none,
+                hintText: 'Profile Name',
+                hintStyle: TextStyle(color: Colors.white38),
               ),
             ),
           ),
           const SizedBox(height: 24),
 
-          // Grouped Settings List (Exact Screenshot 4 items)
+          // 3. Game Handle (Screenshot 5)
           _buildSettingsTile(
             icon: Icons.sports_esports_outlined,
             title: 'Game Handle',
-            subtitle: 'Create your game handle',
-            onTap: () {},
+            subtitle: _gameHandle.isNotEmpty ? _gameHandle : 'Create your game handle',
+            onTap: _showGameHandleDialog,
           ),
           const SizedBox(height: 10),
 
+          // 4. Viewing Restrictions (Screenshot 5)
           _buildSettingsTile(
             icon: Icons.warning_amber_rounded,
             title: 'Viewing Restrictions',
-            subtitle: _isKids ? 'Kids (TV-Y, TV-G, G)' : 'No restrictions',
-            onTap: () {
-              setState(() => _isKids = !_isKids);
-            },
+            subtitle: _maturityRating,
+            onTap: _showMaturityDialog,
           ),
           const SizedBox(height: 10),
 
+          // 5. Profile lock (Screenshot 5)
           _buildSettingsTile(
             icon: Icons.lock_outline_rounded,
             title: 'Profile lock',
@@ -432,39 +479,38 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
           ),
           const SizedBox(height: 10),
 
+          // 6. Display Language (Screenshot 5)
           _buildSettingsTile(
             icon: Icons.translate_rounded,
             title: 'Display Language',
-            subtitle: 'Change the language of the text you see on Voidflix across all devices.',
-            onTap: () {},
+            subtitle: 'Change the language of the text you see on Netflix across all devices.',
+            onTap: _showLanguageDialog,
           ),
           const SizedBox(height: 10),
 
+          // 7. Audio & Subtitle Languages (Screenshot 5)
           _buildSettingsTile(
             icon: Icons.chat_bubble_outline_rounded,
             title: 'Audio & Subtitle Languages',
             subtitle: 'Choose the languages you like to watch shows and movies in.',
-            onTap: () {},
+            onTap: _showAudioLanguagesDialog,
           ),
           const SizedBox(height: 10),
 
+          // 8. Subtitle Appearance (Screenshot 5 -> Screenshot 4)
           _buildSettingsTile(
             icon: Icons.closed_caption_outlined,
             title: 'Subtitle Appearance',
             subtitle: 'Change the way subtitles appear on phones and tablets.',
-            onTap: () {},
+            onTap: () {
+              Navigator.of(context).push(
+                MaterialPageRoute(builder: (_) => const SubtitleAppearanceScreen()),
+              );
+            },
           ),
           const SizedBox(height: 10),
 
-          _buildSettingsTile(
-            icon: Icons.auto_awesome,
-            title: 'Cinema Preferences & Feed',
-            subtitle: 'Tune favorite genres and languages tailored for this profile.',
-            onTap: _showEditInterestsDialog,
-          ),
-          const SizedBox(height: 10),
-
-          // Autoplay Next Episode Switch (Screenshot 4)
+          // 9. Autoplay Next Episode Switch (Screenshot 5)
           Container(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             decoration: BoxDecoration(
@@ -500,9 +546,47 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
               ],
             ),
           ),
+          const SizedBox(height: 10),
+
+          // 10. Autoplay Previews Switch (Screenshot 5)
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            decoration: BoxDecoration(
+              color: const Color(0xFF16161D),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+            ),
+            child: Row(
+              children: [
+                const Icon(Icons.autorenew_rounded, color: Colors.white70, size: 24),
+                const SizedBox(width: 16),
+                const Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'Autoplay Previews',
+                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 15),
+                      ),
+                      SizedBox(height: 2),
+                      Text(
+                        'On all devices',
+                        style: TextStyle(color: Colors.white54, fontSize: 12),
+                      ),
+                    ],
+                  ),
+                ),
+                Switch(
+                  value: _autoplayPreviews,
+                  activeThumbColor: Colors.blueAccent,
+                  onChanged: (val) => setState(() => _autoplayPreviews = val),
+                ),
+              ],
+            ),
+          ),
           const SizedBox(height: 28),
 
-          // Delete Profile button
+          // 11. Delete Profile (Screenshot 5)
           if (totalProfiles > 1)
             Center(
               child: TextButton.icon(
@@ -537,16 +621,19 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       ),
       child: ListTile(
         contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-        leading: Icon(icon, color: Colors.white70, size: 24),
+        leading: Icon(icon, color: Colors.white70, size: 22),
         title: Text(
           title,
           style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 15),
         ),
-        subtitle: Text(
-          subtitle,
-          style: const TextStyle(color: Colors.white54, fontSize: 12),
+        subtitle: Padding(
+          padding: const EdgeInsets.only(top: 2),
+          child: Text(
+            subtitle,
+            style: const TextStyle(color: Colors.white54, fontSize: 12),
+          ),
         ),
-        trailing: const Icon(Icons.chevron_right, color: Colors.white54),
+        trailing: const Icon(Icons.chevron_right, color: Colors.white38, size: 20),
         onTap: onTap,
       ),
     );
