@@ -136,12 +136,6 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
         launched = await launchUrl(webUri, mode: LaunchMode.platformDefault);
       } catch (_) {}
     }
-
-    if (!launched && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not open Telegram: https://t.me/$username')),
-      );
-    }
   }
 
   Future<void> _finish({bool skipped = false}) async {
@@ -755,7 +749,7 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
             child: ListView.separated(
               scrollDirection: Axis.horizontal,
               itemCount: _availableAvatars.length,
-              separatorBuilder: (_, _) => const SizedBox(width: 10),
+              separatorBuilder: (_, __) => const SizedBox(width: 10),
               itemBuilder: (ctx, idx) {
                 final opt = _availableAvatars[idx];
                 final isSelected = _selectedAvatarUrl == opt.url;

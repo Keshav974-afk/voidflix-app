@@ -205,8 +205,8 @@ class ProfileSwitcherSheet extends StatelessWidget {
                                 child: CachedNetworkImage(
                                   imageUrl: selectedAvatarUrl,
                                   fit: BoxFit.cover,
-                                  placeholder: (_, _) => Container(color: const Color(0xFF282828)),
-                                  errorWidget: (_, _, _) => const Icon(Icons.person, color: Colors.white),
+                                  placeholder: (_, __) => Container(color: const Color(0xFF282828)),
+                                  errorWidget: (_, __, ___) => const Icon(Icons.person, color: Colors.white),
                                 ),
                               ),
                             ),
@@ -268,7 +268,7 @@ class ProfileSwitcherSheet extends StatelessWidget {
                       child: ListView.separated(
                         scrollDirection: Axis.horizontal,
                         itemCount: AvatarService.defaultFeatured.length,
-                        separatorBuilder: (_, _) => const SizedBox(width: 10),
+                        separatorBuilder: (_, __) => const SizedBox(width: 10),
                         itemBuilder: (ctx, idx) {
                           final av = AvatarService.defaultFeatured[idx];
                           final isSelected = av.url == selectedAvatarUrl;
@@ -289,8 +289,8 @@ class ProfileSwitcherSheet extends StatelessWidget {
                                 child: CachedNetworkImage(
                                   imageUrl: av.url,
                                   fit: BoxFit.cover,
-                                  placeholder: (_, _) => Container(color: const Color(0xFF282828)),
-                                  errorWidget: (_, _, _) => const Icon(Icons.person, color: Colors.white),
+                                  placeholder: (_, __) => Container(color: const Color(0xFF282828)),
+                                  errorWidget: (_, __, ___) => const Icon(Icons.person, color: Colors.white),
                                 ),
                               ),
                             ),
@@ -412,7 +412,7 @@ class ProfileSwitcherSheet extends StatelessWidget {
                     imageUrl: backdropUrl,
                     fit: BoxFit.cover,
                     alignment: Alignment.topCenter,
-                    errorWidget: (_, _, _) => const ColoredBox(color: Colors.black),
+                    errorWidget: (_, __, ___) => const ColoredBox(color: Colors.black),
                   ),
                   // Dark Vignette gradient fading down to sheet background
                   Container(

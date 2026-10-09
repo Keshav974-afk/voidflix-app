@@ -92,12 +92,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
         launched = await launchUrl(webUri, mode: LaunchMode.externalApplication);
       } catch (_) {}
     }
-
-    if (!launched && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not open Telegram: https://t.me/$username')),
-      );
-    }
   }
 
   Future<void> _openUrl(String url) async {
@@ -111,12 +105,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
       try {
         launched = await launchUrl(uri, mode: LaunchMode.platformDefault);
       } catch (_) {}
-    }
-
-    if (!launched && mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not open link: $url')),
-      );
     }
   }
 
@@ -309,11 +297,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFF0071eb)),
                 onPressed: () {
                   Navigator.pop(dialogCtx);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text('Network re-tested: 100% reachable.')),
-                  );
                 },
-                child: const Text('Test Again', style: TextStyle(color: Colors.white)),
+                child: const Text('Done', style: TextStyle(color: Colors.white)),
               ),
             ],
           );
@@ -568,11 +553,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             leading: Icons.storage_outlined,
             title: 'Download Location',
             subtitle: 'Internal Storage',
-            onTap: () {
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text('Downloads are stored on Internal Storage.')),
-              );
-            },
+            onTap: () {},
           ),
           const Divider(height: 1, color: Color(0xFF1E1E1E)),
 

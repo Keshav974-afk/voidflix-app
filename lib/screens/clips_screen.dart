@@ -142,6 +142,15 @@ class _ClipPlayerTileState extends State<ClipPlayerTile> {
       ..setUserAgent('Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36')
       ..setNavigationDelegate(
         NavigationDelegate(
+          onNavigationRequest: (request) {
+            if (request.url.contains('embed') ||
+                request.url.startsWith('about:blank') ||
+                request.url.startsWith('data:') ||
+                request.url.contains('voidflix.org')) {
+              return NavigationDecision.navigate;
+            }
+            return NavigationDecision.prevent;
+          },
           onPageFinished: (url) {
             controller.runJavaScript('''
               document.body.style.backgroundColor = "#000";
@@ -185,7 +194,9 @@ class _ClipPlayerTileState extends State<ClipPlayerTile> {
         // 1. Trailer Video Player or High-Res Backdrop Fallback
         if (widget.isActive && _webController != null && _trailerKey != null)
           Positioned.fill(
-            child: WebViewWidget(controller: _webController!),
+            child: IgnorePointer(
+              child: WebViewWidget(controller: _webController!),
+            ),
           )
         else
           CachedNetworkImage(
@@ -281,12 +292,6 @@ class _ClipPlayerTileState extends State<ClipPlayerTile> {
                 color: _isLiked ? AppTheme.primaryRed : Colors.white,
                 onTap: () {
                   setState(() => _isLiked = !_isLiked);
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(
-                      content: Text(_isLiked ? 'Added to your likes' : 'Removed from likes'),
-                      duration: const Duration(seconds: 1),
-                    ),
-                  );
                 },
               ),
               const SizedBox(height: 18),

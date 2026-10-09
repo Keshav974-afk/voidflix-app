@@ -5,9 +5,11 @@ import '../core/constants/api_constants.dart';
 import '../core/constants/theme_constants.dart';
 import '../models/media_item.dart';
 import '../models/watch_progress.dart';
+import '../providers/download_provider.dart';
 import '../providers/history_provider.dart';
 import '../providers/profile_provider.dart';
 import '../screens/player_screen.dart';
+import 'package:share_plus/share_plus.dart';
 import 'detail_modal.dart';
 
 class ContinueWatchingRow extends StatelessWidget {
@@ -98,8 +100,14 @@ class ContinueWatchingRow extends StatelessWidget {
                 title: const Text('Download', style: TextStyle(color: Colors.white)),
                 onTap: () {
                   Navigator.of(sheetCtx).pop();
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Starting download for $title...')),
+                  context.read<DownloadProvider>().startDownload(
+                    mediaId: id,
+                    title: title,
+                    mediaType: mediaType,
+                    season: season,
+                    episode: episode,
+                    posterPath: posterPath,
+                    backdropPath: backdropPath,
                   );
                 },
               ),
@@ -110,8 +118,10 @@ class ContinueWatchingRow extends StatelessWidget {
                 title: const Text('Share', style: TextStyle(color: Colors.white)),
                 onTap: () {
                   Navigator.of(sheetCtx).pop();
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    SnackBar(content: Text('Sharing $title...')),
+                  SharePlus.instance.share(
+                    ShareParams(
+                      text: 'Watch "$title" on Voidflix!\nhttps://voidflix.org/$mediaType/$id',
+                    ),
                   );
                 },
               ),

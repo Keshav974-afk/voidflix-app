@@ -12,14 +12,17 @@ import 'dart:io';
 
 import '../core/constants/theme_constants.dart';
 import '../core/network/api_service.dart';
+import '../core/services/clip_export_service.dart';
 import '../core/services/stream_extractor.dart';
 import '../core/services/subtitle_service.dart';
+import '../core/utils/language_utils.dart';
 import '../models/media_detail.dart';
 import '../models/server_config.dart';
 import '../models/watch_progress.dart';
 import '../providers/history_provider.dart';
 import '../providers/profile_provider.dart';
 import '../widgets/netflix_season_picker.dart';
+import 'package:share_plus/share_plus.dart';
 
 class PlayerScreen extends StatefulWidget {
   final int mediaId;
@@ -115,6 +118,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
   bool _isClippingMoment = false;
   double _clipStartSeconds = 0.0;
   double _clipEndSeconds = 41.0;
+  bool _isExportingClip = false;
+  double _exportProgress = 0.0;
 
   // Autoplay Next Episode system
   bool _showAutoplayCard = false;
@@ -144,7 +149,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
     WakelockPlus.enable();
 
     _loadMedia();
-    _recordWatchProgress();
 
     if (widget.mediaType == 'tv') {
       _fetchTvDetailsAndEpisodes();
@@ -155,6 +159,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   @override
   void dispose() {
+    _recordWatchProgress(force: true);
     _hideControlsTimer?.cancel();
     _lockPillTimer?.cancel();
     _brightnessHudTimer?.cancel();
@@ -194,13 +199,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
       return;
     }
 
-    final server = ServerConfig.servers[_selectedServerIndex];
-
-    if (server.isDirectPlay) {
-      await _loadDirectStream();
-    } else {
-      _loadWebEmbed();
-    }
+    // Always attempt native stream extraction first
+    await _loadDirectStream();
   }
 
   Future<void> _loadLocalFile(String path) async {
@@ -223,6 +223,19 @@ class _PlayerScreenState extends State<PlayerScreen> {
       await controller.initialize();
 
       if (!mounted) return;
+
+      // Resume from saved progress if available
+      final saved = context.read<HistoryProvider>().getProgress(widget.mediaId);
+      if (saved != null &&
+          (widget.mediaType != 'tv' || (saved.season == _currentSeason && saved.episode == _currentEpisode)) &&
+          saved.progress > 0.02 &&
+          saved.progress < 0.95) {
+        final totalMs = controller.value.duration.inMilliseconds;
+        if (totalMs > 0) {
+          final resumePos = Duration(milliseconds: (saved.progress * totalMs).round());
+          await controller.seekTo(resumePos);
+        }
+      }
 
       controller.addListener(_videoPlayerListener);
       await controller.setPlaybackSpeed(_playbackSpeed);
@@ -328,8 +341,22 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
       controller.addListener(_videoPlayerListener);
 
-      if (startPosition != null && startPosition > Duration.zero) {
-        await controller.seekTo(startPosition);
+      Duration? resumePos = startPosition;
+      if (resumePos == null) {
+        final saved = context.read<HistoryProvider>().getProgress(widget.mediaId);
+        if (saved != null &&
+            (widget.mediaType != 'tv' || (saved.season == _currentSeason && saved.episode == _currentEpisode)) &&
+            saved.progress > 0.02 &&
+            saved.progress < 0.95) {
+          final totalMs = controller.value.duration.inMilliseconds;
+          if (totalMs > 0) {
+            resumePos = Duration(milliseconds: (saved.progress * totalMs).round());
+          }
+        }
+      }
+
+      if (resumePos != null && resumePos > Duration.zero) {
+        await controller.seekTo(resumePos);
       }
 
       await controller.setPlaybackSpeed(_playbackSpeed);
@@ -433,6 +460,15 @@ class _PlayerScreenState extends State<PlayerScreen> {
         }
       } else if (_activeCueText != null) {
         setState(() => _activeCueText = null);
+      }
+
+      // Record real watch progress as playback progresses
+      if (val.isInitialized && val.duration.inSeconds > 10) {
+        final curMs = val.position.inMilliseconds;
+        final totMs = val.duration.inMilliseconds;
+        if (curMs > 3000 && totMs > 0) {
+          _recordWatchProgress();
+        }
       }
     }
 
@@ -775,39 +811,52 @@ class _PlayerScreenState extends State<PlayerScreen> {
     controller.play();
   }
 
-  void _saveClip() {
-    final startFormatted = _formatDuration(Duration(seconds: _clipStartSeconds.toInt()));
-    final endFormatted = _formatDuration(Duration(seconds: _clipEndSeconds.toInt()));
-    final clipText = '${widget.mediaTitle} Clip [$startFormatted - $endFormatted]';
-
-    Clipboard.setData(ClipboardData(text: clipText));
+  Future<void> _saveClip() async {
+    if (_isExportingClip) return;
 
     setState(() {
-      _isClippingMoment = false;
-      _showControls = true;
+      _isExportingClip = true;
+      _exportProgress = 0.05;
     });
-    _startHideControlsTimer();
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        backgroundColor: const Color(0xFF1F1F1F),
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-        content: Row(
-          children: [
-            const Icon(Icons.check_circle_rounded, color: Color(0xFF2ECC71), size: 20),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                'Clip saved! Copied moment timestamp ($startFormatted - $endFormatted)',
-                style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.w500),
-              ),
-            ),
-          ],
-        ),
-        duration: const Duration(seconds: 3),
-      ),
+    final activeStream = _directStreams.isNotEmpty && _selectedStreamIndex < _directStreams.length
+        ? _directStreams[_selectedStreamIndex]
+        : null;
+
+    final exportedFile = await ClipExportService.exportClip(
+      title: widget.mediaTitle,
+      startSeconds: _clipStartSeconds,
+      endSeconds: _clipEndSeconds,
+      localFilePath: widget.localFilePath,
+      streamUrl: activeStream?.url,
+      streamHeaders: activeStream?.headers,
+      onProgress: (p, status) {
+        if (mounted) {
+          setState(() {
+            _exportProgress = p;
+          });
+        }
+      },
     );
+
+    if (mounted) {
+      setState(() {
+        _isExportingClip = false;
+        _isClippingMoment = false;
+        _showControls = true;
+      });
+      _startHideControlsTimer();
+
+      if (exportedFile != null) {
+        SharePlus.instance.share(
+          ShareParams(
+            files: [XFile(exportedFile.path)],
+            text: 'Watch this moment from "${widget.mediaTitle}" on Voidflix!\nhttps://voidflix.org/${widget.mediaType}/${widget.mediaId}',
+            subject: 'Voidflix Moment: ${widget.mediaTitle}',
+          ),
+        );
+      }
+    }
   }
 
   void _toggleScreenLock() {
@@ -897,7 +946,36 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
   }
 
-  void _recordWatchProgress() {
+  DateTime? _lastProgressSaveTime;
+  double _lastSavedProgress = 0.0;
+
+  void _recordWatchProgress({double? customProgress, bool force = false}) {
+    if (!mounted) return;
+    final controller = _videoPlayerController;
+    double prog = customProgress ?? 0.0;
+
+    if (customProgress == null && controller != null && controller.value.isInitialized) {
+      final totalMs = controller.value.duration.inMilliseconds;
+      final curMs = controller.value.position.inMilliseconds;
+      if (totalMs > 0) {
+        prog = (curMs / totalMs).clamp(0.0, 1.0);
+      }
+    }
+
+    // Do not record unplayed media (< 2%) unless forced with a positive progress
+    if (prog < 0.02 && !force) return;
+
+    final now = DateTime.now();
+    // Throttle automatic progress saves to once every 5 seconds
+    if (!force && _lastProgressSaveTime != null) {
+      if (now.difference(_lastProgressSaveTime!).inSeconds < 5 && (prog - _lastSavedProgress).abs() < 0.03) {
+        return;
+      }
+    }
+
+    _lastProgressSaveTime = now;
+    _lastSavedProgress = prog;
+
     final progress = WatchProgress(
       id: widget.mediaId,
       title: widget.mediaTitle,
@@ -906,21 +984,22 @@ class _PlayerScreenState extends State<PlayerScreen> {
       mediaType: widget.mediaType,
       season: _currentSeason,
       episode: _currentEpisode,
-      progress: 0.1,
-      lastWatched: DateTime.now(),
+      progress: prog,
+      lastWatched: now,
     );
     context.read<HistoryProvider>().saveProgress(progress);
   }
 
   void _goToEpisode(int episodeNum) {
+    _recordWatchProgress(force: true);
     _cancelAutoplayTimer();
     setState(() => _currentEpisode = episodeNum);
     _loadMedia();
-    _recordWatchProgress();
   }
 
   void _nextEpisode() {
     if (widget.mediaType != 'tv') return;
+    _recordWatchProgress(force: true);
     _cancelAutoplayTimer();
     if (_episodes.isNotEmpty && _currentEpisode < _episodes.length) {
       _goToEpisode(_currentEpisode + 1);
@@ -934,7 +1013,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
         });
         _loadEpisodesForSeason(_currentSeason);
         _loadMedia();
-        _recordWatchProgress();
       }
     }
   }
@@ -1010,6 +1088,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _hideControlsTimer?.cancel();
     showModalBottomSheet(
       context: context,
+      isScrollControlled: true,
       backgroundColor: const Color(0xFF141414),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
@@ -1020,7 +1099,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
             return SafeArea(
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                height: MediaQuery.of(context).size.height * 0.78,
+                height: MediaQuery.of(context).size.height * 0.82,
                 child: Column(
                   children: [
                     Center(
@@ -1033,7 +1112,26 @@ class _PlayerScreenState extends State<PlayerScreen> {
                         ),
                       ),
                     ),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 10),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text(
+                          'Audio & Subtitles',
+                          style: TextStyle(
+                            color: Colors.white,
+                            fontSize: 16,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.close, color: Colors.white70),
+                          onPressed: () => Navigator.pop(ctx),
+                        ),
+                      ],
+                    ),
+                    const Divider(color: Colors.white12, height: 1),
+                    const SizedBox(height: 8),
                     Expanded(
                       child: Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1059,29 +1157,83 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                   child: ListView.builder(
                                     itemCount: _directStreams.isNotEmpty ? _directStreams.length : 1,
                                     itemBuilder: (c, idx) {
-                                      final label = _directStreams.isNotEmpty
-                                          ? '${_directStreams[idx].language} (${_directStreams[idx].sourceName})'
-                                          : 'Original (Stereo)';
                                       final isSelected = idx == _selectedStreamIndex;
-                                      return ListTile(
-                                        contentPadding: const EdgeInsets.symmetric(horizontal: 8),
-                                        dense: true,
-                                        title: Text(
-                                          label,
-                                          style: TextStyle(
-                                            color: isSelected ? Colors.white : Colors.white70,
-                                            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                                            fontSize: 14,
-                                          ),
-                                        ),
-                                        trailing: isSelected
-                                            ? const Icon(Icons.check, color: AppTheme.primaryRed, size: 20)
-                                            : null,
+                                      final stream = _directStreams.isNotEmpty ? _directStreams[idx] : null;
+                                      final langRaw = stream?.language ?? 'English';
+                                      final langInfo = LanguageUtils.getInfo(langRaw);
+                                      final sourceName = stream != null ? stream.sourceName : 'Original (Stereo)';
+
+                                      return InkWell(
                                         onTap: () {
                                           setSheetState(() {});
                                           _selectAudioSource(idx);
                                           Navigator.pop(ctx);
                                         },
+                                        borderRadius: BorderRadius.circular(8),
+                                        child: Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                                          margin: const EdgeInsets.symmetric(vertical: 2),
+                                          decoration: BoxDecoration(
+                                            color: isSelected
+                                                ? Colors.white.withValues(alpha: 0.08)
+                                                : Colors.transparent,
+                                            borderRadius: BorderRadius.circular(8),
+                                            border: isSelected
+                                                ? Border.all(
+                                                    color: AppTheme.primaryRed.withValues(alpha: 0.6),
+                                                    width: 1,
+                                                  )
+                                                : null,
+                                          ),
+                                          child: Row(
+                                            children: [
+                                              Text(langInfo.flag, style: const TextStyle(fontSize: 18)),
+                                              const SizedBox(width: 8),
+                                              Container(
+                                                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                                                decoration: BoxDecoration(
+                                                  color: Colors.white12,
+                                                  borderRadius: BorderRadius.circular(4),
+                                                ),
+                                                child: Text(
+                                                  langInfo.code,
+                                                  style: const TextStyle(
+                                                    fontSize: 10,
+                                                    fontWeight: FontWeight.bold,
+                                                    color: Colors.white70,
+                                                  ),
+                                                ),
+                                              ),
+                                              const SizedBox(width: 8),
+                                              Expanded(
+                                                child: Column(
+                                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                                  mainAxisSize: MainAxisSize.min,
+                                                  children: [
+                                                    Text(
+                                                      langInfo.name,
+                                                      style: TextStyle(
+                                                        color: isSelected ? Colors.white : Colors.white70,
+                                                        fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                                                        fontSize: 13,
+                                                      ),
+                                                      maxLines: 1,
+                                                      overflow: TextOverflow.ellipsis,
+                                                    ),
+                                                    Text(
+                                                      sourceName,
+                                                      style: const TextStyle(fontSize: 11, color: Colors.white38),
+                                                      maxLines: 1,
+                                                      overflow: TextOverflow.ellipsis,
+                                                    ),
+                                                  ],
+                                                ),
+                                              ),
+                                              if (isSelected)
+                                                const Icon(Icons.check_rounded, color: AppTheme.primaryRed, size: 18),
+                                            ],
+                                          ),
+                                        ),
                                       );
                                     },
                                   ),
@@ -1111,47 +1263,123 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                 Expanded(
                                   child: ListView(
                                     children: [
-                                      ListTile(
-                                        contentPadding: const EdgeInsets.symmetric(horizontal: 8),
-                                        dense: true,
-                                        title: Text(
-                                          'Off',
-                                          style: TextStyle(
-                                            color: _selectedSubtitle == null ? Colors.white : Colors.white70,
-                                            fontWeight: _selectedSubtitle == null ? FontWeight.bold : FontWeight.normal,
-                                            fontSize: 14,
-                                          ),
-                                        ),
-                                        trailing: _selectedSubtitle == null
-                                            ? const Icon(Icons.check, color: AppTheme.primaryRed, size: 20)
-                                            : null,
+                                      // Off Option
+                                      InkWell(
                                         onTap: () {
                                           _selectSubtitle(null);
                                           Navigator.pop(ctx);
                                         },
-                                      ),
-                                      ..._subtitles.map((track) {
-                                        final isSelected = _selectedSubtitle?.url == track.url;
-                                        return ListTile(
-                                          contentPadding: const EdgeInsets.symmetric(horizontal: 8),
-                                          dense: true,
-                                          title: Text(
-                                            track.label,
-                                            style: TextStyle(
-                                              color: isSelected ? Colors.white : Colors.white70,
-                                              fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                                              fontSize: 14,
-                                            ),
+                                        borderRadius: BorderRadius.circular(8),
+                                        child: Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 9),
+                                          margin: const EdgeInsets.symmetric(vertical: 2),
+                                          decoration: BoxDecoration(
+                                            color: _selectedSubtitle == null
+                                                ? Colors.white.withValues(alpha: 0.08)
+                                                : Colors.transparent,
+                                            borderRadius: BorderRadius.circular(8),
+                                            border: _selectedSubtitle == null
+                                                ? Border.all(
+                                                    color: AppTheme.primaryRed.withValues(alpha: 0.6),
+                                                    width: 1,
+                                                  )
+                                                : null,
                                           ),
-                                          trailing: isSelected
-                                              ? const Icon(Icons.check, color: AppTheme.primaryRed, size: 20)
-                                              : null,
-                                          onTap: () {
-                                            _selectSubtitle(track);
-                                            Navigator.pop(ctx);
-                                          },
-                                        );
-                                      }),
+                                          child: Row(
+                                            children: [
+                                              const Icon(Icons.subtitles_off_outlined, color: Colors.white70, size: 18),
+                                              const SizedBox(width: 10),
+                                              Expanded(
+                                                child: Text(
+                                                  'Off',
+                                                  style: TextStyle(
+                                                    color: _selectedSubtitle == null ? Colors.white : Colors.white70,
+                                                    fontWeight: _selectedSubtitle == null ? FontWeight.bold : FontWeight.normal,
+                                                    fontSize: 13,
+                                                  ),
+                                                ),
+                                              ),
+                                              if (_selectedSubtitle == null)
+                                                const Icon(Icons.check_rounded, color: AppTheme.primaryRed, size: 18),
+                                            ],
+                                          ),
+                                        ),
+                                      ),
+                                      if (_subtitles.isNotEmpty)
+                                        ..._subtitles.map((track) {
+                                          final isSelected = _selectedSubtitle?.url == track.url;
+                                          final langInfo = LanguageUtils.getInfo(
+                                            track.language.isNotEmpty ? track.language : track.label,
+                                          );
+
+                                          return InkWell(
+                                            onTap: () {
+                                              _selectSubtitle(track);
+                                              Navigator.pop(ctx);
+                                            },
+                                            borderRadius: BorderRadius.circular(8),
+                                            child: Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                                              margin: const EdgeInsets.symmetric(vertical: 2),
+                                              decoration: BoxDecoration(
+                                                color: isSelected
+                                                    ? Colors.white.withValues(alpha: 0.08)
+                                                    : Colors.transparent,
+                                                borderRadius: BorderRadius.circular(8),
+                                                border: isSelected
+                                                    ? Border.all(
+                                                        color: AppTheme.primaryRed.withValues(alpha: 0.6),
+                                                        width: 1,
+                                                      )
+                                                    : null,
+                                              ),
+                                              child: Row(
+                                                children: [
+                                                  Text(langInfo.flag, style: const TextStyle(fontSize: 18)),
+                                                  const SizedBox(width: 8),
+                                                  Container(
+                                                    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                                                    decoration: BoxDecoration(
+                                                      color: Colors.white12,
+                                                      borderRadius: BorderRadius.circular(4),
+                                                    ),
+                                                    child: Text(
+                                                      langInfo.code,
+                                                      style: const TextStyle(
+                                                        fontSize: 10,
+                                                        fontWeight: FontWeight.bold,
+                                                        color: Colors.white70,
+                                                      ),
+                                                    ),
+                                                  ),
+                                                  const SizedBox(width: 8),
+                                                  Expanded(
+                                                    child: Text(
+                                                      track.label.isNotEmpty ? track.label : langInfo.name,
+                                                      style: TextStyle(
+                                                        color: isSelected ? Colors.white : Colors.white70,
+                                                        fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                                                        fontSize: 13,
+                                                      ),
+                                                      maxLines: 1,
+                                                      overflow: TextOverflow.ellipsis,
+                                                    ),
+                                                  ),
+                                                  if (isSelected)
+                                                    const Icon(Icons.check_rounded, color: AppTheme.primaryRed, size: 18),
+                                                ],
+                                              ),
+                                            ),
+                                          );
+                                        })
+                                      else
+                                        const Padding(
+                                          padding: EdgeInsets.only(top: 16, left: 8, right: 8),
+                                          child: Text(
+                                            'No external subtitles found for this stream',
+                                            style: TextStyle(color: Colors.white38, fontSize: 12),
+                                          ),
+                                        ),
                                     ],
                                   ),
                                 ),
@@ -1786,21 +2014,41 @@ class _PlayerScreenState extends State<PlayerScreen> {
                     ),
                   ),
                   GestureDetector(
-                    onTap: _saveClip,
+                    onTap: _isExportingClip ? null : _saveClip,
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 6),
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
                       decoration: BoxDecoration(
-                        color: Colors.white,
+                        color: _isExportingClip ? const Color(0xFF2E2E2E) : Colors.white,
                         borderRadius: BorderRadius.circular(4),
                       ),
-                      child: const Text(
-                        'Save',
-                        style: TextStyle(
-                          color: Colors.black,
-                          fontSize: 14,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
+                      child: _isExportingClip
+                          ? Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                const SizedBox(
+                                  width: 13,
+                                  height: 13,
+                                  child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                                ),
+                                const SizedBox(width: 8),
+                                Text(
+                                  'Saving ${(_exportProgress * 100).toInt()}%',
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ],
+                            )
+                          : const Text(
+                              'Save',
+                              style: TextStyle(
+                                color: Colors.black,
+                                fontSize: 14,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
                     ),
                   ),
                 ],
@@ -1900,6 +2148,29 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                 _videoPlayerController?.seekTo(Duration(seconds: _clipStartSeconds.toInt()));
                                 _videoPlayerController?.play();
                               },
+                            ),
+                          ),
+                          // Signature Voidflix Red Watermark (Netflix-style bottom-right)
+                          Positioned(
+                            right: 14,
+                            bottom: 12,
+                            child: IgnorePointer(
+                              child: Text(
+                                'VOIDFLIX',
+                                style: TextStyle(
+                                  color: AppTheme.primaryRed,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w900,
+                                  letterSpacing: 2.2,
+                                  shadows: [
+                                    Shadow(
+                                      color: Colors.black.withValues(alpha: 0.95),
+                                      blurRadius: 6,
+                                      offset: const Offset(1, 1),
+                                    ),
+                                  ],
+                                ),
+                              ),
                             ),
                           ),
                         ],

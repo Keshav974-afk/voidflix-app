@@ -1,10 +1,13 @@
 package com.flowflix.flowflix_app
 
+import android.app.Activity
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
+import android.content.Intent
 import android.os.Build
 import android.os.PowerManager
+import android.speech.RecognizerIntent
 import androidx.core.app.NotificationCompat
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
@@ -12,6 +15,8 @@ import io.flutter.plugin.common.MethodChannel
 
 class MainActivity : FlutterActivity() {
     private val CHANNEL = "org.voidflix/notifications"
+    private val SPEECH_REQUEST_CODE = 4210
+    private var pendingSpeechResult: MethodChannel.Result? = null
     private var wakeLock: PowerManager.WakeLock? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
@@ -41,10 +46,57 @@ class MainActivity : FlutterActivity() {
                     cancelDownloadNotification(id)
                     result.success(true)
                 }
+                "startVoiceSearch" -> {
+                    pendingSpeechResult = result
+                    try {
+                        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                            putExtra(RecognizerIntent.EXTRA_PROMPT, "Speak to search movies and shows…")
+                        }
+                        startActivityForResult(intent, SPEECH_REQUEST_CODE)
+                    } catch (_: Exception) {
+                        pendingSpeechResult?.success("")
+                        pendingSpeechResult = null
+                    }
+                }
+                "scanFileIntoGallery" -> {
+                    val filePath = call.argument<String>("filePath")
+                    if (filePath != null) {
+                        val file = java.io.File(filePath)
+                        if (file.exists()) {
+                            android.media.MediaScannerConnection.scanFile(
+                                applicationContext,
+                                arrayOf(file.absolutePath),
+                                arrayOf("video/mp4")
+                            ) { path, uri ->
+                                android.util.Log.d("Voidflix", "Scanned clip into gallery: $path -> $uri")
+                            }
+                            result.success(true)
+                        } else {
+                            result.success(false)
+                        }
+                    } else {
+                        result.error("ARG_ERROR", "filePath is required", null)
+                    }
+                }
                 else -> {
                     result.notImplemented()
                 }
             }
+        }
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == SPEECH_REQUEST_CODE) {
+            if (resultCode == Activity.RESULT_OK && data != null) {
+                val results = data.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
+                val spokenText = results?.firstOrNull() ?: ""
+                pendingSpeechResult?.success(spokenText)
+            } else {
+                pendingSpeechResult?.success("")
+            }
+            pendingSpeechResult = null
         }
     }
 
@@ -143,4 +195,3 @@ class MainActivity : FlutterActivity() {
         } catch (_: Exception) {}
     }
 }
-

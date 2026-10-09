@@ -455,21 +455,6 @@ class _DetailModalState extends State<DetailModal> {
                                     posterPath: widget.item.posterPath,
                                     backdropPath: widget.item.backdropPath,
                                   );
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(
-                                      content: Text('Started download for ${widget.item.title}'),
-                                      backgroundColor: const Color(0xFFE50914),
-                                      action: SnackBarAction(
-                                        label: 'View',
-                                        textColor: Colors.white,
-                                        onPressed: () {
-                                          Navigator.of(context).push(
-                                            MaterialPageRoute(builder: (_) => const DownloadsScreen()),
-                                          );
-                                        },
-                                      ),
-                                    ),
-                                  );
                                 },
                                 style: ElevatedButton.styleFrom(
                                   backgroundColor: const Color(0xFF262626),
@@ -547,21 +532,6 @@ class _DetailModalState extends State<DetailModal> {
                                       );
                                     }
                                   }
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(
-                                      content: Text('Downloading Season $_selectedSeason (${_episodes.length} episodes)...'),
-                                      backgroundColor: const Color(0xFFE50914),
-                                      action: SnackBarAction(
-                                        label: 'View',
-                                        textColor: Colors.white,
-                                        onPressed: () {
-                                          Navigator.of(context).push(
-                                            MaterialPageRoute(builder: (_) => const DownloadsScreen()),
-                                          );
-                                        },
-                                      ),
-                                    ),
-                                  );
                                 },
                               ),
                           ],
@@ -658,22 +628,7 @@ class _DetailModalState extends State<DetailModal> {
                                 ),
                               ),
                               GestureDetector(
-                                onTap: () {
-                                  final sObj = _detail?.seasons.firstWhere(
-                                    (s) => s.seasonNumber == _selectedSeason,
-                                    orElse: () => _detail!.seasons.first,
-                                  );
-                                  ScaffoldMessenger.of(context).showSnackBar(
-                                    SnackBar(
-                                      content: Text(
-                                        sObj != null && sObj.name.isNotEmpty
-                                            ? '${sObj.name} of ${widget.item.title}'
-                                            : 'Season $_selectedSeason of ${widget.item.title}',
-                                      ),
-                                      backgroundColor: const Color(0xFF262626),
-                                    ),
-                                  );
-                                },
+                                onTap: _openSeasonPicker,
                                 child: Container(
                                   width: 34,
                                   height: 34,
@@ -848,22 +803,6 @@ class _DetailModalState extends State<DetailModal> {
                                                 episodeTitle: ep.name,
                                                 posterPath: widget.item.posterPath,
                                                 backdropPath: widget.item.backdropPath,
-                                              );
-                                              ScaffoldMessenger.of(context).showSnackBar(
-                                                SnackBar(
-                                                  content: Text('Downloading S$_selectedSeason:E${ep.episodeNumber} - ${ep.name}'),
-                                                  backgroundColor: const Color(0xFFE50914),
-                                                  duration: const Duration(seconds: 2),
-                                                  action: SnackBarAction(
-                                                    label: 'View',
-                                                    textColor: Colors.white,
-                                                    onPressed: () {
-                                                      Navigator.of(context).push(
-                                                        MaterialPageRoute(builder: (_) => const DownloadsScreen()),
-                                                      );
-                                                    },
-                                                  ),
-                                                ),
                                               );
                                             },
                                           ),

@@ -5,8 +5,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
 import '../core/constants/voidflix_svg_asset.dart';
-import 'main_navigation_screen.dart';
 import 'onboarding_screen.dart';
+import 'profile_gate_screen.dart';
 
 /// Authentic Netflix-Grade Splash Screen for VOIDFLIX.
 ///
@@ -127,7 +127,7 @@ $voidflixSwoopSvg
     if (!alreadyDone && !hasProfiles) {
       target = const OnboardingScreen();
     } else {
-      target = const MainNavigationScreen();
+      target = const ProfileGateScreen();
     }
 
     if (!mounted) return;

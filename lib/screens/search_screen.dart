@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../core/constants/api_constants.dart';
 import '../core/constants/theme_constants.dart';
@@ -63,6 +64,21 @@ class _SearchScreenState extends State<SearchScreen> {
       }
     } catch (e) {
       if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  Future<void> _startVoiceSearch() async {
+    const channel = MethodChannel('org.voidflix/notifications');
+    try {
+      final spoken = await channel.invokeMethod<String>('startVoiceSearch');
+      if (spoken != null && spoken.trim().isNotEmpty && mounted) {
+        setState(() {
+          _controller.text = spoken.trim();
+        });
+        _performSearch(spoken.trim());
+      }
+    } catch (e) {
+      debugPrint('Voice search platform error: $e');
     }
   }
 
@@ -134,11 +150,7 @@ class _SearchScreenState extends State<SearchScreen> {
                   : IconButton(
                       icon: const Icon(Icons.mic, color: Colors.white70, size: 22),
                       tooltip: 'Voice Search',
-                      onPressed: () {
-                        ScaffoldMessenger.of(context).showSnackBar(
-                          const SnackBar(content: Text('Listening for voice search...')),
-                        );
-                      },
+                      onPressed: _startVoiceSearch,
                     ),
               border: InputBorder.none,
               contentPadding: const EdgeInsets.symmetric(vertical: 12),

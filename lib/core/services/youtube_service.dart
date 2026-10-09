@@ -122,13 +122,15 @@ class YoutubeService {
       width: 100%;
       height: 100%;
       overflow: hidden;
+      pointer-events: none;
     }
     iframe {
       width: 100%;
       height: 100%;
       border: 0;
-      pointer-events: auto;
-      transform: scale(1.02);
+      pointer-events: none;
+      transform: scale(1.35);
+      transform-origin: center center;
     }
   </style>
 </head>
@@ -136,8 +138,8 @@ class YoutubeService {
   <div class="video-container">
     <iframe
       id="trailer-frame"
-      src="https://www.youtube.com/embed/$key?autoplay=1&mute=${isMuted ? 1 : 0}&controls=1&rel=0&modestbranding=1&playsinline=1&enablejsapi=1&loop=1&playlist=$key"
-      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+      src="https://www.youtube-nocookie.com/embed/$key?autoplay=1&mute=${isMuted ? 1 : 0}&controls=0&rel=0&modestbranding=1&playsinline=1&enablejsapi=1&loop=1&playlist=$key&iv_load_policy=3&fs=0&disablekb=1"
+      allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
       allowfullscreen>
     </iframe>
   </div>

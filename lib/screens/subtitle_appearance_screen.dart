@@ -52,12 +52,6 @@ class _SubtitleAppearanceScreenState extends State<SubtitleAppearanceScreen> {
     await prefs.setBool('sub_window_transparent', _windowTransparent);
 
     if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Subtitle appearance saved.'),
-          duration: Duration(seconds: 2),
-        ),
-      );
       Navigator.of(context).pop();
     }
   }
@@ -83,15 +77,6 @@ class _SubtitleAppearanceScreenState extends State<SubtitleAppearanceScreen> {
     await prefs.remove('sub_bg_transparent');
     await prefs.remove('sub_window_color');
     await prefs.remove('sub_window_transparent');
-
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Reset to default subtitle settings.'),
-          duration: Duration(seconds: 1),
-        ),
-      );
-    }
   }
 
   double _getFontSize() {

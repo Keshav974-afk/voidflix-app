@@ -46,6 +46,7 @@ class _DetailScreenState extends State<DetailScreen> {
   WebViewController? _trailerWebController;
   String? _activeTrailerKey;
   bool _showTrailerVideo = true;
+  bool _isLiked = false;
 
   @override
   void initState() {
@@ -65,6 +66,15 @@ class _DetailScreenState extends State<DetailScreen> {
       )
       ..setNavigationDelegate(
         NavigationDelegate(
+          onNavigationRequest: (request) {
+            if (request.url.contains('embed') ||
+                request.url.startsWith('about:blank') ||
+                request.url.startsWith('data:') ||
+                request.url.contains('voidflix.org')) {
+              return NavigationDecision.navigate;
+            }
+            return NavigationDecision.prevent;
+          },
           onWebResourceError: (error) {
             debugPrint('Trailer WebView error: ${error.description}');
           },
@@ -102,12 +112,6 @@ class _DetailScreenState extends State<DetailScreen> {
         }), "*");
       }
     ''');
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(_isMuted ? 'Muted' : 'Sound On'),
-        duration: const Duration(seconds: 1),
-      ),
-    );
   }
 
   Future<void> _loadDetail() async {
@@ -287,7 +291,9 @@ class _DetailScreenState extends State<DetailScreen> {
                   // Active Trailer / Backdrop View
                   if (_trailerWebController != null && _showTrailerVideo)
                     Positioned.fill(
-                      child: WebViewWidget(controller: _trailerWebController!),
+                      child: IgnorePointer(
+                        child: WebViewWidget(controller: _trailerWebController!),
+                      ),
                     )
                   else if (backdropUrl.isNotEmpty)
                     CachedNetworkImage(
@@ -364,15 +370,25 @@ class _DetailScreenState extends State<DetailScreen> {
                     ),
                   ),
 
-                  // Red progress line at bottom of trailer preview (Screenshot 4)
-                  Positioned(
-                    left: 0,
-                    right: 0,
-                    bottom: 0,
-                    child: Container(
-                      height: 2.5,
-                      color: AppTheme.primaryRed,
-                    ),
+                  // Real watch progress indicator (only when actually watched)
+                  Builder(
+                    builder: (c) {
+                      final saved = c.watch<HistoryProvider>().getProgress(detail.id);
+                      if (saved != null && saved.progress > 0.02) {
+                        return Positioned(
+                          left: 0,
+                          right: 0,
+                          bottom: 0,
+                          child: LinearProgressIndicator(
+                            value: saved.progress.clamp(0.02, 1.0),
+                            backgroundColor: Colors.white24,
+                            valueColor: const AlwaysStoppedAnimation<Color>(AppTheme.primaryRed),
+                            minHeight: 2.5,
+                          ),
+                        );
+                      }
+                      return const SizedBox.shrink();
+                    },
                   ),
                 ],
               ),
@@ -615,21 +631,6 @@ class _DetailScreenState extends State<DetailScreen> {
                               posterPath: detail.posterPath,
                               backdropPath: detail.backdropPath,
                             );
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text('Started download for ${detail.title}'),
-                                backgroundColor: const Color(0xFFE50914),
-                                action: SnackBarAction(
-                                  label: 'View',
-                                  textColor: Colors.white,
-                                  onPressed: () {
-                                    Navigator.of(context).push(
-                                      MaterialPageRoute(builder: (_) => const DownloadsScreen()),
-                                    );
-                                  },
-                                ),
-                              ),
-                            );
                           },
                           style: ElevatedButton.styleFrom(
                             backgroundColor: const Color(0xFF262626),
@@ -724,16 +725,27 @@ class _DetailScreenState extends State<DetailScreen> {
                       // Rate
                       GestureDetector(
                         onTap: () {
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            const SnackBar(content: Text('Rated! Added to your likes.')),
-                          );
+                          setState(() {
+                            _isLiked = !_isLiked;
+                          });
                         },
-                        child: const Column(
+                        child: Column(
                           mainAxisSize: MainAxisSize.min,
                           children: [
-                            Icon(Icons.thumb_up_alt_outlined, color: Colors.white, size: 24),
-                            SizedBox(height: 5),
-                            Text('Rate', style: TextStyle(color: Colors.white70, fontSize: 11)),
+                            Icon(
+                              _isLiked ? Icons.thumb_up_alt_rounded : Icons.thumb_up_alt_outlined,
+                              color: _isLiked ? AppTheme.primaryRed : Colors.white,
+                              size: 24,
+                            ),
+                            const SizedBox(height: 5),
+                            Text(
+                              _isLiked ? 'Liked' : 'Rate',
+                              style: TextStyle(
+                                color: _isLiked ? AppTheme.primaryRed : Colors.white70,
+                                fontSize: 11,
+                                fontWeight: _isLiked ? FontWeight.bold : FontWeight.normal,
+                              ),
+                            ),
                           ],
                         ),
                       ),
@@ -769,12 +781,6 @@ class _DetailScreenState extends State<DetailScreen> {
                               posterPath: detail.posterPath,
                               backdropPath: detail.backdropPath,
                             );
-                            ScaffoldMessenger.of(context).showSnackBar(
-                              SnackBar(
-                                content: Text('Downloading ${detail.title}...'),
-                                backgroundColor: const Color(0xFFE50914),
-                              ),
-                            );
                             return;
                           }
 
@@ -802,21 +808,6 @@ class _DetailScreenState extends State<DetailScreen> {
                               );
                             }
                           }
-                          ScaffoldMessenger.of(context).showSnackBar(
-                            SnackBar(
-                              content: Text('Downloading Season $_selectedSeason (${_episodes.length} episodes)...'),
-                              backgroundColor: const Color(0xFFE50914),
-                              action: SnackBarAction(
-                                label: 'View',
-                                textColor: Colors.white,
-                                onPressed: () {
-                                  Navigator.of(context).push(
-                                    MaterialPageRoute(builder: (_) => const DownloadsScreen()),
-                                  );
-                                },
-                              ),
-                            ),
-                          );
                         },
                         child: Column(
                           mainAxisSize: MainAxisSize.min,
@@ -904,22 +895,7 @@ class _DetailScreenState extends State<DetailScreen> {
                             ),
                           ),
                           GestureDetector(
-                            onTap: () {
-                              final sObj = detail.seasons.firstWhere(
-                                (s) => s.seasonNumber == _selectedSeason,
-                                orElse: () => detail.seasons.first,
-                              );
-                              ScaffoldMessenger.of(context).showSnackBar(
-                                SnackBar(
-                                  content: Text(
-                                    sObj.name.isNotEmpty
-                                        ? '${sObj.name} of ${detail.title}'
-                                        : 'Season $_selectedSeason of ${detail.title}',
-                                  ),
-                                  backgroundColor: const Color(0xFF262626),
-                                ),
-                              );
-                            },
+                            onTap: () => _openSeasonPickerSheet(detail),
                             child: Container(
                               width: 34,
                               height: 34,
@@ -1028,15 +1004,28 @@ class _DetailScreenState extends State<DetailScreen> {
                                             ),
                                           ),
 
-                                          // Red progress line
-                                          Positioned(
-                                            left: 0,
-                                            right: 0,
-                                            bottom: 0,
-                                            child: Container(
-                                              height: 2.5,
-                                              color: AppTheme.primaryRed,
-                                            ),
+                                          // Real episode watch progress indicator (only when actually watched)
+                                          Builder(
+                                            builder: (c) {
+                                              final saved = c.watch<HistoryProvider>().getProgress(detail.id);
+                                              if (saved != null &&
+                                                  saved.season == _selectedSeason &&
+                                                  saved.episode == ep.episodeNumber &&
+                                                  saved.progress > 0.02) {
+                                                return Positioned(
+                                                  left: 0,
+                                                  right: 0,
+                                                  bottom: 0,
+                                                  child: LinearProgressIndicator(
+                                                    value: saved.progress.clamp(0.02, 1.0),
+                                                    backgroundColor: Colors.white24,
+                                                    valueColor: const AlwaysStoppedAnimation<Color>(AppTheme.primaryRed),
+                                                    minHeight: 2.5,
+                                                  ),
+                                                );
+                                              }
+                                              return const SizedBox.shrink();
+                                            },
                                           ),
                                         ],
                                       ),
@@ -1133,22 +1122,6 @@ class _DetailScreenState extends State<DetailScreen> {
                                           posterPath: detail.posterPath,
                                           backdropPath: detail.backdropPath,
                                         );
-                                        ScaffoldMessenger.of(context).showSnackBar(
-                                          SnackBar(
-                                            content: Text('Downloading S$_selectedSeason:E${ep.episodeNumber} - ${ep.name}'),
-                                            backgroundColor: const Color(0xFFE50914),
-                                            duration: const Duration(seconds: 2),
-                                            action: SnackBarAction(
-                                              label: 'View',
-                                              textColor: Colors.white,
-                                              onPressed: () {
-                                                Navigator.of(context).push(
-                                                  MaterialPageRoute(builder: (_) => const DownloadsScreen()),
-                                                );
-                                              },
-                                            ),
-                                          ),
-                                        );
                                       },
                                     ),
                                 ],
@@ -1195,12 +1168,6 @@ class _DetailScreenState extends State<DetailScreen> {
                             onTap: () {
                               if (v != null && v.key.isNotEmpty) {
                                 _updateTrailerPlayer(v.key);
-                                ScaffoldMessenger.of(context).showSnackBar(
-                                  SnackBar(
-                                    content: Text('Playing: ${v.name}'),
-                                    duration: const Duration(seconds: 2),
-                                  ),
-                                );
                               } else {
                                 _playMedia(season: _selectedSeason, episode: 1);
                               }

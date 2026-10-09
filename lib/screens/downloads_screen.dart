@@ -37,13 +37,6 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
   void _playOffline(BuildContext context, DownloadedItem item) {
     if (item.status != 'completed') {
       context.read<DownloadProvider>().resumeDownload(item.id);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Resuming download for ${item.title}...'),
-          backgroundColor: const Color(0xFF222228),
-          duration: const Duration(seconds: 2),
-        ),
-      );
       return;
     }
 

@@ -123,7 +123,7 @@ class _ChooseIconScreenState extends State<ChooseIconScreen> {
         scrollDirection: Axis.horizontal,
         padding: const EdgeInsets.symmetric(horizontal: 16),
         itemCount: items.length,
-        separatorBuilder: (_, _) => const SizedBox(width: 14),
+        separatorBuilder: (_, __) => const SizedBox(width: 14),
         itemBuilder: (ctx, idx) => _buildAvatarCard(items[idx]),
       ),
     );
