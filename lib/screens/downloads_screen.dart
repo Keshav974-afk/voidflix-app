@@ -35,6 +35,18 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
   bool _isEditing = false;
 
   void _playOffline(BuildContext context, DownloadedItem item) {
+    if (item.status != 'completed') {
+      context.read<DownloadProvider>().resumeDownload(item.id);
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Resuming download for ${item.title}...'),
+          backgroundColor: const Color(0xFF222228),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+      return;
+    }
+
     Navigator.of(context).push(
       PageRouteBuilder(
         pageBuilder: (context, animation, secondaryAnimation) => PlayerScreen(
@@ -382,17 +394,37 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    isDownloading ? 'Downloading - $percentInt%' : item.formattedSize,
+                    isDownloading
+                        ? 'Downloading - $percentInt%'
+                        : item.status == 'paused'
+                            ? 'Paused - $percentInt%'
+                            : item.status == 'failed'
+                                ? 'Interrupted'
+                                : item.formattedSize,
                     style: TextStyle(
-                      color: isDownloading ? Colors.white70 : Colors.white54,
+                      color: isDownloading
+                          ? Colors.white70
+                          : item.status == 'paused'
+                              ? Colors.amber
+                              : item.status == 'failed'
+                                  ? AppTheme.primaryRed
+                                  : Colors.white54,
                       fontSize: 12,
                     ),
                   ),
                   const SizedBox(height: 2),
-                  const Text(
-                    'Ready to Play',
+                  Text(
+                    item.status == 'completed'
+                        ? 'Ready to Play'
+                        : item.status == 'paused'
+                            ? 'Tap to resume'
+                            : item.status == 'failed'
+                                ? 'Tap to restart'
+                                : 'Saving to device',
                     style: TextStyle(
-                      color: Colors.white38,
+                      color: item.status == 'paused'
+                          ? Colors.amber.withValues(alpha: 0.8)
+                          : Colors.white38,
                       fontSize: 11,
                     ),
                   ),
@@ -412,6 +444,16 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
               CustomPaint(
                 size: const Size(26, 26),
                 painter: _PieProgressPainter(progress: progress),
+              )
+            else if (item.status == 'paused')
+              IconButton(
+                icon: const Icon(Icons.play_circle_filled_rounded, color: Colors.amber, size: 26),
+                onPressed: () => downloadProvider.resumeDownload(item.id),
+              )
+            else if (item.status == 'failed')
+              IconButton(
+                icon: const Icon(Icons.refresh_rounded, color: AppTheme.primaryRed, size: 24),
+                onPressed: () => downloadProvider.resumeDownload(item.id),
               )
             else
               const Icon(Icons.check_circle_rounded, color: Colors.white70, size: 24),

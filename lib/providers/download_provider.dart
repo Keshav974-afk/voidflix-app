@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -26,6 +27,7 @@ class _DownloadCandidate {
 
 class DownloadProvider extends ChangeNotifier {
   static const String _storageKey = 'voidflix_downloads_data';
+  static const _notifChannel = MethodChannel('org.voidflix/notifications');
 
   final List<DownloadedItem> _items = [];
   final Map<String, http.Client> _activeClients = {};
@@ -42,6 +44,30 @@ class DownloadProvider extends ChangeNotifier {
     return 'movie_$mediaId';
   }
 
+  static Future<void> _updateSystemNotification({
+    required int id,
+    required String title,
+    required int progress,
+    bool isDone = false,
+  }) async {
+    try {
+      await _notifChannel.invokeMethod('updateDownloadProgress', {
+        'id': id,
+        'title': title,
+        'progress': progress,
+        'isDone': isDone,
+      });
+    } catch (_) {}
+  }
+
+  static Future<void> _cancelSystemNotification(int id) async {
+    try {
+      await _notifChannel.invokeMethod('cancelDownloadNotification', {
+        'id': id,
+      });
+    } catch (_) {}
+  }
+
   Future<void> loadDownloads() async {
     try {
       final prefs = await SharedPreferences.getInstance();
@@ -51,12 +77,36 @@ class DownloadProvider extends ChangeNotifier {
         _items.clear();
         for (final item in list) {
           final d = DownloadedItem.fromJson(item as Map<String, dynamic>);
-          // Verify local file exists for completed items
-          if (d.status == 'completed' && File(d.localFilePath).existsSync()) {
-            _items.add(d);
+          final file = File(d.localFilePath);
+          final partFile = File('${d.localFilePath}.part');
+          final segDir = Directory('${d.localFilePath}.segments');
+
+          // Verify completed items actually exist and are non-empty (> 100KB)
+          if (d.status == 'completed') {
+            if (file.existsSync() && file.lengthSync() > 100000) {
+              _items.add(d);
+            } else {
+              // File was missing or corrupted while app was closed
+              if (file.existsSync()) {
+                try {
+                  file.deleteSync();
+                } catch (_) {}
+              }
+              _items.add(d.copyWith(status: 'failed', progress: 0.0));
+            }
           } else if (d.status == 'downloading') {
-            // Reset interrupted downloads to failed so user can restart
-            _items.add(d.copyWith(status: 'failed'));
+            // App was closed or killed while download was in progress.
+            // Check if we have partial downloaded content to resume from.
+            final hasPart = partFile.existsSync() && partFile.lengthSync() > 0;
+            final hasSegs = segDir.existsSync() && segDir.listSync().isNotEmpty;
+
+            if (hasPart || hasSegs) {
+              _items.add(d.copyWith(status: 'paused'));
+            } else {
+              _items.add(d.copyWith(status: 'failed', progress: 0.0));
+            }
+          } else {
+            _items.add(d);
           }
         }
         notifyListeners();
@@ -82,6 +132,10 @@ class DownloadProvider extends ChangeNotifier {
 
   bool isDownloading(String id) {
     return _items.any((i) => i.id == id && i.status == 'downloading');
+  }
+
+  bool isPaused(String id) {
+    return _items.any((i) => i.id == id && (i.status == 'paused' || i.status == 'failed'));
   }
 
   double getProgress(String id) {
@@ -122,6 +176,24 @@ class DownloadProvider extends ChangeNotifier {
     return false;
   }
 
+  /// Resumes a paused or interrupted download from where it stopped
+  Future<void> resumeDownload(String id) async {
+    final item = getItem(id);
+    if (item == null) return;
+    if (isDownloading(id) || isDownloaded(id)) return;
+
+    await startDownload(
+      mediaId: item.mediaId,
+      title: item.title,
+      mediaType: item.mediaType,
+      season: item.season,
+      episode: item.episode,
+      episodeTitle: item.episodeTitle,
+      posterPath: item.posterPath,
+      backdropPath: item.backdropPath,
+    );
+  }
+
   /// Initiates robust multi-source extraction and starts streaming download directly to app storage
   Future<void> startDownload({
     required int mediaId,
@@ -143,7 +215,15 @@ class DownloadProvider extends ChangeNotifier {
     if (!downloadDir.existsSync()) {
       await downloadDir.create(recursive: true);
     }
+
     final targetPath = '${downloadDir.path}/$id.mp4';
+    final partPath = '$targetPath.part';
+    final segmentsDirPath = '$targetPath.segments';
+
+    final existingItem = getItem(id);
+    final initialProgress = existingItem != null && existingItem.progress > 0.05
+        ? existingItem.progress
+        : 0.05;
 
     var item = DownloadedItem(
       id: id,
@@ -157,7 +237,7 @@ class DownloadProvider extends ChangeNotifier {
       backdropPath: backdropPath,
       localFilePath: targetPath,
       status: 'downloading',
-      progress: 0.05,
+      progress: initialProgress,
       downloadedAt: DateTime.now(),
     );
 
@@ -168,6 +248,13 @@ class DownloadProvider extends ChangeNotifier {
 
     final client = http.Client();
     _activeClients[id] = client;
+
+    _updateSystemNotification(
+      id: id.hashCode.abs(),
+      title: title,
+      progress: (initialProgress * 100).toInt(),
+      isDone: false,
+    );
 
     try {
       // 2. Build prioritized candidate download stream list
@@ -256,14 +343,6 @@ class DownloadProvider extends ChangeNotifier {
           return;
         }
 
-        // Clean any partial file from previous attempt
-        final partialFile = File(targetPath);
-        if (partialFile.existsSync()) {
-          try {
-            await partialFile.delete();
-          } catch (_) {}
-        }
-
         debugPrint('Attempting download from: ${candidate.url} (HLS: ${candidate.isHls})');
 
         if (candidate.isHls) {
@@ -271,7 +350,10 @@ class DownloadProvider extends ChangeNotifier {
             m3u8Url: candidate.url,
             headers: candidate.headers,
             targetPath: targetPath,
+            partPath: partPath,
+            segmentsDirPath: segmentsDirPath,
             downloadId: id,
+            title: title,
             onProgress: (p, bytes) {
               _updateProgress(id, p, bytes);
             },
@@ -281,7 +363,9 @@ class DownloadProvider extends ChangeNotifier {
             downloadUrl: candidate.url,
             headers: candidate.headers,
             targetPath: targetPath,
+            partPath: partPath,
             downloadId: id,
+            title: title,
             onProgress: (p, bytes) {
               _updateProgress(id, p, bytes);
             },
@@ -316,20 +400,29 @@ class DownloadProvider extends ChangeNotifier {
       }
       await _saveDownloads();
       _activeClients.remove(id);
+
+      _updateSystemNotification(
+        id: id.hashCode.abs(),
+        title: title,
+        progress: 100,
+        isDone: true,
+      );
     } catch (e) {
       debugPrint('Download error ($id): $e');
       _activeClients.remove(id);
+      _cancelSystemNotification(id.hashCode.abs());
 
-      final partialFile = File(targetPath);
-      if (partialFile.existsSync()) {
-        try {
-          await partialFile.delete();
-        } catch (_) {}
-      }
+      final partFile = File(partPath);
+      final segDir = Directory(segmentsDirPath);
+      final hasPartial = (partFile.existsSync() && partFile.lengthSync() > 0) ||
+          (segDir.existsSync() && segDir.listSync().isNotEmpty);
 
       final idx = _items.indexWhere((i) => i.id == id);
       if (idx != -1) {
-        _items[idx] = item.copyWith(status: 'failed', progress: 0.0);
+        _items[idx] = item.copyWith(
+          status: hasPartial ? 'paused' : 'failed',
+          progress: hasPartial ? item.progress : 0.0,
+        );
         notifyListeners();
       }
       await _saveDownloads();
@@ -350,12 +443,15 @@ class DownloadProvider extends ChangeNotifier {
     }
   }
 
-  /// Downloads and concatenates HLS MPEG-TS segments into a single playable offline video
+  /// Downloads and concatenates HLS MPEG-TS segments with resumption support
   Future<bool> _downloadHlsStream({
     required String m3u8Url,
     required Map<String, String> headers,
     required String targetPath,
+    required String partPath,
+    required String segmentsDirPath,
     required String downloadId,
+    required String title,
     required Function(double progress, int bytes) onProgress,
   }) async {
     final client = _activeClients[downloadId];
@@ -415,14 +511,27 @@ class DownloadProvider extends ChangeNotifier {
 
       if (segmentUris.isEmpty) return false;
 
-      final file = File(targetPath);
-      final sink = file.openWrite();
-      int receivedBytes = 0;
+      final segDir = Directory(segmentsDirPath);
+      if (!segDir.existsSync()) {
+        await segDir.create(recursive: true);
+      }
+
+      int totalDownloadedBytes = 0;
+      int notifTick = 0;
 
       for (int i = 0; i < segmentUris.length; i++) {
         if (!_activeClients.containsKey(downloadId)) {
-          await sink.close();
           return false;
+        }
+
+        final segFileName = 'seg_${i.toString().padLeft(6, '0')}.ts';
+        final segFile = File('${segDir.path}/$segFileName');
+
+        if (segFile.existsSync() && segFile.lengthSync() > 0) {
+          totalDownloadedBytes += segFile.lengthSync();
+          final p = ((i + 1) / segmentUris.length).clamp(0.05, 0.99);
+          onProgress(p, totalDownloadedBytes);
+          continue;
         }
 
         final segUri = segmentUris[i];
@@ -431,67 +540,129 @@ class DownloadProvider extends ChangeNotifier {
               .get(segUri, headers: reqHeaders)
               .timeout(const Duration(seconds: 15));
           if (segRes.statusCode == 200) {
-            sink.add(segRes.bodyBytes);
-            receivedBytes += segRes.bodyBytes.length;
+            await segFile.writeAsBytes(segRes.bodyBytes, flush: true);
+            totalDownloadedBytes += segRes.bodyBytes.length;
 
             final p = ((i + 1) / segmentUris.length).clamp(0.05, 0.99);
-            onProgress(p, receivedBytes);
+            onProgress(p, totalDownloadedBytes);
+
+            if (++notifTick % 10 == 0) {
+              _updateSystemNotification(
+                id: downloadId.hashCode.abs(),
+                title: title,
+                progress: (p * 100).toInt(),
+              );
+            }
           }
         } catch (_) {}
       }
 
+      // Assemble all segments into part file
+      final partFile = File(partPath);
+      final sink = partFile.openWrite(mode: FileMode.write);
+
+      for (int i = 0; i < segmentUris.length; i++) {
+        final segFileName = 'seg_${i.toString().padLeft(6, '0')}.ts';
+        final segFile = File('${segDir.path}/$segFileName');
+        if (segFile.existsSync()) {
+          sink.add(await segFile.readAsBytes());
+        }
+      }
+
       await sink.flush();
       await sink.close();
-      return (await file.length()) > 50000;
+
+      final partLen = await partFile.length();
+      if (partLen > 100000) {
+        final targetFile = File(targetPath);
+        if (targetFile.existsSync()) {
+          try {
+            targetFile.deleteSync();
+          } catch (_) {}
+        }
+        await partFile.rename(targetPath);
+
+        // Clean up temporary segments folder
+        try {
+          await segDir.delete(recursive: true);
+        } catch (_) {}
+        return true;
+      }
+      return false;
     } catch (e) {
       debugPrint('HLS download error: $e');
       return false;
     }
   }
 
-  /// Downloads progressive MP4 file with Range and redirect support
+  /// Downloads progressive MP4 file with Range resumption and redirect support
   Future<bool> _downloadProgressiveStream({
     required String downloadUrl,
     required Map<String, String> headers,
     required String targetPath,
+    required String partPath,
     required String downloadId,
+    required String title,
     required Function(double progress, int bytes) onProgress,
   }) async {
     final client = _activeClients[downloadId];
     if (client == null) return false;
 
     try {
+      final partFile = File(partPath);
+      int existingBytes = 0;
+      if (partFile.existsSync()) {
+        existingBytes = partFile.lengthSync();
+      }
+
       final request = http.Request('GET', Uri.parse(downloadUrl));
       request.headers.addAll(headers);
       request.headers['User-Agent'] =
           'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36';
       request.headers['Accept'] = '*/*';
       request.headers['Accept-Encoding'] = 'identity';
+      if (existingBytes > 0) {
+        request.headers['Range'] = 'bytes=$existingBytes-';
+      }
       request.followRedirects = true;
       request.maxRedirects = 10;
 
-      final response = await client.send(request).timeout(const Duration(seconds: 12));
+      final response = await client.send(request).timeout(const Duration(seconds: 15));
       if (response.statusCode != 200 && response.statusCode != 206) {
         return false;
       }
 
-      final totalBytes = response.contentLength ?? 0;
-      int receivedBytes = 0;
+      final isResume = response.statusCode == 206 && existingBytes > 0;
+      final contentLength = response.contentLength ?? 0;
+      final totalExpectedBytes = isResume ? (existingBytes + contentLength) : contentLength;
 
-      final file = File(targetPath);
-      final sink = file.openWrite();
+      final sink = partFile.openWrite(
+        mode: isResume ? FileMode.append : FileMode.write,
+      );
+
+      int receivedBytes = isResume ? existingBytes : 0;
+      int notifTick = 0;
 
       await for (final chunk in response.stream) {
         if (!_activeClients.containsKey(downloadId)) {
+          await sink.flush();
           await sink.close();
           return false;
         }
         sink.add(chunk);
         receivedBytes += chunk.length;
 
-        if (totalBytes > 0) {
-          final p = (receivedBytes / totalBytes).clamp(0.05, 0.99);
+        if (totalExpectedBytes > 0) {
+          final p = (receivedBytes / totalExpectedBytes).clamp(0.05, 0.99);
           onProgress(p, receivedBytes);
+
+          if (++notifTick % 25 == 0) {
+            _updateSystemNotification(
+              id: downloadId.hashCode.abs(),
+              title: title,
+              progress: (p * 100).toInt(),
+            );
+          }
         } else {
           onProgress(0.5, receivedBytes);
         }
@@ -499,7 +670,20 @@ class DownloadProvider extends ChangeNotifier {
 
       await sink.flush();
       await sink.close();
-      return (await file.length()) > 50000;
+
+      final downloadedLength = await partFile.length();
+      if (downloadedLength > 100000) {
+        // Atomic promotion: replace any incomplete file with completed file
+        final targetFile = File(targetPath);
+        if (targetFile.existsSync()) {
+          try {
+            targetFile.deleteSync();
+          } catch (_) {}
+        }
+        await partFile.rename(targetPath);
+        return true;
+      }
+      return false;
     } catch (e) {
       debugPrint('Progressive download error: $e');
       return false;
@@ -510,14 +694,30 @@ class DownloadProvider extends ChangeNotifier {
     final client = _activeClients.remove(id);
     client?.close();
 
+    _cancelSystemNotification(id.hashCode.abs());
+
     final item = getItem(id);
     if (item != null) {
       final file = File(item.localFilePath);
+      final partFile = File('${item.localFilePath}.part');
+      final segDir = Directory('${item.localFilePath}.segments');
+
       if (file.existsSync()) {
         try {
           file.deleteSync();
         } catch (_) {}
       }
+      if (partFile.existsSync()) {
+        try {
+          partFile.deleteSync();
+        } catch (_) {}
+      }
+      if (segDir.existsSync()) {
+        try {
+          segDir.deleteSync(recursive: true);
+        } catch (_) {}
+      }
+
       _items.removeWhere((i) => i.id == id);
       notifyListeners();
       _saveDownloads();
