@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import '../core/constants/theme_constants.dart';
 import '../providers/profile_provider.dart';
 import '../providers/watchlist_provider.dart';
@@ -36,26 +37,55 @@ class WatchlistScreen extends StatelessWidget {
                       },
                       child: Row(
                         children: [
-                          Container(
-                            width: 34,
-                            height: 34,
-                            decoration: BoxDecoration(
-                              gradient: const LinearGradient(
-                                colors: [AppTheme.primaryRed, Color(0xFF8B0000)],
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(6),
+                            child: Container(
+                              width: 34,
+                              height: 34,
+                              decoration: BoxDecoration(
+                                borderRadius: BorderRadius.circular(6),
+                                border: Border.all(color: Colors.white24, width: 1.0),
                               ),
-                              borderRadius: BorderRadius.circular(6),
-                            ),
-                            child: Center(
-                              child: Text(
-                                activeProfile.name.isNotEmpty
-                                    ? activeProfile.name[0].toUpperCase()
-                                    : 'V',
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 16,
-                                ),
-                              ),
+                              child: activeProfile.avatar.startsWith('http')
+                                  ? CachedNetworkImage(
+                                      imageUrl: activeProfile.avatar,
+                                      fit: BoxFit.cover,
+                                      placeholder: (c, u) => Container(color: AppTheme.primaryRed),
+                                      errorWidget: (c, u, e) => Container(
+                                        color: AppTheme.primaryRed,
+                                        child: Center(
+                                          child: Text(
+                                            activeProfile.name.isNotEmpty
+                                                ? activeProfile.name[0].toUpperCase()
+                                                : 'V',
+                                            style: const TextStyle(
+                                              color: Colors.white,
+                                              fontWeight: FontWeight.bold,
+                                              fontSize: 16,
+                                            ),
+                                          ),
+                                        ),
+                                      ),
+                                    )
+                                  : Container(
+                                      decoration: const BoxDecoration(
+                                        gradient: LinearGradient(
+                                          colors: [AppTheme.primaryRed, Color(0xFF8B0000)],
+                                        ),
+                                      ),
+                                      child: Center(
+                                        child: Text(
+                                          activeProfile.name.isNotEmpty
+                                              ? activeProfile.name[0].toUpperCase()
+                                              : 'V',
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 16,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
                             ),
                           ),
                           const SizedBox(width: 10),

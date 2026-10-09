@@ -6,7 +6,6 @@ import '../core/constants/theme_constants.dart';
 import '../models/media_item.dart';
 import '../models/watch_progress.dart';
 import '../providers/history_provider.dart';
-import '../providers/media_provider.dart';
 import '../providers/profile_provider.dart';
 import '../screens/player_screen.dart';
 import 'detail_modal.dart';
@@ -139,23 +138,20 @@ class ContinueWatchingRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final historyProvider = context.watch<HistoryProvider>();
-    final mediaProvider = context.watch<MediaProvider>();
     final profileProvider = context.watch<ProfileProvider>();
     final activeProfileName = profileProvider.activeProfile.name;
 
     final realHistory = historyProvider.history;
 
-    // Use actual history if available, else fallback to trending items with sample progress
-    final List<dynamic> displayItems = realHistory.isNotEmpty
-        ? realHistory
-        : mediaProvider.trending.take(5).toList();
+    // Only show Continue Watching when the user has actual watch history
+    if (realHistory.isEmpty) return const SizedBox.shrink();
 
-    if (displayItems.isEmpty) return const SizedBox.shrink();
+    final List<WatchProgress> displayItems = realHistory;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // Section Header matching Screenshot 2: "Continue Watching for {username}"
+        // Section Header matching Netflix: "Continue Watching for {username}"
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
           child: Text(
@@ -169,7 +165,7 @@ class ContinueWatchingRow extends StatelessWidget {
           ),
         ),
 
-        // Horizontal Portrait Cards Row matching Screenshot 2
+        // Horizontal Portrait Cards Row matching Netflix
         SizedBox(
           height: 204,
           child: ListView.separated(
@@ -180,37 +176,14 @@ class ContinueWatchingRow extends StatelessWidget {
             itemBuilder: (context, index) {
               final raw = displayItems[index];
 
-              final int id;
-              final String title;
-              final String? posterPath;
-              final String? backdropPath;
-              final String mediaType;
-              final int season;
-              final int episode;
-              final double progress;
-
-              if (raw is WatchProgress) {
-                id = raw.id;
-                title = raw.title;
-                posterPath = raw.posterPath;
-                backdropPath = raw.backdropPath;
-                mediaType = raw.mediaType;
-                season = raw.season;
-                episode = raw.episode;
-                progress = raw.progress > 0 ? raw.progress : 0.45;
-              } else if (raw is MediaItem) {
-                id = raw.id;
-                title = raw.title;
-                posterPath = raw.posterPath;
-                backdropPath = raw.backdropPath;
-                mediaType = raw.mediaType;
-                season = 1;
-                episode = 1;
-                final sampleRates = [0.65, 0.40, 0.85, 0.30, 0.50];
-                progress = sampleRates[index % sampleRates.length];
-              } else {
-                return const SizedBox.shrink();
-              }
+              final int id = raw.id;
+              final String title = raw.title;
+              final String? posterPath = raw.posterPath;
+              final String? backdropPath = raw.backdropPath;
+              final String mediaType = raw.mediaType;
+              final int season = raw.season;
+              final int episode = raw.episode;
+              final double progress = raw.progress > 0 ? raw.progress : 0.05;
 
               final imageUrl = ApiConstants.getImageUrl(posterPath ?? backdropPath, size: 'w342');
 
@@ -352,9 +325,7 @@ class ContinueWatchingRow extends StatelessWidget {
                                 posterPath: posterPath,
                                 backdropPath: backdropPath,
                                 onRemove: () {
-                                  if (raw is WatchProgress) {
-                                    historyProvider.removeProgress(id);
-                                  }
+                                  historyProvider.removeProgress(id);
                                 },
                               );
                             },

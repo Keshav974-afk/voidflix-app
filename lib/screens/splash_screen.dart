@@ -1,12 +1,21 @@
 import 'dart:async';
 import 'dart:math' as math;
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../core/constants/theme_constants.dart';
 import 'main_navigation_screen.dart';
 import 'onboarding_screen.dart';
 
+/// OP Cinematic Netflix-grade Splash Screen for VOIDFLIX.
+///
+/// Features:
+/// 1. Authentic 3D Ribbon 'V' monogram emergence with crimson gradients & drop shadow.
+/// 2. Iconic Netflix "Swoop" glide & scale using exact cubic bezier splines (0.684, 0, 0.455, 1).
+/// 3. Curved arch typography reveal of "OIDFLIX" sequentially unfurling from behind the ribbon.
+/// 4. Synchronized multi-stage haptic feedback (emergence, lock, ta-dum burst).
+/// 5. Dramatic "Ta-dum" zoom into camera lens with prismatic vertical spectral light beams.
 class SplashScreen extends StatefulWidget {
   const SplashScreen({super.key});
 
@@ -16,60 +25,109 @@ class SplashScreen extends StatefulWidget {
 
 class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderStateMixin {
   late AnimationController _controller;
-  late Animation<double> _ribbonProgress;
-  late Animation<double> _glowAnimation;
-  late Animation<double> _textFadeAnimation;
+
+  // Animation Curves
+  late Animation<double> _ribbonDrawProgress;
+  late Animation<double> _swoopProgress;
+  late Animation<double> _swoopScale;
+  late Animation<double> _wordmarkReveal;
+  late Animation<double> _gleamProgress;
   late Animation<double> _zoomAnimation;
   late Animation<double> _fadeAnimation;
+  late Animation<double> _ambientGlow;
+
   Timer? _timer;
   bool _navigated = false;
+  bool _hapticStage1Triggered = false;
+  bool _hapticStage2Triggered = false;
+  bool _hapticStage3Triggered = false;
 
   @override
   void initState() {
     super.initState();
 
+    // 2800ms total runtime: punchy, authentic, deeply cinematic
     _controller = AnimationController(
       vsync: this,
-      duration: const Duration(milliseconds: 2600),
+      duration: const Duration(milliseconds: 2800),
     );
 
-    // 1. Ribbon growth & emergence (0% - 40%)
-    _ribbonProgress = CurvedAnimation(
+    // 1. Ribbon V emergence in center (0% - 35%)
+    _ribbonDrawProgress = CurvedAnimation(
       parent: _controller,
-      curve: const Interval(0.0, 0.45, curve: Curves.easeOutCubic),
+      curve: const Interval(0.0, 0.35, curve: Curves.easeOutCubic),
     );
 
-    // 2. Ambient crimson pulse & spectral ray expansion (20% - 70%)
-    _glowAnimation = CurvedAnimation(
+    // 2. The Iconic Netflix Swoop translation (36% - 58%)
+    // Exact cubic spline matching Netflix Logo Swoop.svg: keySplines="0.684 0 0.455 1"
+    _swoopProgress = CurvedAnimation(
       parent: _controller,
-      curve: const Interval(0.2, 0.70, curve: Curves.easeInOut),
+      curve: const Interval(0.36, 0.58, curve: Cubic(0.684, 0.0, 0.455, 1.0)),
     );
 
-    // 3. Brand text reveal (35% - 70%)
-    _textFadeAnimation = CurvedAnimation(
-      parent: _controller,
-      curve: const Interval(0.35, 0.70, curve: Curves.easeIn),
-    );
-
-    // 4. Dramatic Netflix Ta-dum zoom into camera (72% - 100%)
-    _zoomAnimation = Tween<double>(begin: 1.0, end: 8.5).animate(
+    // 3. Swoop Scale down from Hero to Wordmark size (34% - 56%)
+    // Exact cubic spline matching Netflix SVG: keySplines="0.655 0 0.461 1"
+    _swoopScale = Tween<double>(begin: 1.0, end: 0.34).animate(
       CurvedAnimation(
         parent: _controller,
-        curve: const Interval(0.72, 1.0, curve: Curves.easeInExpo),
+        curve: const Interval(0.34, 0.56, curve: Cubic(0.655, 0.0, 0.461, 1.0)),
       ),
     );
 
-    // 5. Fade out at the very end of zoom (85% - 100%)
+    // 4. Wordmark letters "OIDFLIX" unfurl from behind swooping ribbon (42% - 68%)
+    _wordmarkReveal = CurvedAnimation(
+      parent: _controller,
+      curve: const Interval(0.42, 0.68, curve: Curves.easeOutCubic),
+    );
+
+    // 5. Logo lock gleam (68% - 74%)
+    _gleamProgress = CurvedAnimation(
+      parent: _controller,
+      curve: const Interval(0.68, 0.74, curve: Curves.easeInOut),
+    );
+
+    // 6. Ambient crimson background pulse (10% - 75%)
+    _ambientGlow = CurvedAnimation(
+      parent: _controller,
+      curve: const Interval(0.10, 0.75, curve: Curves.easeInOut),
+    );
+
+    // 7. Iconic Ta-Dum exponential zoom into camera (75% - 100%)
+    _zoomAnimation = Tween<double>(begin: 1.0, end: 12.0).animate(
+      CurvedAnimation(
+        parent: _controller,
+        curve: const Interval(0.75, 1.0, curve: Curves.easeInExpo),
+      ),
+    );
+
+    // 8. Final camera fade out (86% - 100%)
     _fadeAnimation = Tween<double>(begin: 1.0, end: 0.0).animate(
       CurvedAnimation(
         parent: _controller,
-        curve: const Interval(0.82, 1.0, curve: Curves.easeIn),
+        curve: const Interval(0.86, 1.0, curve: Curves.easeIn),
       ),
     );
 
+    // Listener for synchronized tactile haptics
+    _controller.addListener(() {
+      final val = _controller.value;
+      if (val >= 0.15 && !_hapticStage1Triggered) {
+        _hapticStage1Triggered = true;
+        HapticFeedback.lightImpact();
+      }
+      if (val >= 0.60 && !_hapticStage2Triggered) {
+        _hapticStage2Triggered = true;
+        HapticFeedback.mediumImpact();
+      }
+      if (val >= 0.75 && !_hapticStage3Triggered) {
+        _hapticStage3Triggered = true;
+        HapticFeedback.heavyImpact();
+      }
+    });
+
     _controller.forward();
 
-    _timer = Timer(const Duration(milliseconds: 2550), () {
+    _timer = Timer(const Duration(milliseconds: 2750), () {
       _proceedNext();
     });
   }
@@ -88,7 +146,6 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
     if (!alreadyDone && !hasProfiles) {
       target = const OnboardingScreen();
     } else {
-      // Seamless Netflix experience: proceed straight into main navigation
       target = const MainNavigationScreen();
     }
 
@@ -121,27 +178,38 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
         body: AnimatedBuilder(
           animation: _controller,
           builder: (context, child) {
-            final ribbonVal = _ribbonProgress.value;
-            final glowVal = _glowAnimation.value;
-            final textVal = _textFadeAnimation.value;
+            final ribbonVal = _ribbonDrawProgress.value;
+            final swoopVal = _swoopProgress.value;
+            final swoopScaleVal = _swoopScale.value;
+            final wordmarkVal = _wordmarkReveal.value;
+            final gleamVal = _gleamProgress.value;
+            final glowVal = _ambientGlow.value;
             final zoomVal = _zoomAnimation.value;
             final fadeVal = _fadeAnimation.value;
+
+            // Dimensions for the swoop trajectory
+            // The wordmark total width is approx 230px, centered at (0, 0).
+            // 'V' position is on the far left of VOIDFLIX (around X = -100px).
+            const double targetVx = -99.0;
+            const double targetVy = 0.0;
+            final currentVx = targetVx * swoopVal;
+            final currentVy = targetVy * swoopVal;
 
             return Stack(
               alignment: Alignment.center,
               children: [
-                // 1. Pure cinematic black background with subtle radial crimson glow
-                Container(
-                  color: Colors.black,
-                ),
+                // 1. OLED Pure Black Background
+                const ColoredBox(color: Colors.black),
+
+                // 2. Subtle Cinematic Crimson Ambient Radial Glow
                 Positioned.fill(
                   child: Container(
                     decoration: BoxDecoration(
                       gradient: RadialGradient(
                         center: Alignment.center,
-                        radius: 0.9,
+                        radius: 0.85,
                         colors: [
-                          AppTheme.primaryRed.withValues(alpha: 0.16 * glowVal),
+                          AppTheme.primaryRed.withValues(alpha: 0.20 * glowVal),
                           Colors.transparent,
                         ],
                       ),
@@ -149,128 +217,73 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
                   ),
                 ),
 
-                // 2. Central Zoom Container (Monogram + Spectral Spectrum + Brand)
+                // 3. Prismatic Spectral Light Beams (erupts during Ta-dum zoom)
+                if (_controller.value >= 0.70)
+                  Positioned.fill(
+                    child: Opacity(
+                      opacity: ((_controller.value - 0.70) / 0.20).clamp(0.0, 1.0) * fadeVal,
+                      child: CustomPaint(
+                        size: Size.infinite,
+                        painter: _NetflixSpectralBeamsPainter(
+                          progress: (_controller.value - 0.70) / 0.30,
+                        ),
+                      ),
+                    ),
+                  ),
+
+                // 4. Central Hero Container (Monogram + Arched Wordmark)
                 Opacity(
                   opacity: fadeVal.clamp(0.0, 1.0),
                   child: Transform.scale(
                     scale: zoomVal,
                     child: Center(
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          // Netflix-style 3D V Monogram with Spectral Beams
-                          SizedBox(
-                            width: 140,
-                            height: 150,
-                            child: Stack(
-                              alignment: Alignment.center,
-                              children: [
-                                // Ambient spectral light beams
-                                CustomPaint(
-                                  size: const Size(140, 150),
-                                  painter: _NetflixSpectralBeamsPainter(
-                                    progress: glowVal,
-                                  ),
-                                ),
-                                // 3D Ribbon Monogram
-                                CustomPaint(
-                                  size: const Size(110, 120),
-                                  painter: _NetflixMonogramPainter(
-                                    progress: ribbonVal,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
+                      child: SizedBox(
+                        width: 320,
+                        height: 180,
+                        child: Stack(
+                          alignment: Alignment.center,
+                          children: [
+                            // --- LAYER A: Trailing Letters (OIDFLIX) ---
+                            // Arched curved baseline matching the authentic Netflix smile
+                            _buildArchedLetters(wordmarkVal, gleamVal),
 
-                          const SizedBox(height: 24),
-
-                          // Brand Title: VOIDFLIX
-                          Opacity(
-                            opacity: textVal.clamp(0.0, 1.0),
-                            child: Transform.translate(
-                              offset: Offset(0, 10 * (1.0 - textVal)),
-                              child: Column(
-                                mainAxisSize: MainAxisSize.min,
-                                children: [
-                                  RichText(
-                                    textAlign: TextAlign.center,
-                                    text: TextSpan(
-                                      children: [
-                                        TextSpan(
-                                          text: 'VOID',
-                                          style: GoogleFonts.bebasNeue(
-                                            fontSize: 54,
-                                            fontWeight: FontWeight.w900,
-                                            color: AppTheme.primaryRed,
-                                            letterSpacing: 8.0,
-                                            shadows: [
-                                              Shadow(
-                                                color: AppTheme.primaryRed.withValues(alpha: 0.75),
-                                                blurRadius: 28,
-                                              ),
-                                              const Shadow(
-                                                color: Colors.black,
-                                                offset: Offset(0, 4),
-                                                blurRadius: 10,
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                        TextSpan(
-                                          text: 'FLIX',
-                                          style: GoogleFonts.bebasNeue(
-                                            fontSize: 54,
-                                            fontWeight: FontWeight.w900,
-                                            color: Colors.white,
-                                            letterSpacing: 8.0,
-                                            shadows: const [
-                                              Shadow(
-                                                color: Colors.white60,
-                                                blurRadius: 18,
-                                              ),
-                                              Shadow(
-                                                color: Colors.black,
-                                                offset: Offset(0, 4),
-                                                blurRadius: 10,
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                      ],
+                            // --- LAYER B: The Swooping 3D Ribbon 'V' ---
+                            Transform.translate(
+                              offset: Offset(currentVx, currentVy),
+                              child: Transform.scale(
+                                scale: swoopScaleVal,
+                                child: SizedBox(
+                                  width: 110,
+                                  height: 120,
+                                  child: CustomPaint(
+                                    size: const Size(110, 120),
+                                    painter: _NetflixRibbonVPainter(
+                                      progress: ribbonVal,
+                                      gleam: gleamVal,
                                     ),
                                   ),
-                                  const SizedBox(height: 6),
-                                  Text(
-                                    'WATCH UNLIMITED',
-                                    style: GoogleFonts.inter(
-                                      color: Colors.white54,
-                                      fontSize: 10,
-                                      fontWeight: FontWeight.w700,
-                                      letterSpacing: 5.5,
-                                    ),
-                                  ),
-                                ],
+                                ),
                               ),
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
                     ),
                   ),
                 ),
 
-                // 3. Subtle skip hint at bottom
+                // 5. Subtle "Tap to skip" prompt for accessibility
                 Positioned(
-                  bottom: 28,
+                  bottom: 30,
                   child: Opacity(
-                    opacity: (_controller.value > 0.45 && _controller.value < 0.8) ? 0.35 : 0.0,
+                    opacity: (_controller.value > 0.40 && _controller.value < 0.75) ? 0.40 : 0.0,
                     child: const Text(
                       'Tap to skip',
                       style: TextStyle(
                         color: Colors.white54,
                         fontSize: 11,
-                        letterSpacing: 1.4,
+                        letterSpacing: 1.6,
+                        fontWeight: FontWeight.w500,
                       ),
                     ),
                   ),
@@ -282,13 +295,83 @@ class _SplashScreenState extends State<SplashScreen> with SingleTickerProviderSt
       ),
     );
   }
+
+  /// Builds the arched trailing letters "OIDFLIX" with Netflix concave baseline arch
+  Widget _buildArchedLetters(double revealProgress, double gleam) {
+    if (revealProgress <= 0.0) {
+      return const SizedBox.shrink();
+    }
+
+    // Letters following 'V' in VOIDFLIX:
+    const letters = ['O', 'I', 'D', 'F', 'L', 'I', 'X'];
+
+    // Relative X positions for each letter centered around the wordmark
+    // V is at -99
+    const xOffsets = [-66.0, -42.0, -22.0, 6.0, 32.0, 54.0, 78.0];
+
+    // Arch baseline offsets (concave upward curve: center lifted higher than edges)
+    // Parabolic arc formula: dy = (1 - (dist / maxDist)^2) * -archHeight
+    // OIDFLIX center is around 'F' (index 3), lifted up by ~6.5px
+    const archOffsets = [-2.8, -4.5, -6.0, -6.5, -5.8, -4.2, -1.5];
+
+    return Stack(
+      alignment: Alignment.center,
+      children: List.generate(letters.length, (index) {
+        final letter = letters[index];
+        final targetX = xOffsets[index];
+        final archY = archOffsets[index];
+
+        // Staggered reveal from left to right as the ribbon swoops past
+        final letterDelay = index * 0.08;
+        final letterProgress = ((revealProgress - letterDelay) / 0.50).clamp(0.0, 1.0);
+
+        if (letterProgress <= 0.0) return const SizedBox.shrink();
+
+        // Slide in slightly from the right as it reveals
+        final slideX = targetX + (12.0 * (1.0 - letterProgress));
+
+        return Transform.translate(
+          offset: Offset(slideX, archY),
+          child: Opacity(
+            opacity: letterProgress,
+            child: Text(
+              letter,
+              style: GoogleFonts.bebasNeue(
+                fontSize: 48,
+                fontWeight: FontWeight.w900,
+                color: AppTheme.primaryRed,
+                letterSpacing: 2.0,
+                shadows: [
+                  Shadow(
+                    color: AppTheme.primaryRed.withValues(alpha: 0.55 + 0.40 * gleam),
+                    blurRadius: 16 + (gleam * 12),
+                  ),
+                  const Shadow(
+                    color: Colors.black,
+                    offset: Offset(0, 3),
+                    blurRadius: 8,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      }),
+    );
+  }
 }
 
-/// Custom painter that creates the authentic Netflix 3D ribbon "V" monogram
-class _NetflixMonogramPainter extends CustomPainter {
+/// Custom painter for the authentic 3D Ribbon 'V' monogram
+/// Left Arm: Deep Crimson base layer (#8B0007 - #B80B14)
+/// Right Arm: Vivid Scarlet Red (#E50914 - #FF2B33) overlapping with realistic cast shadow
+class _NetflixRibbonVPainter extends CustomPainter {
   final double progress;
+  final double gleam;
 
-  _NetflixMonogramPainter({required this.progress});
+  _NetflixRibbonVPainter({
+    required this.progress,
+    required this.gleam,
+  });
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -297,12 +380,12 @@ class _NetflixMonogramPainter extends CustomPainter {
     final w = size.width;
     final h = size.height;
 
-    // Left Arm of the V (Deep Crimson base layer)
+    // --- 1. LEFT ARM OF THE 'V' (Base layer, dark crimson) ---
     final leftPath = Path();
-    leftPath.moveTo(w * 0.12, 0);
+    leftPath.moveTo(w * 0.10, 0);
     leftPath.lineTo(w * 0.38, 0);
     leftPath.lineTo(w * 0.52, h * progress);
-    leftPath.lineTo(w * 0.26, h * progress);
+    leftPath.lineTo(w * 0.24, h * progress);
     leftPath.close();
 
     final leftPaint = Paint()
@@ -312,18 +395,18 @@ class _NetflixMonogramPainter extends CustomPainter {
         colors: [
           Color(0xFF8B0007),
           Color(0xFFB80B14),
-          Color(0xFF98040C),
+          Color(0xFF94040B),
         ],
       ).createShader(Rect.fromLTWH(0, 0, w, h));
 
     canvas.drawPath(leftPath, leftPaint);
 
-    // Cast shadow from overlapping Right Arm onto Left Arm
+    // --- 2. CAST SHADOW FROM OVERLAPPING RIGHT ARM ---
     final shadowPath = Path();
-    shadowPath.moveTo(w * 0.45, 0);
+    shadowPath.moveTo(w * 0.44, 0);
     shadowPath.lineTo(w * 0.54, 0);
     shadowPath.lineTo(w * 0.54, h * progress);
-    shadowPath.lineTo(w * 0.35, h * progress);
+    shadowPath.lineTo(w * 0.34, h * progress);
     shadowPath.close();
 
     final shadowPaint = Paint()
@@ -331,55 +414,55 @@ class _NetflixMonogramPainter extends CustomPainter {
         begin: Alignment.centerLeft,
         end: Alignment.centerRight,
         colors: [
-          Colors.black.withValues(alpha: 0.65),
+          Colors.black.withValues(alpha: 0.70),
           Colors.transparent,
         ],
       ).createShader(Rect.fromLTWH(0, 0, w, h));
 
     canvas.drawPath(shadowPath, shadowPaint);
 
-    // Right Arm of the V (Bright foreground ribbon with glossy flame red)
+    // --- 3. RIGHT ARM OF THE 'V' (Foreground ribbon, bright Netflix red) ---
     final rightPath = Path();
-    rightPath.moveTo(w * 0.88, 0);
+    rightPath.moveTo(w * 0.90, 0);
     rightPath.lineTo(w * 0.62, 0);
     rightPath.lineTo(w * 0.48, h * progress);
-    rightPath.lineTo(w * 0.74, h * progress);
+    rightPath.lineTo(w * 0.76, h * progress);
     rightPath.close();
 
     final rightPaint = Paint()
-      ..shader = const LinearGradient(
+      ..shader = LinearGradient(
         begin: Alignment.topCenter,
         end: Alignment.bottomCenter,
         colors: [
-          Color(0xFFE50914),
-          Color(0xFFFF222A),
-          Color(0xFFD80812),
+          const Color(0xFFE50914),
+          Color.lerp(const Color(0xFFFF222A), Colors.white, gleam * 0.35)!,
+          const Color(0xFFD80812),
         ],
       ).createShader(Rect.fromLTWH(0, 0, w, h))
-      ..maskFilter = const MaskFilter.blur(BlurStyle.solid, 0.5);
+      ..maskFilter = const MaskFilter.blur(BlurStyle.solid, 0.4);
 
     canvas.drawPath(rightPath, rightPaint);
 
-    // Gloss highlight along right edge
+    // --- 4. GLOSS HIGHLIGHT ALONG RIGHT OUTER EDGE ---
     final highlightPaint = Paint()
-      ..color = Colors.white.withValues(alpha: 0.28 * progress)
-      ..strokeWidth = 1.5
+      ..color = Colors.white.withValues(alpha: 0.35 * progress + 0.35 * gleam)
+      ..strokeWidth = 1.8
       ..style = PaintingStyle.stroke;
 
     canvas.drawLine(
-      Offset(w * 0.88, 0),
-      Offset(w * 0.74, h * progress),
+      Offset(w * 0.90, 0),
+      Offset(w * 0.76, h * progress),
       highlightPaint,
     );
   }
 
   @override
-  bool shouldRepaint(covariant _NetflixMonogramPainter oldDelegate) {
-    return oldDelegate.progress != progress;
+  bool shouldRepaint(covariant _NetflixRibbonVPainter oldDelegate) {
+    return oldDelegate.progress != progress || oldDelegate.gleam != gleam;
   }
 }
 
-/// Custom painter for the signature Netflix spectral vertical light beams
+/// Custom painter for signature Netflix Ta-dum vertical spectral light rays
 class _NetflixSpectralBeamsPainter extends CustomPainter {
   final double progress;
 
@@ -391,30 +474,34 @@ class _NetflixSpectralBeamsPainter extends CustomPainter {
 
     final w = size.width;
     final h = size.height;
-    final random = math.Random(42);
+    final random = math.Random(1337);
 
-    // Draw vertical spectral beam bars resembling the Ta-dum light spectrum
-    const beamCount = 28;
+    const beamCount = 38;
     for (int i = 0; i < beamCount; i++) {
-      final x = (i / beamCount) * w + (random.nextDouble() * 3 - 1.5);
-      final beamHeight = h * (0.4 + random.nextDouble() * 0.6) * progress;
+      final x = (i / beamCount) * w + (random.nextDouble() * 4 - 2);
+      final beamHeight = h * (0.45 + random.nextDouble() * 0.55) * progress.clamp(0.0, 1.0);
       final yStart = (h - beamHeight) / 2;
 
-      // Color variation: crimson, scarlet, flame red, with rare white streaks
       Color beamColor;
-      if (i % 7 == 0) {
-        beamColor = Colors.white.withValues(alpha: 0.45 * progress);
+      if (i % 6 == 0) {
+        // Crisp white prism streak
+        beamColor = Colors.white.withValues(alpha: 0.55 * progress.clamp(0.0, 1.0));
       } else if (i % 4 == 0) {
-        beamColor = const Color(0xFFFF414A).withValues(alpha: 0.6 * progress);
+        // Bright magenta/violet spectrum
+        beamColor = const Color(0xFFFF2277).withValues(alpha: 0.65 * progress.clamp(0.0, 1.0));
+      } else if (i % 3 == 0) {
+        // Neon scarlet
+        beamColor = const Color(0xFFFF3838).withValues(alpha: 0.75 * progress.clamp(0.0, 1.0));
       } else {
-        beamColor = const Color(0xFFE50914).withValues(alpha: (0.2 + random.nextDouble() * 0.5) * progress);
+        // Deep Netflix crimson
+        beamColor = const Color(0xFFE50914).withValues(alpha: (0.3 + random.nextDouble() * 0.5) * progress.clamp(0.0, 1.0));
       }
 
       final beamPaint = Paint()
         ..color = beamColor
-        ..strokeWidth = 1.8 + random.nextDouble() * 2.2
+        ..strokeWidth = 2.0 + random.nextDouble() * 3.0
         ..strokeCap = StrokeCap.round
-        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 2.5);
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 2.8);
 
       canvas.drawLine(
         Offset(x, yStart),

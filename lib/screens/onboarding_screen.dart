@@ -8,6 +8,7 @@ import '../core/constants/theme_constants.dart';
 import '../providers/media_provider.dart';
 import '../providers/profile_provider.dart';
 import '../widgets/profile_avatar.dart';
+import '../services/avatar_service.dart';
 import 'choose_icon_screen.dart';
 import 'main_navigation_screen.dart';
 
@@ -94,11 +95,19 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
 
   late String _selectedAvatarUrl;
   static const int _totalPages = 4;
+  List<NetflixAvatar> _availableAvatars = List.from(AvatarService.defaultFeatured);
 
   @override
   void initState() {
     super.initState();
     _selectedAvatarUrl = _netflixPfpOptions.first['url']!;
+    AvatarService().loadAvatars().then((_) {
+      if (mounted && AvatarService().allAvatars.isNotEmpty) {
+        setState(() {
+          _availableAvatars = AvatarService().allAvatars;
+        });
+      }
+    });
   }
 
   @override
@@ -740,18 +749,18 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
           ),
           const SizedBox(height: 10),
 
-          // Horizontal list of official Netflix avatars
+          // Horizontal list of official Netflix avatars (expanded with all extracted avatars)
           SizedBox(
             height: 72,
             child: ListView.separated(
               scrollDirection: Axis.horizontal,
-              itemCount: _netflixPfpOptions.length,
+              itemCount: _availableAvatars.length,
               separatorBuilder: (_, _) => const SizedBox(width: 10),
               itemBuilder: (ctx, idx) {
-                final opt = _netflixPfpOptions[idx];
-                final isSelected = _selectedAvatarUrl == opt['url'];
+                final opt = _availableAvatars[idx];
+                final isSelected = _selectedAvatarUrl == opt.url;
                 return GestureDetector(
-                  onTap: () => setState(() => _selectedAvatarUrl = opt['url']!),
+                  onTap: () => setState(() => _selectedAvatarUrl = opt.url),
                   child: Container(
                     width: 64,
                     height: 64,
@@ -773,8 +782,10 @@ class _OnboardingScreenState extends State<OnboardingScreen> {
                     child: ClipRRect(
                       borderRadius: BorderRadius.circular(8),
                       child: CachedNetworkImage(
-                        imageUrl: opt['url']!,
+                        imageUrl: opt.url,
                         fit: BoxFit.cover,
+                        memCacheWidth: 150,
+                        memCacheHeight: 150,
                         placeholder: (c, u) => Container(color: const Color(0xFF1E1E24)),
                         errorWidget: (c, u, e) => Container(
                           color: const Color(0xFF1E1E24),

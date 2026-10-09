@@ -1,0 +1,93 @@
+<svg fill="none" height="100%" width="100%" viewBox="0 0 512 512" xmlns:xlink="http://www.w3.org/1999/xlink" xmlns="http://www.w3.org/2000/svg">
+<defs>
+  <filter filterUnits="userSpaceOnUse" height="200%" width="200%" y="-50%" x="-50%" id="f0">
+    <feGaussianBlur result="blur0" stdDeviation="35" in="SourceGraphic" />
+  </filter>
+  <filter filterUnits="userSpaceOnUse" height="200%" width="200%" y="-50%" x="-50%" id="f1">
+    <feDropShadow result="dropShadow0" flood-opacity="0.893" flood-color="#000000" stdDeviation="6.667" dy="0" dx="0" in="SourceGraphic" />
+  </filter>
+  <filter filterUnits="userSpaceOnUse" height="200%" width="200%" y="-50%" x="-50%" id="f2">
+    <feDropShadow result="dropShadow0" flood-opacity="0.893" flood-color="#000000" stdDeviation="6.667" dy="0" dx="0" in="SourceGraphic" />
+  </filter>
+  <filter id="i3">
+    <feComponentTransfer in="SourceGraphic">
+      <feFuncA tableValues="1 0" type="table" />
+    </feComponentTransfer>
+  </filter>
+  <mask height="20000" width="20000" y="-10000" x="-10000" maskContentUnits="userSpaceOnUse" maskUnits="userSpaceOnUse" style="mask-type: alpha" mask-type="alpha" id="i4">
+    <g filter="url(#i3)">
+      <rect opacity="0" fill="#ffffff" height="512" width="512" y="0" x="0" />
+      <g filter="url(#f0)" transform="matrix(2.324,0,0,1.14,26,255)">
+        <g id="i5" transform="matrix(1,0,0,1,232,1)">
+          <rect height="538" width="72" y="-269" x="-36" fill="#b1060f" />
+        </g>
+      </g>
+    </g>
+  </mask>
+</defs>
+
+<!-- Pure Black Cinematic Canvas -->
+<rect width="100%" height="100%" fill="#000000" />
+
+<!-- 1. Wordmark VOIDFLIX revealed from behind the Swoop Mask -->
+<g mask="url(#i4)" opacity="0" visibility="hidden" id="i14">
+  <animate repeatCount="indefinite" begin="0s" calcMode="discrete" dur="4.6s" values="hidden; visible; visible" keyTimes="0; 0.37; 1" attributeName="visibility" />
+  <animate repeatCount="indefinite" attributeName="opacity" dur="4.6s" begin="0s" fill="freeze" values="0; 0; 1; 1; 0; 0" keyTimes="0; 0.376812; 0.543478; 0.882435; 0.992754; 1" keySplines="0 0 1 1; 0.612 0 0.87 1; 0.167 0 0.833 1; 0.167 0 0.833 1; 0 0 1 1" calcMode="spline" />
+  <g>
+    <g transform="translate(402.75,0)">
+      <animateTransform repeatCount="indefinite" type="translate" attributeName="transform" dur="4.6s" begin="0s" calcMode="spline" values="402.75 0; 402.75 0; 256 0; 256 0" keyTimes="0; 0.376812; 0.560674; 1" keySplines="0 0 1 1; 0.684 0 0.455 1; 0 0 1 1" fill="freeze" />
+      <g transform="translate(0,256)">
+        <g transform="scale(1,1) translate(0,0)">
+          <path fill="#e50914" d="M-176.945,-46.090L-162.681,-46.090L-153.429,23.592L-153.172,23.566L-143.920,-46.090L-130.942,-46.090L-144.562,42.620L-163.323,45.069ZM-123.103,19.725L-123.103,-25.631C-123.103,-32.533,-121.261,-37.883,-117.578,-41.682C-113.894,-45.432,-108.583,-47.302,-101.644,-47.293C-94.705,-47.285,-89.393,-45.462,-85.710,-41.823C-82.026,-38.219,-80.184,-33.114,-80.184,-26.508L-80.184,16.904C-80.184,23.510,-82.026,28.744,-85.710,32.608C-89.393,36.523,-94.705,38.768,-101.644,39.343C-108.583,39.981,-113.894,38.604,-117.578,35.213C-121.261,31.790,-123.103,26.627,-123.103,19.725ZM-94.319,18.537L-94.319,-27.096C-94.319,-32.591,-96.761,-35.313,-101.644,-35.260C-106.526,-35.204,-108.968,-32.387,-108.968,-26.809L-108.968,19.513C-108.968,25.091,-106.526,27.690,-101.644,27.310C-96.761,26.957,-94.319,24.033,-94.319,18.537ZM-68.619,-46.090L-54.484,-46.090L-54.484,35.018L-68.619,35.756ZM-41.891,-46.090L-20.303,-46.090C-13.278,-46.090,-8.010,-44.417,-4.498,-41.070C-0.985,-37.725,0.771,-32.820,0.771,-26.356L0.771,14.026C0.771,20.490,-0.985,25.398,-4.498,28.749C-8.010,32.117,-13.278,33.845,-20.303,33.935L-41.891,34.504ZM-20.560,22.506C-18.247,22.475,-16.469,21.843,-15.227,20.610C-13.985,19.379,-13.364,17.394,-13.364,14.654L-13.364,-26.908C-13.364,-29.648,-13.985,-31.626,-15.227,-32.841C-16.469,-34.057,-18.247,-34.663,-20.560,-34.657L-27.756,-34.636L-27.756,22.633ZM12.336,-46.090L49.729,-46.090L49.729,-34.533L26.471,-34.640L26.471,-12.314L44.718,-12.082L44.718,-0.553L26.471,-0.864L26.471,34.057L12.336,33.825ZM58.596,-46.090L72.731,-46.090L72.731,24.275L95.989,25.701L95.989,37.666L58.596,35.216ZM104.856,-46.090L118.991,-46.090L118.991,39.763L104.856,38.421ZM144.048,-2.780L128.500,-46.090L143.406,-46.090L152.915,-17.109L153.172,-17.099L162.938,-46.090L176.302,-46.090L160.753,-1.725L177.073,47.053L162.167,44.909L151.887,12.298L151.630,12.276L141.093,42.200L127.729,40.677Z" />
+        </g>
+      </g>
+    </g>
+  </g>
+</g>
+
+<!-- 2. The 3D Ribbon 'V' Monogram Swoop Animation -->
+<g id="ribbon-v">
+  <g transform="translate(256,256)">
+    <!-- Swoop Translation: from center (256,256) to 'V' letter position (102.1, 256) -->
+    <animateTransform repeatCount="indefinite" type="translate" attributeName="transform" dur="4.6s" begin="0s" calcMode="spline" values="256 256; 256 256; 102.1 256; 102.1 256" keyTimes="0; 0.376812; 0.560674; 1" keySplines="0 0 1 1; 0.684 0 0.455 1; 0 0 1 1" fill="freeze" />
+    <!-- Swoop Scale: from hero size (0.66) to wordmark letter size (0.21) -->
+    <g transform="scale(0.66,0.66)">
+      <animateTransform repeatCount="indefinite" type="scale" attributeName="transform" dur="4.6s" begin="0s" calcMode="spline" values="0.66 0.66; 0.66 0.66; 0.21 0.21; 0.21 0.21" keyTimes="0; 0.166667; 0.376812; 1" keySplines="0 0 1 1; 0.655 0 0.461 1; 0 0 1 1" fill="freeze" />
+      <g transform="translate(-0.209,-0.143)">
+        <g opacity="0" id="ribbon-v-inner">
+          <animate repeatCount="indefinite" attributeName="opacity" dur="4.6s" begin="0s" fill="freeze" values="0; 0; 1; 1; 0; 0" keyTimes="0; 0.05; 0.12; 0.58; 0.65; 1" keySplines="0 0 1 1; 0.333 0 0.667 1; 0 0 1 1; 0.612 0 1 1; 0 0 1 1" calcMode="spline" />
+          
+          <!-- Left Arm of 'V' (Dark Crimson Base Ribbon) -->
+          <path fill="#b1060f" d="M-115,-218.21L-35,-218.21L12,218.52L-68,218.52Z">
+            <animate repeatCount="indefinite" attributeName="d" dur="4.6s" begin="0s" calcMode="spline"
+              values="M-115,-218.21L-35,-218.21L-35,-218.21L-115,-218.21Z;
+                      M-115,-218.21L-35,-218.21L-35,-218.21L-115,-218.21Z;
+                      M-115,-218.21L-35,-218.21L12,218.52L-68,218.52Z;
+                      M-115,-218.21L-35,-218.21L12,218.52L-68,218.52Z"
+              keyTimes="0; 0.04; 0.18; 1"
+              keySplines="0 0 1 1; 0.434 0 0.252 1; 0 0 1 1"
+              fill="freeze" />
+          </path>
+
+          <!-- Right Arm of 'V' (Foreground Bright Red Ribbon with Cast Shadow) -->
+          <g filter="url(#f1)">
+            <path fill="#e50914" d="M115,-218.21L35,-218.21L-12,218.52L68,218.52Z">
+              <animate repeatCount="indefinite" attributeName="d" dur="4.6s" begin="0s" calcMode="spline"
+                values="M115,-218.21L35,-218.21L35,-218.21L115,-218.21Z;
+                        M115,-218.21L35,-218.21L35,-218.21L115,-218.21Z;
+                        M115,-218.21L35,-218.21L-12,218.52L68,218.52Z;
+                        M115,-218.21L35,-218.21L-12,218.52L68,218.52Z"
+                keyTimes="0; 0.06; 0.22; 1"
+                keySplines="0 0 1 1; 0.434 0 0.252 1; 0 0 1 1"
+                fill="freeze" />
+            </path>
+          </g>
+
+          <!-- Gloss Edge Highlight along Right Outer Border -->
+          <line x1="115" y1="-218.21" x2="68" y2="218.52" stroke="#ffffff" stroke-width="2.5" stroke-opacity="0.32" />
+        </g>
+      </g>
+    </g>
+  </g>
+</g>
+</svg>
