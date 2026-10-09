@@ -11,39 +11,29 @@ workflows:
       - name: Get Flutter dependencies
         script: |
           flutter packages pub get
-      - name: Build iOS App (unsigned)
+      - name: Configure Flutter iOS assets and plugins
         script: |
-          flutter build ios --release --no-codesign
-      - name: Package into IPA
+          flutter build ios --config-only --release
+      - name: Build unsigned iOS App via xcodebuild
+        script: |
+          xcodebuild build \
+            -workspace ios/Runner.xcworkspace \
+            -scheme Runner \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -derivedDataPath build/ios_derived \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY=""
+      - name: Package Payload into Voidflix.ipa
         script: |
           mkdir -p Payload
-          cp -r build/ios/iphoneos/Runner.app Payload/Voidflix.app
+          APP_PATH=$(find build/ios_derived/Build/Products/Release-iphoneos -name "*.app" | head -n 1)
+          cp -r "$APP_PATH" Payload/Voidflix.app
           zip -r Voidflix.ipa Payload
     artifacts:
       - Voidflix.ipa
-      - build/ios/iphoneos/Runner.app
-
-  ios-signed:
-    name: Voidflix iOS Signed IPA (App Store / Ad Hoc Distribution)
-    instance_type: mac_mini_m2
-    max_build_duration: 60
-    environment:
-      flutter: master
-      xcode: latest
-      cocoapods: default
-      groups:
-        - app_store_credentials # Optional: Configure in Codemagic UI if using Apple Developer account
-    scripts:
-      - name: Set up code signing settings on Xcode project
-        script: xcode-project use-profiles
-      - name: Get Flutter packages
-        script: |
-          flutter packages pub get
-      - name: Build IPA with Flutter
-        script: |
-          flutter build ipa --release
-    artifacts:
-      - build/ios/ipa/*.ipa
+      - build/ios_derived/Build/Products/Release-iphoneos/*.app
 
   android-release:
     name: Voidflix Android Release APK
