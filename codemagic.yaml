@@ -1,0 +1,63 @@
+workflows:
+  ios-release:
+    name: Voidflix iOS Release (IPA for Sideloading & AltStore)
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    environment:
+      flutter: master
+      xcode: latest
+      cocoapods: default
+    scripts:
+      - name: Get Flutter dependencies
+        script: |
+          flutter packages pub get
+      - name: Build iOS App (unsigned)
+        script: |
+          flutter build ios --release --no-codesign
+      - name: Package into IPA
+        script: |
+          mkdir -p Payload
+          cp -r build/ios/iphoneos/Runner.app Payload/Voidflix.app
+          zip -r Voidflix.ipa Payload
+    artifacts:
+      - Voidflix.ipa
+      - build/ios/iphoneos/Runner.app
+
+  ios-signed:
+    name: Voidflix iOS Signed IPA (App Store / Ad Hoc Distribution)
+    instance_type: mac_mini_m2
+    max_build_duration: 60
+    environment:
+      flutter: master
+      xcode: latest
+      cocoapods: default
+      groups:
+        - app_store_credentials # Optional: Configure in Codemagic UI if using Apple Developer account
+    scripts:
+      - name: Set up code signing settings on Xcode project
+        script: xcode-project use-profiles
+      - name: Get Flutter packages
+        script: |
+          flutter packages pub get
+      - name: Build IPA with Flutter
+        script: |
+          flutter build ipa --release
+    artifacts:
+      - build/ios/ipa/*.ipa
+
+  android-release:
+    name: Voidflix Android Release APK
+    instance_type: mac_mini_m2
+    max_build_duration: 30
+    environment:
+      flutter: master
+    scripts:
+      - name: Get Flutter dependencies
+        script: |
+          flutter packages pub get
+      - name: Build Split Release APK
+        script: |
+          flutter build apk --release --split-per-abi
+    artifacts:
+      - build/app/outputs/flutter-apk/app-arm64-v8a-release.apk
+      - build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk

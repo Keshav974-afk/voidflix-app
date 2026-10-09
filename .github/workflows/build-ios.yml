@@ -5,6 +5,9 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build-ios:
     name: Build iOS IPA
@@ -22,13 +25,13 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      - name: Build iOS IPA (unsigned for sideloading)
-        run: flutter build ipa --no-codesign --release
+      - name: Build iOS App (unsigned for sideloading)
+        run: flutter build ios --release --no-codesign
 
       - name: Package Payload into Voidflix.ipa
         run: |
           mkdir -p Payload
-          cp -r build/ios/archive/Runner.xcarchive/Products/Applications/Runner.app Payload/Voidflix.app
+          cp -r build/ios/iphoneos/Runner.app Payload/Voidflix.app
           zip -r Voidflix.ipa Payload
 
       - name: Upload iOS IPA Artifact
@@ -41,4 +44,4 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release create v1.0.0 Voidflix.ipa --title "Voidflix v1.0.0" --notes "Official iOS IPA & Android Release" --clobber || true
+          gh release upload v1.0.0 Voidflix.ipa --clobber || gh release create v1.0.0 Voidflix.ipa --title "Voidflix v1.0.0" --notes "Official iOS IPA & Android Release" --clobber || true
