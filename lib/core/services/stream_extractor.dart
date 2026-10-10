@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'subtitle_service.dart';
+import '../constants/api_constants.dart';
 
 class StreamQuality {
   final String label;
@@ -186,6 +187,7 @@ class StreamExtractor {
   static void invalidateCache(String type, int tmdbId, int season, int episode) {
     final keys = [
       getCacheKey(type, tmdbId, season, episode),
+      getCacheKey(type, tmdbId, season, episode, prefix: 'cinejoy'),
       getCacheKey(type, tmdbId, season, episode, prefix: 'vidrock'),
       getCacheKey(type, tmdbId, season, episode, prefix: 'vidlink'),
       getCacheKey(type, tmdbId, season, episode, prefix: 'voidflix'),
@@ -269,8 +271,8 @@ class StreamExtractor {
       final json = jsonDecode(res.body) as Map<String, dynamic>;
       final results = <ExtractedStream>[];
 
-      // Preferred priority order of sources
-      final order = ['Nova', 'Atlas', 'Orion', 'Astra', 'Luna'];
+      // Preferred priority order of sources (Orion is primary active 1080p cluster)
+      final order = ['Orion', 'Nova', 'Atlas', 'Astra', 'Luna'];
       for (final name in order) {
         final src = json[name] as Map<String, dynamic>?;
         if (src != null && src['url'] != null) {
@@ -286,6 +288,7 @@ class StreamExtractor {
                 language: lang,
                 headers: {
                   'Referer': 'https://vidrock.ru/',
+                  'Origin': 'https://vidrock.ru',
                   'User-Agent':
                       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
                 },
@@ -374,7 +377,9 @@ class StreamExtractor {
       ).timeout(const Duration(seconds: 8));
 
       if (res.statusCode != 200) return null;
-      final data = jsonDecode(res.body) as Map<String, dynamic>;
+      final decoded = jsonDecode(res.body);
+      if (decoded is! Map<String, dynamic>) return null;
+      final data = decoded;
       final streamObj = data['stream'] as Map<String, dynamic>?;
       if (streamObj == null) return null;
 
@@ -574,6 +579,165 @@ class StreamExtractor {
     return null;
   }
 
+  /// Extracts high-bitrate direct HLS streams (up to 4K Ultra HD & 1080p) via Cinejoy / wing.st using enc-dec.app
+  static Future<List<ExtractedStream>> extractCinejoy({
+    required String type, // 'movie' or 'tv'
+    required int tmdbId,
+    int season = 1,
+    int episode = 1,
+    String? preferredServer, // 'Lisbon' (4K) or 'Nebula' (1080p)
+  }) async {
+    final cacheKey = getCacheKey(type, tmdbId, season, episode, prefix: 'cinejoy');
+    final cached = await getCachedEntry(cacheKey);
+    if (cached != null && cached.streams.isNotEmpty) {
+      debugPrint('StreamExtractor: Reusing cached Cinejoy streams for $cacheKey (instant!)');
+      return cached.streams;
+    }
+
+    try {
+      // 1. Fetch metadata (Title, Year, IMDb ID) from TMDB
+      final tmdbUri = Uri.parse(
+        'https://api.themoviedb.org/3/$type/$tmdbId?api_key=${ApiConstants.tmdbApiKey}&append_to_response=external_ids',
+      );
+      final tmdbRes = await http.get(tmdbUri).timeout(const Duration(seconds: 4));
+      if (tmdbRes.statusCode != 200) return [];
+      final tmdbJson = jsonDecode(tmdbRes.body) as Map<String, dynamic>;
+      final title = (tmdbJson['title'] ?? tmdbJson['name'] ?? '') as String;
+      final rawDate = (tmdbJson['release_date'] ?? tmdbJson['first_air_date'] ?? '') as String;
+      final year = rawDate.length >= 4 ? rawDate.substring(0, 4) : '';
+      final extIds = tmdbJson['external_ids'] as Map<String, dynamic>?;
+      final imdbId = (tmdbJson['imdb_id'] ?? extIds?['imdb_id'] ?? '') as String;
+      if (title.isEmpty) return [];
+
+      final serversToTry = preferredServer != null
+          ? [preferredServer, if (preferredServer != 'Lisbon') 'Lisbon', if (preferredServer != 'Nebula') 'Nebula']
+          : ['Lisbon', 'Nebula'];
+
+      final results = <ExtractedStream>[];
+      final mirrors = [
+        'https://enc-dec.app/api',
+        'https://enc-dec.vercel.app/api',
+        'https://encdec.vercel.app/api',
+      ];
+
+      for (final srv in serversToTry) {
+        try {
+          final tParam = type == 'movie' ? 'movie' : 'series';
+          final wingUrl = type == 'movie'
+              ? 'https://api.wing.st/?title=${Uri.encodeComponent(title)}&type=$tParam&year=$year&imdb=$imdbId&tmdb=$tmdbId&server=$srv'
+              : 'https://api.wing.st/?title=${Uri.encodeComponent(title)}&type=$tParam&year=$year&imdb=$imdbId&tmdb=$tmdbId&server=$srv&season=$season&episode=$episode';
+
+          // Step 1: Encrypt request via enc-dec
+          Map<String, dynamic>? encResult;
+          for (final host in mirrors) {
+            try {
+              final encUri = Uri.parse('$host/enc-cinejoy?url=${Uri.encodeComponent(wingUrl)}');
+              final encRes = await http.get(encUri, headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+              }).timeout(const Duration(seconds: 4));
+              if (encRes.statusCode == 200) {
+                final json = jsonDecode(encRes.body) as Map<String, dynamic>;
+                if (json['status'] == 200 && json['result'] is Map<String, dynamic>) {
+                  encResult = json['result'] as Map<String, dynamic>;
+                  break;
+                }
+              }
+            } catch (_) {}
+          }
+
+          if (encResult == null) continue;
+          final encData = encResult['data'] as String?;
+          final encState = encResult['state'];
+          if (encData == null || encState == null) continue;
+
+          // Step 2: Query wing.st/g with base64url-decoded bytes
+          var b64Data = encData.replaceAll('-', '+').replaceAll('_', '/');
+          while (b64Data.length % 4 != 0) {
+            b64Data += '=';
+          }
+          final decodedPayloadBytes = base64Decode(b64Data);
+
+          final wingRes = await http.post(
+            Uri.parse('https://api.wing.st/g'),
+            body: decodedPayloadBytes,
+            headers: {
+              'Accept': '*/*',
+              'Origin': 'https://cinejoy.pk',
+              'Referer': 'https://cinejoy.pk/',
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            },
+          ).timeout(const Duration(seconds: 5));
+
+          if (wingRes.statusCode != 200) continue;
+          final encryptedBytes = wingRes.bodyBytes;
+
+          // Step 3: Decrypt via enc-dec dec-cinejoy
+          final b64Encrypted = base64UrlEncode(encryptedBytes).replaceAll('=', '');
+          Map<String, dynamic>? decResult;
+          for (final host in mirrors) {
+            try {
+              final decUri = Uri.parse('$host/dec-cinejoy');
+              final decRes = await http.post(
+                decUri,
+                body: jsonEncode({'text': b64Encrypted, 'state': encState}),
+                headers: {
+                  'Content-Type': 'application/json',
+                  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                },
+              ).timeout(const Duration(seconds: 5));
+              if (decRes.statusCode == 200) {
+                final json = jsonDecode(decRes.body) as Map<String, dynamic>;
+                if (json['status'] == 200 && json['result'] is Map<String, dynamic>) {
+                  decResult = json['result'] as Map<String, dynamic>;
+                  break;
+                }
+              }
+            } catch (_) {}
+          }
+
+          if (decResult == null) continue;
+          final dataMap = decResult['data'] as Map<String, dynamic>?;
+          final streamList = dataMap?['stream'] as List<dynamic>?;
+          if (streamList == null || streamList.isEmpty) continue;
+
+          for (final s in streamList) {
+            if (s is Map<String, dynamic> && s['playlist'] != null) {
+              final playlistUrl = s['playlist'] as String;
+              if (playlistUrl.isNotEmpty && playlistUrl.startsWith('http')) {
+                final is4k = srv == 'Lisbon';
+                results.add(ExtractedStream(
+                  url: playlistUrl,
+                  type: 'hls',
+                  sourceName: 'Cinejoy ($srv${is4k ? ' 4K' : ''})',
+                  headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                  },
+                  qualityLabel: is4k ? '4K Ultra HD' : '1080p Full HD',
+                  qualities: [
+                    if (is4k) StreamQuality(label: '4K', height: 2160, url: playlistUrl),
+                    StreamQuality(label: '1080p', height: 1080, url: playlistUrl),
+                    StreamQuality(label: '720p', height: 720, url: playlistUrl),
+                    StreamQuality(label: '360p', height: 360, url: playlistUrl),
+                  ],
+                ));
+              }
+            }
+          }
+        } catch (e) {
+          debugPrint('Cinejoy $srv extraction error: $e');
+        }
+      }
+
+      if (results.isNotEmpty) {
+        setCachedEntry(cacheKey, results);
+      }
+      return results;
+    } catch (e) {
+      debugPrint('Cinejoy extraction overall error: $e');
+      return [];
+    }
+  }
+
   /// Master extraction method that queries all direct stream extractors
   /// and aggregates audio sources, qualities, and all subtitle tracks.
   /// Automatically uses cached results within 3 hours for instant resumption.
@@ -600,23 +764,14 @@ class StreamExtractor {
     // Parallel concurrent extraction across all direct sources
     try {
       final futures = await Future.wait([
-        extractVoidflixBackend(
+        extractCinejoy(
           type: type,
           tmdbId: tmdbId,
           season: season,
           episode: episode,
         ).catchError((e) {
-          debugPrint('Voidflix extractor error: $e');
-          return null;
-        }),
-        extractVidlink(
-          type: type,
-          tmdbId: tmdbId,
-          season: season,
-          episode: episode,
-        ).catchError((e) {
-          debugPrint('Vidlink extractor error: $e');
-          return null;
+          debugPrint('Cinejoy extractor error: $e');
+          return <ExtractedStream>[];
         }),
         extractVidrock(
           type: type,
@@ -627,26 +782,53 @@ class StreamExtractor {
           debugPrint('Vidrock extractor error: $e');
           return <ExtractedStream>[];
         }),
+        extractVidlink(
+          type: type,
+          tmdbId: tmdbId,
+          season: season,
+          episode: episode,
+        ).catchError((e) {
+          debugPrint('Vidlink extractor error: $e');
+          return null;
+        }),
+        extractVoidflixBackend(
+          type: type,
+          tmdbId: tmdbId,
+          season: season,
+          episode: episode,
+        ).catchError((e) {
+          debugPrint('Voidflix extractor error: $e');
+          return null;
+        }),
       ]);
 
-      final voidflixStream = futures[0] as ExtractedStream?;
-      final vidlinkStream = futures[1] as ExtractedStream?;
-      final vidrockStreams = futures[2] as List<ExtractedStream>;
+      final cinejoyStreams = futures[0] as List<ExtractedStream>;
+      final vidrockStreams = futures[1] as List<ExtractedStream>;
+      final vidlinkStream = futures[2] as ExtractedStream?;
+      final voidflixStream = futures[3] as ExtractedStream?;
 
-      if (voidflixStream != null) {
-        results.add(voidflixStream);
-        if (voidflixStream.subtitles.isNotEmpty) {
-          sharedSubs = voidflixStream.subtitles;
-        }
+      if (voidflixStream != null && voidflixStream.subtitles.isNotEmpty) {
+        sharedSubs = voidflixStream.subtitles;
+      }
+      if (vidlinkStream != null && vidlinkStream.subtitles.isNotEmpty && sharedSubs.isEmpty) {
+        sharedSubs = vidlinkStream.subtitles;
       }
 
-      if (vidlinkStream != null) {
-        results.add(vidlinkStream);
-        if (vidlinkStream.subtitles.isNotEmpty && sharedSubs.isEmpty) {
-          sharedSubs = vidlinkStream.subtitles;
-        }
+      // 1. Add Cinejoy 4K & 1080p streams first (fastest, cleanest, high-res)
+      for (final c in cinejoyStreams) {
+        results.add(ExtractedStream(
+          url: c.url,
+          type: c.type,
+          sourceName: c.sourceName,
+          language: c.language,
+          headers: c.headers,
+          qualityLabel: c.qualityLabel,
+          qualities: c.qualities,
+          subtitles: sharedSubs.isNotEmpty ? sharedSubs : c.subtitles,
+        ));
       }
 
+      // 2. Add Vidrock streams (Orion, Nova, Atlas)
       for (final v in vidrockStreams) {
         results.add(ExtractedStream(
           url: v.url,
@@ -658,6 +840,16 @@ class StreamExtractor {
           qualities: v.qualities,
           subtitles: sharedSubs.isNotEmpty ? sharedSubs : v.subtitles,
         ));
+      }
+
+      // 3. Add Vidlink stream if present
+      if (vidlinkStream != null) {
+        results.add(vidlinkStream);
+      }
+
+      // 4. Add Voidflix backend stream if present
+      if (voidflixStream != null) {
+        results.add(voidflixStream);
       }
     } catch (e) {
       debugPrint('Parallel extraction error: $e');

@@ -473,14 +473,31 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
     try {
       List<ExtractedStream> streams = [];
-      if (server.name.contains('VoidHD')) {
-        final v = await StreamExtractor.extractVidlink(
+      if (server.name.contains('Cine4K') || server.name.contains('Lisbon')) {
+        streams = await StreamExtractor.extractCinejoy(
+          type: widget.mediaType,
+          tmdbId: widget.mediaId,
+          season: _currentSeason,
+          episode: _currentEpisode,
+          preferredServer: 'Lisbon',
+        );
+      } else if (server.name.contains('Nebula')) {
+        streams = await StreamExtractor.extractCinejoy(
+          type: widget.mediaType,
+          tmdbId: widget.mediaId,
+          season: _currentSeason,
+          episode: _currentEpisode,
+          preferredServer: 'Nebula',
+        );
+      } else if (server.name.contains('OrionStream')) {
+        final all = await StreamExtractor.extractVidrock(
           type: widget.mediaType,
           tmdbId: widget.mediaId,
           season: _currentSeason,
           episode: _currentEpisode,
         );
-        if (v != null) streams = [v];
+        streams = all.where((s) => s.sourceName.toLowerCase().contains('orion')).toList();
+        if (streams.isEmpty) streams = all;
       } else if (server.name.contains('PulsarHD')) {
         streams = await StreamExtractor.extractVidrock(
           type: widget.mediaType,
@@ -506,8 +523,16 @@ class _PlayerScreenState extends State<PlayerScreen> {
         );
         streams = all.where((s) => s.sourceName.toLowerCase() == 'atlas').toList();
         if (streams.isEmpty) streams = all;
+      } else if (server.name.contains('VoidHD')) {
+        final v = await StreamExtractor.extractVidlink(
+          type: widget.mediaType,
+          tmdbId: widget.mediaId,
+          season: _currentSeason,
+          episode: _currentEpisode,
+        );
+        if (v != null) streams = [v];
       } else {
-        // VoidDirect / default: multi-source extraction
+        // VoidDirect / default: multi-source extraction (Cinejoy + Vidrock in parallel)
         streams = await StreamExtractor.extractAll(
           type: widget.mediaType,
           tmdbId: widget.mediaId,
