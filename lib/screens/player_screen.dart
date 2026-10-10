@@ -10,6 +10,7 @@ import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../core/constants/theme_constants.dart';
 import '../core/network/api_service.dart';
@@ -106,6 +107,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   // General loading & errors
   bool _isLoading = true;
+  bool _isDeveloperMode = false;
+  bool _isStreamUnavailable = false;
 
   // Double tap seek ripple indicator
   int? _doubleTapSeekSeconds;
@@ -390,15 +393,30 @@ class _PlayerScreenState extends State<PlayerScreen> {
       return;
     }
 
-    final safeIdx = (_selectedServerIndex >= 0 && _selectedServerIndex < ServerConfig.servers.length)
+    final prefs = await SharedPreferences.getInstance();
+    _isDeveloperMode = prefs.getBool('voidflix_developer_mode') ?? false;
+
+    int safeIdx = (_selectedServerIndex >= 0 && _selectedServerIndex < ServerConfig.servers.length)
         ? _selectedServerIndex
         : 0;
+
+    // If developer mode is disabled, guarantee native direct server is chosen
+    if (!_isDeveloperMode && !ServerConfig.servers[safeIdx].isDirectPlay) {
+      final firstDirect = ServerConfig.servers.indexWhere((s) => s.isDirectPlay);
+      safeIdx = firstDirect != -1 ? firstDirect : 0;
+      _selectedServerIndex = safeIdx;
+    }
+
     _triedNativeServerIndices.clear();
     final server = ServerConfig.servers[safeIdx];
     if (server.isDirectPlay) {
       await _loadServerDirect(safeIdx);
     } else {
-      _loadWebEmbed();
+      if (_isDeveloperMode) {
+        _loadWebEmbed();
+      } else {
+        _handleAllNativeServersFailed();
+      }
     }
   }
 
@@ -431,9 +449,25 @@ class _PlayerScreenState extends State<PlayerScreen> {
       return;
     }
 
-    // Only if ALL native direct play servers have been tried, fall back to web view embed
-    debugPrint('All native direct servers exhausted. Falling back to web embed.');
-    _switchToEmbedFallback();
+    // Only if ALL native direct play servers have been tried:
+    debugPrint('All native direct servers exhausted.');
+    if (_isDeveloperMode) {
+      debugPrint('Developer mode enabled: falling back to web embed.');
+      _switchToEmbedFallback();
+    } else {
+      debugPrint('Developer mode disabled: showing aesthetic unavailable screen.');
+      _handleAllNativeServersFailed();
+    }
+  }
+
+  void _handleAllNativeServersFailed() {
+    _disposeVideoController();
+    if (!mounted) return;
+    setState(() {
+      _isStreamUnavailable = true;
+      _isLoading = false;
+      _isExtracting = false;
+    });
   }
 
   Future<void> _loadServerDirect(int serverIdx, {Duration? startPosition}) async {
@@ -444,6 +478,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _isNativeMode = true;
       _isExtracting = true;
       _isLoading = true;
+      _isStreamUnavailable = false;
       _activeCueText = null;
     });
 
@@ -2066,44 +2101,53 @@ class _PlayerScreenState extends State<PlayerScreen> {
                           );
                         }),
                       ],
-                      const Divider(color: Colors.white12),
-                      // Embed Fallbacks
-                      const Padding(
-                        padding: EdgeInsets.fromLTRB(16, 6, 16, 4),
-                        child: Text(
-                          'ALTERNATIVE EMBED SERVERS',
-                          style: TextStyle(color: Colors.white54, fontSize: 11, fontWeight: FontWeight.bold),
+                      // Embed Fallbacks (Visible ONLY when Developer Mode is active)
+                      if (_isDeveloperMode) ...[
+                        const Divider(color: Colors.white12),
+                        const Padding(
+                          padding: EdgeInsets.fromLTRB(16, 6, 16, 4),
+                          child: Row(
+                            children: [
+                              Text(
+                                'ALTERNATIVE EMBED SERVERS',
+                                style: TextStyle(color: Colors.amber, fontSize: 11, fontWeight: FontWeight.bold),
+                              ),
+                              SizedBox(width: 6),
+                              Text('(DEV MODE)', style: TextStyle(color: Colors.amber, fontSize: 9, fontWeight: FontWeight.w900)),
+                            ],
+                          ),
                         ),
-                      ),
-                      ...List.generate(ServerConfig.servers.length, (idx) {
-                        final s = ServerConfig.servers[idx];
-                        if (s.isDirectPlay) return const SizedBox.shrink();
-                        final isSel = !_isNativeMode && idx == _selectedServerIndex;
-                        return ListTile(
-                          dense: true,
-                          leading: Icon(
-                            isSel ? Icons.radio_button_checked : Icons.radio_button_off,
-                            color: isSel ? AppTheme.primaryRed : Colors.white54,
-                          ),
-                          title: Text(
-                            s.name,
-                            style: TextStyle(
-                              color: isSel ? Colors.white : Colors.white70,
-                              fontWeight: isSel ? FontWeight.bold : FontWeight.normal,
+                        ...List.generate(ServerConfig.servers.length, (idx) {
+                          final s = ServerConfig.servers[idx];
+                          if (s.isDirectPlay) return const SizedBox.shrink();
+                          final isSel = !_isNativeMode && idx == _selectedServerIndex;
+                          return ListTile(
+                            dense: true,
+                            leading: Icon(
+                              isSel ? Icons.radio_button_checked : Icons.radio_button_off,
+                              color: isSel ? Colors.amber : Colors.white54,
                             ),
-                          ),
-                          subtitle: Text(s.description, style: const TextStyle(fontSize: 11, color: Colors.white38)),
-                          onTap: () {
-                            Navigator.pop(ctx);
-                            setState(() {
-                              _selectedServerIndex = idx;
-                              _isNativeMode = false;
-                            });
-                            context.read<ProfileProvider>().setSelectedServer(idx);
-                            _loadWebEmbed();
-                          },
-                        );
-                      }),
+                            title: Text(
+                              s.name,
+                              style: TextStyle(
+                                color: isSel ? Colors.white : Colors.white70,
+                                fontWeight: isSel ? FontWeight.bold : FontWeight.normal,
+                              ),
+                            ),
+                            subtitle: Text(s.description, style: const TextStyle(fontSize: 11, color: Colors.white38)),
+                            onTap: () {
+                              Navigator.pop(ctx);
+                              setState(() {
+                                _selectedServerIndex = idx;
+                                _isNativeMode = false;
+                                _isStreamUnavailable = false;
+                              });
+                              context.read<ProfileProvider>().setSelectedServer(idx);
+                              _loadWebEmbed();
+                            },
+                          );
+                        }),
+                      ],
                     ],
                   ),
                 ),
@@ -3008,7 +3052,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
               // ---------------------------------------------------------------
               // Layer 4: Loading & Buffering Overlays
               // ---------------------------------------------------------------
-              if (_isLoading && !_isClippingMoment)
+              if (_isLoading && !_isClippingMoment && !_isStreamUnavailable)
                 Container(
                   color: _isNativeMode ? Colors.black : Colors.black87,
                   child: Center(
@@ -3039,7 +3083,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                   ),
                 ),
 
-              if (!_isLoading && _isBuffering && _isNativeMode && !_isClippingMoment)
+              if (!_isLoading && _isBuffering && _isNativeMode && !_isClippingMoment && !_isStreamUnavailable)
                 const Center(
                   child: CircularProgressIndicator(color: AppTheme.primaryRed),
                 ),
@@ -3603,8 +3647,176 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 Positioned.fill(
                   child: _buildClipMomentView(),
                 ),
+
+              // ---------------------------------------------------------------
+              // Layer 12: Aesthetic Unavailable Overlay (Native Only Mode)
+              // ---------------------------------------------------------------
+              if (_isStreamUnavailable)
+                _buildUnavailableOverlay(),
             ],
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildUnavailableOverlay() {
+    final title = widget.mediaType == 'tv'
+        ? '${widget.mediaTitle} (S$_currentSeason E$_currentEpisode)'
+        : widget.mediaTitle;
+
+    return Positioned.fill(
+      child: Container(
+        color: const Color(0xFF0A0A0F),
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            if (widget.backdropPath != null && widget.backdropPath!.isNotEmpty)
+              Positioned.fill(
+                child: Opacity(
+                  opacity: 0.22,
+                  child: CachedNetworkImage(
+                    imageUrl: 'https://image.tmdb.org/t/p/w780${widget.backdropPath}',
+                    fit: BoxFit.cover,
+                    errorWidget: (_, __, ___) => const SizedBox.shrink(),
+                  ),
+                ),
+              ),
+            Positioned.fill(
+              child: Container(
+                decoration: const BoxDecoration(
+                  gradient: RadialGradient(
+                    center: Alignment.center,
+                    radius: 1.1,
+                    colors: [
+                      Color(0xE60D0D14),
+                      Color(0xFF050508),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            Positioned(
+              top: 16,
+              left: 16,
+              child: SafeArea(
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.5),
+                    shape: BoxShape.circle,
+                  ),
+                  child: IconButton(
+                    icon: const Icon(Icons.arrow_back, color: Colors.white, size: 24),
+                    onPressed: _handleSmoothBack,
+                  ),
+                ),
+              ),
+            ),
+            Center(
+              child: SingleChildScrollView(
+                padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 20),
+                child: ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 520),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(18),
+                        decoration: BoxDecoration(
+                          color: AppTheme.primaryRed.withValues(alpha: 0.12),
+                          shape: BoxShape.circle,
+                          border: Border.all(
+                            color: AppTheme.primaryRed.withValues(alpha: 0.4),
+                            width: 1.5,
+                          ),
+                        ),
+                        child: const Icon(
+                          Icons.videocam_off_rounded,
+                          color: AppTheme.primaryRed,
+                          size: 40,
+                        ),
+                      ),
+                      const SizedBox(height: 18),
+                      const Text(
+                        'Sorry, this stream is currently unavailable',
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 19,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 0.2,
+                        ),
+                      ),
+                      const SizedBox(height: 10),
+                      Text(
+                        'We searched all direct streaming servers for "$title", but no active native stream could be established right now.',
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          color: Colors.white70,
+                          fontSize: 13,
+                          height: 1.45,
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+                      Wrap(
+                        alignment: WrapAlignment.center,
+                        spacing: 12,
+                        runSpacing: 10,
+                        children: [
+                          ElevatedButton.icon(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: AppTheme.primaryRed,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                            ),
+                            icon: const Icon(Icons.refresh, size: 18),
+                            label: const Text('Try Again', style: TextStyle(fontWeight: FontWeight.bold)),
+                            onPressed: () {
+                              setState(() {
+                                _isStreamUnavailable = false;
+                                _isLoading = true;
+                              });
+                              _triedNativeServerIndices.clear();
+                              _loadMedia();
+                            },
+                          ),
+                          OutlinedButton.icon(
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: Colors.white,
+                              side: const BorderSide(color: Colors.white38),
+                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                            ),
+                            icon: const Icon(Icons.dns_outlined, size: 18),
+                            label: const Text('Servers'),
+                            onPressed: _openServerPicker,
+                          ),
+                          OutlinedButton.icon(
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: Colors.white70,
+                              side: const BorderSide(color: Colors.white24),
+                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                            ),
+                            icon: const Icon(Icons.arrow_back, size: 18),
+                            label: const Text('Go Back'),
+                            onPressed: _handleSmoothBack,
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );

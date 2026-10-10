@@ -71,4 +71,15 @@ class MediaItem {
     if (releaseDate == null || releaseDate!.isEmpty) return '';
     return releaseDate!.split('-').first;
   }
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is MediaItem &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          mediaType == other.mediaType;
+
+  @override
+  int get hashCode => Object.hash(id, mediaType);
 }

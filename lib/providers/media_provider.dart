@@ -410,7 +410,7 @@ class MediaProvider extends ChangeNotifier {
       }
 
       // 5. Linear Scoring Optimization Model for Top Picks
-      final pool = <MediaItem>{
+      final rawCandidates = [
         ..._trending,
         ..._popularMovies,
         ..._popularTV,
@@ -419,7 +419,14 @@ class MediaProvider extends ChangeNotifier {
         ..._actionMovies,
         ..._sciFiMovies,
         ..._comedyMovies,
-      }.toList();
+      ];
+
+      // Explicitly deduplicate candidate pool by unique key
+      final uniquePool = <String, MediaItem>{};
+      for (final m in rawCandidates) {
+        uniquePool['${m.mediaType}_${m.id}'] = m;
+      }
+      final pool = uniquePool.values.toList();
 
       final genreCounts = <int, int>{};
       final scoredCandidates = <MapEntry<MediaItem, double>>[];
@@ -445,12 +452,17 @@ class MediaProvider extends ChangeNotifier {
       scoredCandidates.sort((a, b) => b.value.compareTo(a.value));
 
       final selectedTopPicks = <MediaItem>[];
+      final seenTopPickKeys = <String>{};
       for (final entry in scoredCandidates) {
         final item = entry.key;
+        final key = '${item.mediaType}_${item.id}';
+        if (seenTopPickKeys.contains(key)) continue;
+
         final primaryGenre = item.genreIds.isNotEmpty ? item.genreIds.first : 0;
         final currentCount = genreCounts[primaryGenre] ?? 0;
         if (currentCount < 4) {
           selectedTopPicks.add(item);
+          seenTopPickKeys.add(key);
           genreCounts[primaryGenre] = currentCount + 1;
         }
         if (selectedTopPicks.length >= 15) break;

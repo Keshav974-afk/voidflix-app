@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -35,11 +36,68 @@ class _SettingsScreenState extends State<SettingsScreen> {
   double _cacheSizeMb = 0.0;
   bool _isLoadingCache = true;
 
+  // Developer Mode state (unlocked by 5 taps on Device)
+  bool _isDeveloperMode = false;
+  int _deviceTapCount = 0;
+  DateTime? _lastDeviceTapTime;
+  Map<String, dynamic>? _deviceInfo;
+
   @override
   void initState() {
     super.initState();
     _loadSettings();
     _calculateCacheSize();
+    _loadDeviceInfo();
+  }
+
+  Future<void> _loadDeviceInfo() async {
+    try {
+      if (Platform.isAndroid) {
+        const platform = MethodChannel('org.voidflix/notifications');
+        final dynamic res = await platform.invokeMethod('getDeviceInfo');
+        if (res != null && mounted) {
+          setState(() {
+            _deviceInfo = Map<String, dynamic>.from(res as Map);
+          });
+        }
+      }
+    } catch (e) {
+      debugPrint('Failed to load device info: $e');
+    }
+  }
+
+  String get _formattedDeviceInfo {
+    if (_deviceInfo != null) {
+      final versionName = _deviceInfo!['versionName']?.toString() ?? '1.0.0';
+      final versionCode = _deviceInfo!['versionCode']?.toString() ?? '1';
+      final sdkInt = _deviceInfo!['sdkInt']?.toString() ?? '31';
+      final primaryAbi = _deviceInfo!['primaryAbi']?.toString() ?? 'arm64-v8a';
+      final model = _deviceInfo!['model']?.toString() ?? 'Device';
+      final manufacturer = _deviceInfo!['manufacturer']?.toString() ?? '';
+      final brand = _deviceInfo!['brand']?.toString() ?? '';
+      final release = _deviceInfo!['release']?.toString() ?? '';
+      final display = _deviceInfo!['display']?.toString() ?? _deviceInfo!['buildId']?.toString() ?? '';
+      final fingerprint = _deviceInfo!['fingerprint']?.toString() ?? '';
+
+      final safeBrand = (brand.isNotEmpty ? brand : manufacturer).toUpperCase().replaceAll(RegExp(r'[^A-Z0-9]'), '');
+      final safeModel = model.toUpperCase().replaceAll(RegExp(r'[^A-Z0-9]'), '');
+      final esnHash = fingerprint.isNotEmpty ? fingerprint.hashCode.abs().toString() : '74592019';
+      final esn = 'NFANDROID1-PRV-$safeBrand-$safeModel-$sdkInt-$esnHash';
+
+      final mfgStr = manufacturer.isNotEmpty && !model.toLowerCase().contains(manufacturer.toLowerCase())
+          ? ' ($manufacturer)'
+          : '';
+
+      return 'Version: $versionName build $versionCode (code $versionCode), OS API: $sdkInt, $primaryAbi\n'
+          'Model: $model$mfgStr\n'
+          'Android: $release (API $sdkInt)\n'
+          'Build: $display\n'
+          'ESN: $esn';
+    }
+
+    return 'Version: 1.0.0, OS API: ${Platform.operatingSystemVersion}\n'
+        'Model: ${Platform.operatingSystem}\n'
+        'Platform: ${Platform.isAndroid ? "Android" : Platform.operatingSystem}';
   }
 
   Future<void> _loadSettings() async {
@@ -50,8 +108,68 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _smartDownloads = prefs.getBool('voidflix_smart_downloads') ?? true;
         _cellularDataUsage = prefs.getString('voidflix_cellular_data') ?? 'Automatic';
         _downloadQuality = prefs.getString('voidflix_download_quality') ?? 'Standard';
+        _isDeveloperMode = prefs.getBool('voidflix_developer_mode') ?? false;
       });
     }
+  }
+
+  void _handleDeviceTap() async {
+    final now = DateTime.now();
+    if (_lastDeviceTapTime == null || now.difference(_lastDeviceTapTime!).inSeconds > 2) {
+      _deviceTapCount = 0;
+    }
+    _lastDeviceTapTime = now;
+    _deviceTapCount++;
+
+    if (_isDeveloperMode) {
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Developer mode is already active.'),
+          duration: Duration(seconds: 1),
+        ),
+      );
+      return;
+    }
+
+    if (_deviceTapCount >= 5) {
+      _deviceTapCount = 0;
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setBool('voidflix_developer_mode', true);
+      if (!mounted) return;
+      setState(() => _isDeveloperMode = true);
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Developer mode enabled! Web servers unlocked.'),
+          backgroundColor: Color(0xFFE50914),
+          duration: Duration(seconds: 3),
+        ),
+      );
+    } else if (_deviceTapCount >= 2) {
+      final remaining = 5 - _deviceTapCount;
+      ScaffoldMessenger.of(context).hideCurrentSnackBar();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Tap $remaining more times to unlock Developer options.'),
+          duration: const Duration(milliseconds: 900),
+        ),
+      );
+    }
+  }
+
+  Future<void> _turnOffDeveloperMode() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setBool('voidflix_developer_mode', false);
+    if (!mounted) return;
+    setState(() => _isDeveloperMode = false);
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(
+        content: Text('Developer mode turned off.'),
+        duration: Duration(seconds: 2),
+      ),
+    );
   }
 
   Future<void> _calculateCacheSize() async {
@@ -614,40 +732,100 @@ class _SettingsScreenState extends State<SettingsScreen> {
           // 4. ABOUT (Screenshot 2)
           // ═══════════════════════════════════════════════
           _buildCategoryHeader('About'),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Icon(Icons.smartphone, color: Colors.white70, size: 24),
-                const SizedBox(width: 18),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: const [
-                      Text('Device', style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold)),
-                      SizedBox(height: 8),
-                      Text(
-                        'Version: 9.86.0 build 5 (code 74592), OS API: 31, arm64-v8a\n'
-                        'Model: M2010J19SG\n'
-                        'PL: 1, ChannelId: 497730f0-ad4b-11e7-95a4-c7ad113ce187 (R), SSM: 1\n'
-                        'CBSPV: Q6115-31409-1\n'
-                        'Build: Android-Q-build-20230330215153\n'
-                        'ESN: NFANDROID1-PXA-P-XIAOMM2010J19SG-19515-0202I85AA4L5PR7JVTBDM46NUJP5VTVAIO3BTC44VGFDJJ82STA525B2NA7631T2HD57HO1DNIJKRAEJKE6K8V6SQ4T25081SNAC239E',
-                        style: TextStyle(
-                          color: Colors.white54,
-                          fontSize: 12,
-                          height: 1.35,
-                          fontFamily: 'monospace',
+          InkWell(
+            onTap: _handleDeviceTap,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(Icons.smartphone, color: Colors.white70, size: 24),
+                  const SizedBox(width: 18),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text('Device', style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold)),
+                        const SizedBox(height: 8),
+                        Text(
+                          _formattedDeviceInfo,
+                          style: const TextStyle(
+                            color: Colors.white54,
+                            fontSize: 12,
+                            height: 1.35,
+                            fontFamily: 'monospace',
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const Divider(height: 1, color: Color(0xFF1E1E1E)),
+
+          // ═══════════════════════════════════════════════
+          // DEVELOPER MODE (Hidden, activated via 5 taps)
+          // ═══════════════════════════════════════════════
+          if (_isDeveloperMode) ...[
+            _buildCategoryHeader('Developer Options'),
+            Container(
+              margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: const Color(0xFF1B1824),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: Colors.amber.withValues(alpha: 0.6), width: 1.2),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      const Icon(Icons.developer_mode, color: Colors.amber, size: 24),
+                      const SizedBox(width: 12),
+                      const Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              'Developer Mode Active',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 15,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            SizedBox(height: 2),
+                            Text(
+                              'Web embed servers and WebView fallbacks are unlocked in player.',
+                              style: TextStyle(color: Colors.white60, fontSize: 12),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      ElevatedButton(
+                        onPressed: _turnOffDeveloperMode,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFFE50914),
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                        ),
+                        child: const Text(
+                          'TURN OFF',
+                          style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, letterSpacing: 0.5),
                         ),
                       ),
                     ],
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
-          const Divider(height: 1, color: Color(0xFF1E1E1E)),
+            const Divider(height: 1, color: Color(0xFF1E1E1E)),
+          ],
           _buildSettingTile(
             leading: Icons.person_outline,
             title: 'Account',
