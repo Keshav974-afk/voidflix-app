@@ -1,8 +1,10 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import '../providers/download_provider.dart';
 import 'package:video_player/video_player.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
@@ -32,6 +34,7 @@ class PlayerScreen extends StatefulWidget {
   final String? posterPath;
   final String? backdropPath;
   final String? localFilePath;
+  final String? localSubtitlePath;
 
   const PlayerScreen({
     super.key,
@@ -43,6 +46,7 @@ class PlayerScreen extends StatefulWidget {
     this.posterPath,
     this.backdropPath,
     this.localFilePath,
+    this.localSubtitlePath,
   });
 
   @override
@@ -240,6 +244,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
       });
 
       _startHideControlsTimer();
+
+      // Automatically discover and load offline subtitles for this video
+      _loadOfflineSubtitles(filePath);
     } catch (e) {
       debugPrint('Error loading local file video: $e');
       if (mounted) {
@@ -250,6 +257,126 @@ class _PlayerScreenState extends State<PlayerScreen> {
           SnackBar(content: Text('Failed to play local video: $e')),
         );
       }
+    }
+  }
+
+  Future<void> _loadOfflineSubtitles(String videoFilePath) async {
+    try {
+      final subs = <SubtitleTrack>[];
+      final seenUrls = <String>{};
+
+      void addSub(String label, String lang, String path) {
+        if (!seenUrls.contains(path) && File(path).existsSync()) {
+          seenUrls.add(path);
+          subs.add(SubtitleTrack(
+            label: label,
+            language: lang,
+            url: path,
+          ));
+        }
+      }
+
+      // 1. Direct param passed to widget
+      if (widget.localSubtitlePath != null && widget.localSubtitlePath!.isNotEmpty) {
+        addSub('English', 'en', widget.localSubtitlePath!);
+      }
+
+      // 2. Query DownloadProvider for matching DownloadedItem
+      final downloadProvider = context.read<DownloadProvider>();
+      final itemId = widget.mediaType == 'tv'
+          ? 'tv_${widget.mediaId}_${_currentSeason}_$_currentEpisode'
+          : 'movie_${widget.mediaId}';
+      final item = downloadProvider.getItem(itemId) ??
+          downloadProvider.getItemByPath(videoFilePath);
+
+      if (item?.localSubtitlePath != null && item!.localSubtitlePath!.isNotEmpty) {
+        addSub('Subtitles', 'en', item.localSubtitlePath!);
+      }
+
+      // 3. Check for manifest file: <id>_subs.json in the same folder
+      final videoFile = File(videoFilePath);
+      final dir = videoFile.parent;
+
+      final manifestFiles = [
+        File('${dir.path}/${itemId}_subs.json'),
+        File('${videoFilePath.replaceAll(RegExp(r'\.[^.]+$'), '')}_subs.json'),
+      ];
+
+      for (final mFile in manifestFiles) {
+        if (mFile.existsSync()) {
+          try {
+            final content = mFile.readAsStringSync();
+            final parsed = jsonDecode(content);
+            if (parsed is List) {
+              for (final entry in parsed) {
+                if (entry is Map) {
+                  final label = (entry['label'] as String?) ?? 'Subtitle';
+                  final lang = (entry['language'] as String?) ?? 'en';
+                  final path = entry['path'] as String?;
+                  if (path != null) {
+                    addSub(label, lang, path);
+                  }
+                }
+              }
+            }
+          } catch (_) {}
+        }
+      }
+
+      // 4. Scan disk directory for any matching subtitles (.vtt or .srt)
+      if (dir.existsSync()) {
+        try {
+          final entries = dir.listSync();
+          for (final entity in entries) {
+            if (entity is File) {
+              final path = entity.path;
+              if (path.endsWith('.vtt') || path.endsWith('.srt')) {
+                final base = path.split(Platform.pathSeparator).last;
+                if (base.contains(itemId) || base.contains(widget.mediaId.toString())) {
+                  final parts = base.replaceAll(RegExp(r'\.(vtt|srt)$'), '').split('_sub_');
+                  final langLabel = parts.length > 1 ? parts.last : 'Sub';
+                  addSub(langLabel, langLabel.toLowerCase(), path);
+                }
+              }
+            }
+          }
+        } catch (_) {}
+      }
+
+      if (!mounted) return;
+
+      if (subs.isNotEmpty) {
+        setState(() {
+          _subtitles = subs;
+        });
+
+        // Pick user preferred subtitle or default to first / English
+        final profile = context.read<ProfileProvider>().activeProfile;
+        final preferredSub = profile.preferredSubtitleLang;
+        final preferredAudio = profile.preferredAudioLang;
+        final preferredList = profile.preferredLanguages;
+
+        final subPrefs = [
+          if (preferredSub != null && preferredSub.isNotEmpty) preferredSub,
+          if (preferredAudio != null && preferredAudio.isNotEmpty) preferredAudio,
+          ...preferredList,
+          'English',
+          'en',
+        ];
+
+        final bestSub = LanguageUtils.pickBestSubtitle(
+          subs,
+          preferredLangs: subPrefs,
+        );
+
+        if (bestSub != null) {
+          await _selectSubtitle(bestSub);
+        } else {
+          await _selectSubtitle(subs.first);
+        }
+      }
+    } catch (e) {
+      debugPrint('Error loading offline subtitles: $e');
     }
   }
 
@@ -902,10 +1029,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
     final curSec = controller.value.position.inSeconds.toDouble();
     double start = curSec;
-    double end = curSec + 41.0;
+    double end = curSec + 30.0;
     if (end > totalSec) {
       end = totalSec;
-      start = (end - 41.0).clamp(0.0, totalSec);
+      start = (end - 30.0).clamp(0.0, totalSec);
+    }
+    if (end - start > 300.0) {
+      end = start + 300.0;
     }
 
     setState(() {
@@ -931,13 +1061,35 @@ class _PlayerScreenState extends State<PlayerScreen> {
         ? _directStreams[_selectedStreamIndex]
         : null;
 
+    final playingUrl = (_availableQualities.isNotEmpty && _selectedQualityIndex < _availableQualities.length)
+        ? _availableQualities[_selectedQualityIndex].url
+        : activeStream?.url;
+
+    final hasSubtitles = _selectedSubtitle != null && _currentCues.isNotEmpty;
+    final subtitleCues = <Map<String, dynamic>>[];
+    if (hasSubtitles) {
+      final clipStartMs = (_clipStartSeconds * 1000).toInt();
+      final clipEndMs = (_clipEndSeconds * 1000).toInt();
+      for (final cue in _currentCues) {
+        if (cue.endMs >= clipStartMs && cue.startMs <= clipEndMs) {
+          subtitleCues.add({
+            'start': cue.startMs,
+            'end': cue.endMs,
+            'text': cue.text,
+          });
+        }
+      }
+    }
+
     final exportedFile = await ClipExportService.exportClip(
       title: widget.mediaTitle,
       startSeconds: _clipStartSeconds,
       endSeconds: _clipEndSeconds,
       localFilePath: widget.localFilePath,
-      streamUrl: activeStream?.url,
+      streamUrl: playingUrl,
       streamHeaders: activeStream?.headers,
+      subtitles: subtitleCues,
+      burnSubtitles: hasSubtitles,
       onProgress: (p, status) {
         if (mounted) {
           setState(() {
@@ -2245,24 +2397,56 @@ class _PlayerScreenState extends State<PlayerScreen> {
               ),
             ),
 
-            // Current Playhead Time Label below preview (Screenshot 2)
+            // Current Playhead Time Label & Duration Badge below preview
             Padding(
               padding: const EdgeInsets.only(bottom: 6),
-              child: Text(
-                _formatDuration(_currentPosition),
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 15,
-                  fontWeight: FontWeight.bold,
-                ),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Text(
+                    _formatDuration(_currentPosition),
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 15,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: (_clipEndSeconds - _clipStartSeconds) >= 300.0
+                          ? AppTheme.primaryRed.withValues(alpha: 0.3)
+                          : Colors.white.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(
+                        color: (_clipEndSeconds - _clipStartSeconds) >= 300.0
+                            ? AppTheme.primaryRed
+                            : Colors.white24,
+                        width: 1,
+                      ),
+                    ),
+                    child: Text(
+                      '${_formatDuration(Duration(seconds: (_clipEndSeconds - _clipStartSeconds).toInt()))} / 5:00 max',
+                      style: TextStyle(
+                        color: (_clipEndSeconds - _clipStartSeconds) >= 300.0
+                            ? const Color(0xFFFF6B6B)
+                            : Colors.white70,
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 0.4,
+                      ),
+                    ),
+                  ),
+                ],
               ),
             ),
 
-            // Bottom Filmstrip & Range Trimmer (Screenshot 2)
+            // Bottom Filmstrip & Range Trimmer with Interactive Sliding Stick
             Padding(
               padding: const EdgeInsets.fromLTRB(20, 0, 20, 14),
               child: SizedBox(
-                height: 56,
+                height: 64,
                 child: LayoutBuilder(
                   builder: (context, constraints) {
                     final trackWidth = constraints.maxWidth;
@@ -2277,63 +2461,169 @@ class _PlayerScreenState extends State<PlayerScreen> {
                     return Stack(
                       clipBehavior: Clip.none,
                       children: [
-                        // Filmstrip background
+                        // Filmstrip background with tap-to-seek
                         Positioned.fill(
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(6),
-                            child: Container(
-                              color: const Color(0xFF1E1E1E),
-                              child: Row(
-                                children: List.generate(14, (idx) {
-                                  return Expanded(
-                                    child: Container(
-                                      margin: const EdgeInsets.symmetric(horizontal: 1),
-                                      decoration: BoxDecoration(
-                                        color: Colors.white.withValues(alpha: 0.05),
-                                        borderRadius: BorderRadius.circular(2),
-                                        image: widget.backdropPath != null
-                                            ? DecorationImage(
-                                                image: CachedNetworkImageProvider(
-                                                  ApiService.getImageUrl(widget.backdropPath, size: 'w300'),
-                                                ),
-                                                fit: BoxFit.cover,
-                                                opacity: 0.55,
-                                              )
-                                            : null,
+                          child: GestureDetector(
+                            behavior: HitTestBehavior.opaque,
+                            onTapDown: (details) {
+                              final tapFraction = (details.localPosition.dx / trackWidth).clamp(0.0, 1.0);
+                              final tapSec = (tapFraction * totalSec).clamp(_clipStartSeconds, _clipEndSeconds);
+                              _videoPlayerController?.seekTo(Duration(seconds: tapSec.toInt()));
+                              setState(() {
+                                _currentPosition = Duration(seconds: tapSec.toInt());
+                              });
+                            },
+                            child: ClipRRect(
+                              borderRadius: BorderRadius.circular(6),
+                              child: Container(
+                                color: const Color(0xFF1E1E1E),
+                                child: Row(
+                                  children: List.generate(14, (idx) {
+                                    return Expanded(
+                                      child: Container(
+                                        margin: const EdgeInsets.symmetric(horizontal: 1),
+                                        decoration: BoxDecoration(
+                                          color: Colors.white.withValues(alpha: 0.05),
+                                          borderRadius: BorderRadius.circular(2),
+                                          image: widget.backdropPath != null
+                                              ? DecorationImage(
+                                                  image: CachedNetworkImageProvider(
+                                                    ApiService.getImageUrl(widget.backdropPath, size: 'w300'),
+                                                  ),
+                                                  fit: BoxFit.cover,
+                                                  opacity: 0.55,
+                                                )
+                                              : null,
+                                        ),
                                       ),
-                                    ),
-                                  );
-                                }),
+                                    );
+                                  }),
+                                ),
                               ),
                             ),
                           ),
                         ),
 
+                        // Dimmed out regions outside selection
+                        if (leftPos > 0)
+                          Positioned(
+                            left: 0,
+                            width: leftPos,
+                            top: 0,
+                            bottom: 0,
+                            child: IgnorePointer(
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  color: Colors.black.withValues(alpha: 0.6),
+                                  borderRadius: const BorderRadius.horizontal(left: Radius.circular(6)),
+                                ),
+                              ),
+                            ),
+                          ),
+                        if (rightPos < trackWidth)
+                          Positioned(
+                            left: rightPos,
+                            width: (trackWidth - rightPos).clamp(0.0, trackWidth),
+                            top: 0,
+                            bottom: 0,
+                            child: IgnorePointer(
+                              child: Container(
+                                decoration: BoxDecoration(
+                                  color: Colors.black.withValues(alpha: 0.6),
+                                  borderRadius: const BorderRadius.horizontal(right: Radius.circular(6)),
+                                ),
+                              ),
+                            ),
+                          ),
+
                         // Selection Window (connecting border)
                         Positioned(
                           left: leftPos,
-                          width: (rightPos - leftPos).clamp(24.0, trackWidth),
+                          width: (rightPos - leftPos).clamp(28.0, trackWidth),
                           top: 0,
                           bottom: 0,
-                          child: Container(
-                            decoration: BoxDecoration(
-                              border: Border.all(color: Colors.white70, width: 1.5),
+                          child: IgnorePointer(
+                            child: Container(
+                              decoration: BoxDecoration(
+                                border: Border.all(color: Colors.white, width: 2.0),
+                              ),
                             ),
                           ),
                         ),
 
-                        // Playhead vertical scrubber line
+                        // Interactive Sliding Stick (draggable scrubber needle with handle)
                         Positioned(
-                          left: playheadPos.clamp(leftPos, rightPos),
-                          top: 0,
-                          bottom: 0,
-                          child: Container(
-                            width: 3,
-                            color: Colors.white,
+                          left: (playheadPos - 20).clamp(leftPos - 10, rightPos - 20),
+                          top: -6,
+                          bottom: -6,
+                          child: GestureDetector(
+                            behavior: HitTestBehavior.opaque,
+                            onHorizontalDragUpdate: (details) {
+                              final deltaFraction = details.primaryDelta! / trackWidth;
+                              final deltaSec = deltaFraction * totalSec;
+                              final newSec = (curSec + deltaSec).clamp(_clipStartSeconds, _clipEndSeconds);
+                              _videoPlayerController?.seekTo(Duration(seconds: newSec.toInt()));
+                              setState(() {
+                                _currentPosition = Duration(seconds: newSec.toInt());
+                              });
+                            },
+                            child: SizedBox(
+                              width: 40,
+                              child: Stack(
+                                alignment: Alignment.center,
+                                clipBehavior: Clip.none,
+                                children: [
+                                  // White vertical needle line
+                                  Container(
+                                    width: 3.5,
+                                    decoration: BoxDecoration(
+                                      color: Colors.white,
+                                      borderRadius: BorderRadius.circular(2),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: Colors.black.withValues(alpha: 0.7),
+                                          blurRadius: 4,
+                                          offset: const Offset(0, 1),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  // Top draggable handle / knob
+                                  Positioned(
+                                    top: 0,
+                                    child: Container(
+                                      width: 14,
+                                      height: 18,
+                                      decoration: BoxDecoration(
+                                        color: Colors.white,
+                                        borderRadius: BorderRadius.circular(4),
+                                        boxShadow: [
+                                          BoxShadow(
+                                            color: Colors.black.withValues(alpha: 0.6),
+                                            blurRadius: 5,
+                                            offset: const Offset(0, 2),
+                                          ),
+                                        ],
+                                      ),
+                                      child: Center(
+                                        child: Container(
+                                          width: 3,
+                                          height: 10,
+                                          decoration: BoxDecoration(
+                                            color: AppTheme.primaryRed,
+                                            borderRadius: BorderRadius.circular(1.5),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
                           ),
                         ),
 
-                        // Green Start Handle (draggable)
+                        // Green Start Handle (draggable, clamped to max 5 minutes)
                         Positioned(
                           left: leftPos.clamp(0.0, trackWidth - 28),
                           top: 0,
@@ -2342,8 +2632,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
                             onHorizontalDragUpdate: (details) {
                               final deltaFraction = details.primaryDelta! / trackWidth;
                               final deltaSec = deltaFraction * totalSec;
+                              final minStart = (_clipEndSeconds - 300.0).clamp(0.0, totalSec);
+                              final maxStart = _clipEndSeconds - 2.0;
                               setState(() {
-                                _clipStartSeconds = (_clipStartSeconds + deltaSec).clamp(0.0, _clipEndSeconds - 2.0);
+                                _clipStartSeconds = (_clipStartSeconds + deltaSec).clamp(minStart, maxStart);
                               });
                               _videoPlayerController?.seekTo(Duration(seconds: _clipStartSeconds.toInt()));
                             },
@@ -2367,7 +2659,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                           ),
                         ),
 
-                        // Red End Handle (draggable)
+                        // Red End Handle (draggable, clamped to max 5 minutes)
                         Positioned(
                           left: (rightPos - 26).clamp(leftPos + 26, trackWidth - 26),
                           top: 0,
@@ -2376,8 +2668,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
                             onHorizontalDragUpdate: (details) {
                               final deltaFraction = details.primaryDelta! / trackWidth;
                               final deltaSec = deltaFraction * totalSec;
+                              final minEnd = _clipStartSeconds + 2.0;
+                              final maxEnd = (_clipStartSeconds + 300.0).clamp(0.0, totalSec);
                               setState(() {
-                                _clipEndSeconds = (_clipEndSeconds + deltaSec).clamp(_clipStartSeconds + 2.0, totalSec);
+                                _clipEndSeconds = (_clipEndSeconds + deltaSec).clamp(minEnd, maxEnd);
                               });
                               _videoPlayerController?.seekTo(Duration(seconds: _clipEndSeconds.toInt()));
                             },

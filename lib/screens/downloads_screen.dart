@@ -64,6 +64,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
           posterPath: item.posterPath,
           backdropPath: item.backdropPath,
           localFilePath: item.localFilePath,
+          localSubtitlePath: item.localSubtitlePath,
         ),
         transitionsBuilder: (context, animation, secondaryAnimation, child) {
           return FadeTransition(opacity: animation, child: child);

@@ -37,7 +37,37 @@ class ClipExportService {
     return fallbackDir;
   }
 
-  /// Trims/extracts and saves a clip from the active stream or local file to the gallery.
+  static String _formatSrtTimestamp(double seconds) {
+    final ms = (seconds * 1000).toInt();
+    final h = (ms ~/ 3600000).toString().padLeft(2, '0');
+    final m = ((ms % 3600000) ~/ 60000).toString().padLeft(2, '0');
+    final s = ((ms % 60000) ~/ 1000).toString().padLeft(2, '0');
+    final millis = (ms % 1000).toString().padLeft(3, '0');
+    return '$h:$m:$s,$millis';
+  }
+
+  static String _generateSrt(List<Map<String, dynamic>> subtitles, double startSeconds) {
+    final buffer = StringBuffer();
+    int index = 1;
+    for (final item in subtitles) {
+      final sSec = (item['start'] as num).toDouble() / 1000.0;
+      final eSec = (item['end'] as num).toDouble() / 1000.0;
+      final text = item['text'] as String;
+
+      final relStart = (sSec - startSeconds).clamp(0.0, double.infinity);
+      final relEnd = (eSec - startSeconds).clamp(relStart + 0.5, double.infinity);
+
+      buffer.writeln('$index');
+      buffer.writeln('${_formatSrtTimestamp(relStart)} --> ${_formatSrtTimestamp(relEnd)}');
+      buffer.writeln(text);
+      buffer.writeln();
+      index++;
+    }
+    return buffer.toString();
+  }
+
+  /// Trims/extracts and saves a clip from the active stream or local file to the gallery
+  /// with burned-in Voidflix logo, subtitles (if enabled), and sidecar subtitle file.
   static Future<File?> exportClip({
     required String title,
     required double startSeconds,
@@ -45,8 +75,11 @@ class ClipExportService {
     String? localFilePath,
     String? streamUrl,
     Map<String, String>? streamHeaders,
+    List<Map<String, dynamic>>? subtitles,
+    bool burnSubtitles = false,
     Function(double progress, String status)? onProgress,
   }) async {
+    File? tempSourceFile;
     try {
       onProgress?.call(0.1, 'Preparing clip export…');
 
@@ -57,25 +90,35 @@ class ClipExportService {
       final fileName = 'Voidflix_${cleanTitle}_${startSecInt}s-${endSecInt}s.mp4';
       final outputFile = File('${clipDir.path}/$fileName');
 
+      final subtitleList = subtitles ?? <Map<String, dynamic>>[];
+
+      // Generate sidecar .srt subtitle file if subtitles were enabled
+      if (burnSubtitles && subtitleList.isNotEmpty) {
+        try {
+          final srtFile = File('${clipDir.path}/Voidflix_${cleanTitle}_${startSecInt}s-${endSecInt}s.srt');
+          await srtFile.writeAsString(_generateSrt(subtitleList, startSeconds));
+        } catch (_) {}
+      }
+
+      String? inputVideoPath;
+      int startMs = (startSeconds * 1000).toInt();
+      int endMs = (endSeconds * 1000).toInt();
+      List<Map<String, dynamic>> adjustedCues = subtitleList;
+
       // 1. Source is an offline downloaded local file
       if (localFilePath != null && File(localFilePath).existsSync()) {
-        onProgress?.call(0.4, 'Exporting from local media…');
-        final sourceFile = File(localFilePath);
-        final sourceBytes = await sourceFile.readAsBytes();
-
-        // If local file exists, write clip
-        await outputFile.writeAsBytes(sourceBytes, flush: true);
-        onProgress?.call(0.9, 'Watermarking & saving…');
+        onProgress?.call(0.2, 'Using local offline media…');
+        inputVideoPath = localFilePath;
       }
-      // 2. Source is an online stream (HLS or MP4)
+      // 2. Source is an online stream (HLS or progressive MP4)
       else if (streamUrl != null && streamUrl.isNotEmpty) {
         onProgress?.call(0.2, 'Fetching clip stream…');
         final client = http.Client();
+        final cacheDir = await getTemporaryDirectory();
 
         try {
           if (streamUrl.contains('.m3u8')) {
-            // HLS stream: Download segments covering [startSeconds, endSeconds]
-            onProgress?.call(0.3, 'Reading playlist segments…');
+            onProgress?.call(0.25, 'Reading playlist segments…');
             final headers = Map<String, String>.from(streamHeaders ?? {});
             headers['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36';
 
@@ -99,11 +142,12 @@ class ClipExportService {
                 final endIdx = (endSeconds / estSegDur).ceil().clamp(startIdx + 1, segmentUrls.length);
 
                 final targetSegments = segmentUrls.sublist(startIdx, endIdx);
-                final sink = outputFile.openWrite();
+                tempSourceFile = File('${cacheDir.path}/temp_clip_${DateTime.now().millisecondsSinceEpoch}.ts');
+                final sink = tempSourceFile.openWrite();
 
                 for (int i = 0; i < targetSegments.length; i++) {
-                  final segP = 0.3 + (0.6 * (i / targetSegments.length));
-                  onProgress?.call(segP, 'Exporting moment (${i + 1}/${targetSegments.length})…');
+                  final segP = 0.3 + (0.4 * (i / targetSegments.length));
+                  onProgress?.call(segP, 'Downloading stream (${i + 1}/${targetSegments.length})…');
 
                   final sRes = await client.get(targetSegments[i], headers: headers);
                   if (sRes.statusCode == 200) {
@@ -113,17 +157,35 @@ class ClipExportService {
 
                 await sink.flush();
                 await sink.close();
+
+                inputVideoPath = tempSourceFile.path;
+                final offsetSec = startIdx * estSegDur;
+                final relStartSec = (startSeconds - offsetSec).clamp(0.0, double.infinity);
+                final relEndSec = (endSeconds - offsetSec).clamp(relStartSec + 1.0, double.infinity);
+                startMs = (relStartSec * 1000).toInt();
+                endMs = (relEndSec * 1000).toInt();
+
+                final offsetMs = (offsetSec * 1000).toInt();
+                adjustedCues = subtitleList.map((c) {
+                  return {
+                    'start': ((c['start'] as num).toInt() - offsetMs),
+                    'end': ((c['end'] as num).toInt() - offsetMs),
+                    'text': c['text'],
+                  };
+                }).toList();
               }
             }
           } else {
             // Progressive MP4 stream
-            onProgress?.call(0.4, 'Downloading clip video…');
+            onProgress?.call(0.3, 'Downloading stream for clipping…');
             final headers = Map<String, String>.from(streamHeaders ?? {});
             headers['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36';
 
             final res = await client.get(Uri.parse(streamUrl), headers: headers);
             if (res.statusCode == 200) {
-              await outputFile.writeAsBytes(res.bodyBytes, flush: true);
+              tempSourceFile = File('${cacheDir.path}/temp_clip_${DateTime.now().millisecondsSinceEpoch}.mp4');
+              await tempSourceFile.writeAsBytes(res.bodyBytes, flush: true);
+              inputVideoPath = tempSourceFile.path;
             }
           }
         } finally {
@@ -131,23 +193,40 @@ class ClipExportService {
         }
       }
 
-      if (outputFile.existsSync() && outputFile.lengthSync() > 1000) {
-        onProgress?.call(0.95, 'Indexing into gallery…');
-        // Notify Android MediaStore so it appears directly in Gallery
-        try {
-          await _channel.invokeMethod('scanFileIntoGallery', {
-            'filePath': outputFile.absolute.path,
-          });
-        } catch (_) {}
+      if (inputVideoPath != null && File(inputVideoPath).existsSync()) {
+        onProgress?.call(0.75, 'Trimming & burning Voidflix watermark…');
 
-        onProgress?.call(1.0, 'Clip saved to Gallery!');
-        return outputFile;
+        // Invoke native Android Media3 Transformer via MethodChannel
+        try {
+          final res = await _channel.invokeMethod('trimAndExportClip', {
+            'inputPath': inputVideoPath,
+            'outputPath': outputFile.absolute.path,
+            'startMs': startMs,
+            'endMs': endMs,
+            'burnSubtitles': burnSubtitles,
+            'subtitles': adjustedCues,
+          });
+
+          if (res != null && outputFile.existsSync() && outputFile.lengthSync() > 1000) {
+            onProgress?.call(1.0, 'Clip saved to Gallery!');
+            return outputFile;
+          }
+        } catch (nativeErr) {
+          debugPrint('Native clip export error: $nativeErr');
+        }
       }
 
       return null;
     } catch (e) {
       debugPrint('Error exporting clip: $e');
       return null;
+    } finally {
+      // Clean up temporary segment file
+      if (tempSourceFile != null && tempSourceFile.existsSync()) {
+        try {
+          tempSourceFile.deleteSync();
+        } catch (_) {}
+      }
     }
   }
 }

@@ -168,6 +168,7 @@ class _DetailScreenState extends State<DetailScreen> {
     int season = 1,
     int episode = 1,
     String? localFilePath,
+    String? localSubtitlePath,
     String? episodeTitle,
   }) {
     if (_detail == null) return;
@@ -193,6 +194,7 @@ class _DetailScreenState extends State<DetailScreen> {
           posterPath: _detail!.posterPath,
           backdropPath: _detail!.backdropPath,
           localFilePath: localFilePath,
+          localSubtitlePath: localSubtitlePath,
         ),
         transitionsBuilder: (context, animation, secondaryAnimation, child) {
           return FadeTransition(
@@ -522,6 +524,7 @@ class _DetailScreenState extends State<DetailScreen> {
                           season: s,
                           episode: e,
                           localFilePath: localFile,
+                          localSubtitlePath: offlineItem?.status == 'completed' ? offlineItem?.localSubtitlePath : null,
                         );
                       },
                       style: ElevatedButton.styleFrom(
@@ -599,6 +602,7 @@ class _DetailScreenState extends State<DetailScreen> {
                                 episode: targetEpNum,
                                 episodeTitle: firstEp?.name,
                                 localFilePath: mainItem?.localFilePath,
+                                localSubtitlePath: mainItem?.localSubtitlePath,
                               );
                             },
                             style: ElevatedButton.styleFrom(
@@ -968,6 +972,7 @@ class _DetailScreenState extends State<DetailScreen> {
                                       episode: ep.episodeNumber,
                                       episodeTitle: ep.name,
                                       localFilePath: isEpDownloaded ? epDownloadedItem?.localFilePath : null,
+                                      localSubtitlePath: isEpDownloaded ? epDownloadedItem?.localSubtitlePath : null,
                                     ),
                                     child: Container(
                                       width: 125,
@@ -1106,6 +1111,7 @@ class _DetailScreenState extends State<DetailScreen> {
                                           episode: ep.episodeNumber,
                                           episodeTitle: ep.name,
                                           localFilePath: epDownloadedItem?.localFilePath,
+                                          localSubtitlePath: epDownloadedItem?.localSubtitlePath,
                                         );
                                       },
                                     )

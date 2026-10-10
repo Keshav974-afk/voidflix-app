@@ -12,6 +12,107 @@ import androidx.core.app.NotificationCompat
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
+import androidx.media3.common.MediaItem
+import androidx.media3.common.MimeTypes
+import androidx.media3.transformer.Transformer
+import androidx.media3.transformer.Composition
+import androidx.media3.transformer.EditedMediaItem
+import androidx.media3.transformer.ExportException
+import androidx.media3.transformer.ExportResult
+import androidx.media3.effect.OverlayEffect
+import androidx.media3.effect.BitmapOverlay
+import androidx.media3.effect.TextureOverlay
+import com.google.common.collect.ImmutableList
+
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.Paint
+import android.graphics.RectF
+import android.graphics.Typeface
+import android.media.MediaCodec
+import android.media.MediaExtractor
+import android.media.MediaFormat
+import android.media.MediaMuxer
+import android.media.MediaScannerConnection
+import androidx.media3.common.Effect
+import java.io.File
+import java.nio.ByteBuffer
+
+data class SubtitleCue(val startMs: Long, val endMs: Long, val text: String)
+
+class VoidflixOverlay(
+    private val cues: List<SubtitleCue>,
+    private val burnSubtitles: Boolean,
+    private val startMs: Long
+) : BitmapOverlay() {
+
+    private val logoPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#E50914")
+        textSize = 34f
+        typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        letterSpacing = 0.18f
+        setShadowLayer(6f, 2f, 2f, Color.BLACK)
+    }
+
+    private val subTextPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.WHITE
+        textSize = 38f
+        typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
+        textAlign = Paint.Align.CENTER
+        setShadowLayer(6f, 2f, 2f, Color.BLACK)
+    }
+
+    private val subBgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+        color = Color.parseColor("#99000000")
+        style = Paint.Style.FILL
+    }
+
+    private val overlayWidth = 1280
+    private val overlayHeight = 720
+    private val bitmap = Bitmap.createBitmap(overlayWidth, overlayHeight, Bitmap.Config.ARGB_8888)
+    private val canvas = Canvas(bitmap)
+
+    override fun getBitmap(presentationTimeUs: Long): Bitmap {
+        bitmap.eraseColor(Color.TRANSPARENT)
+
+        // 1. Draw signature VOIDFLIX logo watermark at bottom-right
+        val logoText = "VOIDFLIX"
+        val logoX = overlayWidth - 210f
+        val logoY = overlayHeight - 36f
+        canvas.drawText(logoText, logoX, logoY, logoPaint)
+
+        // 2. Draw active subtitle if enabled
+        if (burnSubtitles && cues.isNotEmpty()) {
+            val currentMediaMs = startMs + (presentationTimeUs / 1000L)
+            val activeCue = cues.firstOrNull { cue ->
+                currentMediaMs >= cue.startMs && currentMediaMs <= cue.endMs
+            }
+
+            if (activeCue != null && activeCue.text.isNotBlank()) {
+                val cleanText = activeCue.text.replace(Regex("<[^>]*>"), "").trim()
+                val lines = cleanText.split("\n")
+                val textX = overlayWidth / 2f
+                var startY = overlayHeight - 75f - (lines.size - 1) * 44f
+
+                for (line in lines) {
+                    val textWidth = subTextPaint.measureText(line)
+                    val bgRect = RectF(
+                        textX - (textWidth / 2f) - 18f,
+                        startY - 32f,
+                        textX + (textWidth / 2f) + 18f,
+                        startY + 10f
+                    )
+                    canvas.drawRoundRect(bgRect, 8f, 8f, subBgPaint)
+                    canvas.drawText(line, textX, startY, subTextPaint)
+                    startY += 44f
+                }
+            }
+        }
+
+        return bitmap
+    }
+}
 
 class MainActivity : FlutterActivity() {
     private val CHANNEL = "org.voidflix/notifications"
@@ -62,9 +163,9 @@ class MainActivity : FlutterActivity() {
                 "scanFileIntoGallery" -> {
                     val filePath = call.argument<String>("filePath")
                     if (filePath != null) {
-                        val file = java.io.File(filePath)
+                        val file = File(filePath)
                         if (file.exists()) {
-                            android.media.MediaScannerConnection.scanFile(
+                            MediaScannerConnection.scanFile(
                                 applicationContext,
                                 arrayOf(file.absolutePath),
                                 arrayOf("video/mp4")
@@ -79,10 +180,194 @@ class MainActivity : FlutterActivity() {
                         result.error("ARG_ERROR", "filePath is required", null)
                     }
                 }
+                "trimAndExportClip" -> {
+                    val inputPath = call.argument<String>("inputPath") ?: ""
+                    val outputPath = call.argument<String>("outputPath") ?: ""
+                    val startMs = (call.argument<Number>("startMs"))?.toLong() ?: 0L
+                    val endMs = (call.argument<Number>("endMs"))?.toLong() ?: 0L
+                    val burnSubtitles = call.argument<Boolean>("burnSubtitles") ?: false
+                    val rawSubtitles = call.argument<List<Map<String, Any>>>("subtitles") ?: emptyList()
+
+                    val cues = rawSubtitles.mapNotNull { map ->
+                        val s = (map["start"] as? Number)?.toLong() ?: return@mapNotNull null
+                        val e = (map["end"] as? Number)?.toLong() ?: return@mapNotNull null
+                        val t = map["text"] as? String ?: ""
+                        SubtitleCue(s, e, t)
+                    }
+
+                    trimAndExportClipWithTransformer(inputPath, outputPath, startMs, endMs, cues, burnSubtitles, result)
+                }
                 else -> {
                     result.notImplemented()
                 }
             }
+        }
+    }
+
+    private fun trimAndExportClipWithTransformer(
+        inputPath: String,
+        outputPath: String,
+        startMs: Long,
+        endMs: Long,
+        cues: List<SubtitleCue>,
+        burnSubtitles: Boolean,
+        result: MethodChannel.Result
+    ) {
+        val inputFile = File(inputPath)
+        if (!inputFile.exists()) {
+            result.error("FILE_NOT_FOUND", "Source file does not exist: $inputPath", null)
+            return
+        }
+
+        val outputFile = File(outputPath)
+        outputFile.parentFile?.mkdirs()
+        if (outputFile.exists()) {
+            outputFile.delete()
+        }
+
+        try {
+            val mediaItem = MediaItem.Builder()
+                .setUri(android.net.Uri.fromFile(inputFile))
+                .setClippingConfiguration(
+                    MediaItem.ClippingConfiguration.Builder()
+                        .setStartPositionMs(startMs)
+                        .setEndPositionMs(endMs)
+                        .build()
+                )
+                .build()
+
+            val overlay = VoidflixOverlay(cues, burnSubtitles, startMs)
+            val overlayEffect = OverlayEffect(ImmutableList.of(overlay))
+            val effects = androidx.media3.transformer.Effects(
+                emptyList(),
+                listOf<Effect>(overlayEffect)
+            )
+
+            val editedMediaItem = EditedMediaItem.Builder(mediaItem)
+                .setEffects(effects)
+                .build()
+
+            val transformer = Transformer.Builder(applicationContext)
+                .setVideoMimeType(MimeTypes.VIDEO_H264)
+                .setAudioMimeType(MimeTypes.AUDIO_AAC)
+                .build()
+
+            transformer.addListener(object : Transformer.Listener {
+                override fun onCompleted(composition: Composition, exportResult: ExportResult) {
+                    MediaScannerConnection.scanFile(
+                        applicationContext,
+                        arrayOf(outputFile.absolutePath),
+                        arrayOf("video/mp4")
+                    ) { _, _ -> }
+                    result.success(outputFile.absolutePath)
+                }
+
+                override fun onError(
+                    composition: Composition,
+                    exportResult: ExportResult,
+                    exportException: ExportException
+                ) {
+                    android.util.Log.w("Voidflix", "Media3 export error: ${exportException.message}, trying fallback muxer...")
+                    val fallbackOk = fallbackMuxerTrim(inputPath, outputPath, startMs, endMs)
+                    if (fallbackOk) {
+                        MediaScannerConnection.scanFile(
+                            applicationContext,
+                            arrayOf(outputFile.absolutePath),
+                            arrayOf("video/mp4")
+                        ) { _, _ -> }
+                        result.success(outputFile.absolutePath)
+                    } else {
+                        result.error("EXPORT_FAILED", exportException.message, null)
+                    }
+                }
+            })
+
+            transformer.start(editedMediaItem, outputFile.absolutePath)
+        } catch (e: Exception) {
+            android.util.Log.w("Voidflix", "Transformer initialization error: ${e.message}, falling back to muxer...")
+            val fallbackOk = fallbackMuxerTrim(inputPath, outputPath, startMs, endMs)
+            if (fallbackOk) {
+                MediaScannerConnection.scanFile(
+                    applicationContext,
+                    arrayOf(outputFile.absolutePath),
+                    arrayOf("video/mp4")
+                ) { _, _ -> }
+                result.success(outputFile.absolutePath)
+            } else {
+                result.error("EXPORT_ERROR", e.message, null)
+            }
+        }
+    }
+
+    private fun fallbackMuxerTrim(
+        inputPath: String,
+        outputPath: String,
+        startMs: Long,
+        endMs: Long
+    ): Boolean {
+        var extractor: MediaExtractor? = null
+        var muxer: MediaMuxer? = null
+        try {
+            extractor = MediaExtractor()
+            extractor.setDataSource(inputPath)
+            val trackCount = extractor.trackCount
+            muxer = MediaMuxer(outputPath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
+
+            val trackIndexMap = HashMap<Int, Int>()
+            var bufferSize = 1024 * 1024
+
+            for (i in 0 until trackCount) {
+                val format = extractor.getTrackFormat(i)
+                val mime = format.getString(MediaFormat.KEY_MIME) ?: ""
+                if (mime.startsWith("video/") || mime.startsWith("audio/")) {
+                    extractor.selectTrack(i)
+                    val newTrackIndex = muxer.addTrack(format)
+                    trackIndexMap[i] = newTrackIndex
+                    if (format.containsKey(MediaFormat.KEY_MAX_INPUT_SIZE)) {
+                        val size = format.getInteger(MediaFormat.KEY_MAX_INPUT_SIZE)
+                        if (size > bufferSize) bufferSize = size
+                    }
+                }
+            }
+
+            if (trackIndexMap.isEmpty()) return false
+            muxer.start()
+
+            val startUs = startMs * 1000L
+            val endUs = endMs * 1000L
+            extractor.seekTo(startUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
+
+            val buffer = ByteBuffer.allocateDirect(bufferSize)
+            val bufferInfo = MediaCodec.BufferInfo()
+
+            while (true) {
+                val sampleSize = extractor.readSampleData(buffer, 0)
+                if (sampleSize < 0) break
+
+                val sampleTimeUs = extractor.sampleTime
+                if (sampleTimeUs > endUs) break
+
+                val trackIndex = extractor.sampleTrackIndex
+                if (trackIndexMap.containsKey(trackIndex) && sampleTimeUs >= startUs) {
+                    bufferInfo.offset = 0
+                    bufferInfo.size = sampleSize
+                    bufferInfo.presentationTimeUs = sampleTimeUs - startUs
+                    bufferInfo.flags = extractor.sampleFlags
+                    muxer.writeSampleData(trackIndexMap[trackIndex]!!, buffer, bufferInfo)
+                }
+                extractor.advance()
+            }
+
+            return true
+        } catch (e: Exception) {
+            android.util.Log.e("Voidflix", "Fallback muxer trim failed: ${e.message}")
+            return false
+        } finally {
+            try { extractor?.release() } catch (_: Exception) {}
+            try {
+                muxer?.stop()
+                muxer?.release()
+            } catch (_: Exception) {}
         }
     }
 

@@ -60,6 +60,7 @@ class _HomeScreenState extends State<HomeScreen> {
           posterPath: item.posterPath,
           backdropPath: item.backdropPath,
           localFilePath: item.localFilePath,
+          localSubtitlePath: item.localSubtitlePath,
         ),
       ),
     );
@@ -283,25 +284,25 @@ class _HomeScreenState extends State<HomeScreen> {
                     margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
                     padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
                     decoration: BoxDecoration(
-                      color: const Color(0xFF1E1E28),
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: AppTheme.primaryRed.withValues(alpha: 0.4)),
+                      color: const Color(0xFF16161A),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.white12),
                     ),
                     child: Row(
                       children: [
-                        const Icon(Icons.wifi_off_rounded, color: AppTheme.primaryRed, size: 20),
-                        const SizedBox(width: 10),
+                        const Icon(Icons.wifi_off_rounded, color: Colors.white70, size: 20),
+                        const SizedBox(width: 12),
                         Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               const Text(
-                                "You're currently offline",
-                                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+                                "Offline Mode",
+                                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
                               ),
                               Text(
-                                "Watch ${completedDownloads.length} downloaded title${completedDownloads.length > 1 ? 's' : ''} without Wi-Fi",
-                                style: const TextStyle(color: Colors.white70, fontSize: 11),
+                                "${completedDownloads.length} downloaded title${completedDownloads.length > 1 ? 's' : ''} available to play",
+                                style: const TextStyle(color: Colors.white60, fontSize: 11),
                               ),
                             ],
                           ),
@@ -311,10 +312,16 @@ class _HomeScreenState extends State<HomeScreen> {
                             context,
                             MaterialPageRoute(builder: (_) => const DownloadsScreen()),
                           ),
-                          style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
+                          style: TextButton.styleFrom(
+                            backgroundColor: Colors.white,
+                            foregroundColor: Colors.black,
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                            minimumSize: Size.zero,
+                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                          ),
                           child: const Text(
-                            'Watch Downloads',
-                            style: TextStyle(color: AppTheme.primaryRed, fontWeight: FontWeight.bold, fontSize: 12),
+                            'Downloads',
+                            style: TextStyle(fontWeight: FontWeight.bold, fontSize: 11),
                           ),
                         ),
                       ],
@@ -597,19 +604,13 @@ class _HomeScreenState extends State<HomeScreen> {
           child: ListView(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             children: [
+              // Mature Netflix-style Offline Hero Card
               Container(
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: [
-                      AppTheme.primaryRed.withValues(alpha: 0.18),
-                      Colors.white.withValues(alpha: 0.04),
-                    ],
-                    begin: Alignment.topLeft,
-                    end: Alignment.bottomRight,
-                  ),
-                  borderRadius: BorderRadius.circular(14),
-                  border: Border.all(color: AppTheme.primaryRed.withValues(alpha: 0.3)),
+                  color: const Color(0xFF16161A),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: Colors.white12),
                 ),
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -617,26 +618,39 @@ class _HomeScreenState extends State<HomeScreen> {
                     Row(
                       children: [
                         Container(
-                          padding: const EdgeInsets.all(8),
-                          decoration: BoxDecoration(
-                            color: AppTheme.primaryRed.withValues(alpha: 0.25),
+                          width: 44,
+                          height: 44,
+                          decoration: const BoxDecoration(
+                            color: Color(0xFF282830),
                             shape: BoxShape.circle,
                           ),
-                          child: const Icon(Icons.wifi_off_rounded, color: AppTheme.primaryRed, size: 24),
+                          child: const Icon(
+                            Icons.wifi_off_rounded,
+                            color: Colors.white70,
+                            size: 22,
+                          ),
                         ),
-                        const SizedBox(width: 12),
+                        const SizedBox(width: 14),
                         const Expanded(
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                "You're Offline",
-                                style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.bold),
+                                "Offline Mode",
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold,
+                                ),
                               ),
-                              SizedBox(height: 2),
+                              SizedBox(height: 3),
                               Text(
-                                "Watch your downloaded movies and series without Wi-Fi",
-                                style: TextStyle(color: Colors.white70, fontSize: 12),
+                                "You can watch any of your downloaded titles without internet",
+                                style: TextStyle(
+                                  color: Colors.white60,
+                                  fontSize: 12,
+                                  height: 1.3,
+                                ),
                               ),
                             ],
                           ),
@@ -644,23 +658,51 @@ class _HomeScreenState extends State<HomeScreen> {
                       ],
                     ),
                     const SizedBox(height: 14),
-                    ElevatedButton.icon(
-                      onPressed: () => Navigator.push(
-                        context,
-                        MaterialPageRoute(builder: (_) => const DownloadsScreen()),
-                      ),
-                      icon: const Icon(Icons.download_done_rounded, size: 18, color: Colors.white),
-                      label: const Text('Go to All Downloads', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppTheme.primaryRed,
-                        minimumSize: const Size(double.infinity, 42),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                      ),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: SizedBox(
+                            height: 38,
+                            child: ElevatedButton(
+                              onPressed: () => Navigator.push(
+                                context,
+                                MaterialPageRoute(builder: (_) => const DownloadsScreen()),
+                              ),
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: Colors.white,
+                                foregroundColor: Colors.black,
+                                elevation: 0,
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                              ),
+                              child: const Text(
+                                'Manage Downloads',
+                                style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        SizedBox(
+                          height: 38,
+                          child: OutlinedButton(
+                            onPressed: () {
+                              _checkConnectivity();
+                              mediaProvider.fetchHomeData();
+                            },
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: Colors.white70,
+                              side: const BorderSide(color: Colors.white24),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                            ),
+                            child: const Text('Retry', style: TextStyle(fontSize: 13)),
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),
               ),
-              const SizedBox(height: 20),
+              const SizedBox(height: 22),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
@@ -674,70 +716,157 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ],
               ),
-              const SizedBox(height: 10),
+              const SizedBox(height: 12),
               ...downloads.map((item) {
                 final cleanTitle = DownloadsScreen.sanitizeTitle(item.title);
-                final episodeInfo = item.mediaType == 'tv'
-                    ? 'S${item.season}E${item.episode}${item.episodeTitle != null ? ' - ${item.episodeTitle}' : ''}'
+                final isTv = item.mediaType == 'tv';
+                final episodeInfo = isTv
+                    ? 'S${item.season}E${item.episode}${item.episodeTitle != null ? ' • ${item.episodeTitle}' : ''}'
                     : (item.quality.isNotEmpty ? '${item.quality} • Movie' : 'Movie');
                 final hasThumb = item.localThumbnailPath != null && File(item.localThumbnailPath!).existsSync();
+                final sizeMb = item.fileSizeBytes > 0
+                    ? '${(item.fileSizeBytes / (1024 * 1024)).toStringAsFixed(0)} MB'
+                    : '';
 
                 return Container(
-                  margin: const EdgeInsets.only(bottom: 10),
+                  margin: const EdgeInsets.only(bottom: 12),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF14141E),
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: Colors.white12),
+                    color: const Color(0xFF141418),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
                   ),
-                  child: ListTile(
-                    contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                    leading: ClipRRect(
-                      borderRadius: BorderRadius.circular(6),
-                      child: SizedBox(
-                        width: 70,
-                        height: 48,
-                        child: hasThumb
-                            ? Image.file(File(item.localThumbnailPath!), fit: BoxFit.cover)
-                            : (item.posterPath != null
-                                ? Image.network(
-                                    'https://image.tmdb.org/t/p/w200${item.posterPath}',
-                                    fit: BoxFit.cover,
-                                    errorBuilder: (_, __, ___) => const Icon(Icons.movie, color: Colors.white30),
-                                  )
-                                : const Icon(Icons.movie, color: Colors.white30)),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(8),
+                    onTap: () => _playOffline(item),
+                    child: Padding(
+                      padding: const EdgeInsets.all(10),
+                      child: Row(
+                        children: [
+                          // 16:9 Thumbnail preview matching Downloads screen
+                          ClipRRect(
+                            borderRadius: BorderRadius.circular(6),
+                            child: SizedBox(
+                              width: 104,
+                              height: 58,
+                              child: Stack(
+                                fit: StackFit.expand,
+                                children: [
+                                  if (hasThumb)
+                                    Image.file(File(item.localThumbnailPath!), fit: BoxFit.cover)
+                                  else if (item.posterPath != null)
+                                    Image.network(
+                                      'https://image.tmdb.org/t/p/w300${item.posterPath}',
+                                      fit: BoxFit.cover,
+                                      errorBuilder: (_, __, ___) => Container(
+                                        color: const Color(0xFF222228),
+                                        child: const Icon(Icons.movie, color: Colors.white24),
+                                      ),
+                                    )
+                                  else
+                                    Container(
+                                      color: const Color(0xFF222228),
+                                      child: const Icon(Icons.movie, color: Colors.white24),
+                                    ),
+                                  // Translucent Play Icon Overlay
+                                  Container(
+                                    color: Colors.black.withValues(alpha: 0.3),
+                                    child: Center(
+                                      child: Container(
+                                        width: 28,
+                                        height: 28,
+                                        decoration: BoxDecoration(
+                                          color: Colors.black.withValues(alpha: 0.55),
+                                          shape: BoxShape.circle,
+                                          border: Border.all(color: Colors.white38, width: 1.2),
+                                        ),
+                                        child: const Icon(Icons.play_arrow, color: Colors.white, size: 16),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          // Title & Info
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  cleanTitle,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 14,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                const SizedBox(height: 4),
+                                Text(
+                                  episodeInfo,
+                                  style: const TextStyle(
+                                    color: Colors.white60,
+                                    fontSize: 12,
+                                  ),
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                                const SizedBox(height: 4),
+                                Row(
+                                  children: [
+                                    if (sizeMb.isNotEmpty)
+                                      Text(
+                                        sizeMb,
+                                        style: const TextStyle(color: Colors.white38, fontSize: 11),
+                                      ),
+                                    if (sizeMb.isNotEmpty && item.localSubtitlePath != null)
+                                      const Text('  •  ', style: TextStyle(color: Colors.white24, fontSize: 10)),
+                                    if (item.localSubtitlePath != null)
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                                        decoration: BoxDecoration(
+                                          borderRadius: BorderRadius.circular(2),
+                                          border: Border.all(color: Colors.white30, width: 0.8),
+                                        ),
+                                        child: const Text(
+                                          'CC',
+                                          style: TextStyle(
+                                            color: Colors.white70,
+                                            fontSize: 9,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                      ),
+                                  ],
+                                ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          IconButton(
+                            icon: const Icon(Icons.play_circle_outline, color: Colors.white70, size: 28),
+                            onPressed: () => _playOffline(item),
+                          ),
+                        ],
                       ),
                     ),
-                    title: Text(
-                      cleanTitle,
-                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    subtitle: Text(
-                      episodeInfo,
-                      style: const TextStyle(color: Colors.white60, fontSize: 12),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    trailing: IconButton(
-                      icon: const Icon(Icons.play_circle_fill, color: AppTheme.primaryRed, size: 34),
-                      onPressed: () => _playOffline(item),
-                    ),
-                    onTap: () => _playOffline(item),
                   ),
                 );
               }),
-              const SizedBox(height: 20),
+              const SizedBox(height: 16),
               Center(
                 child: TextButton.icon(
                   onPressed: () {
                     _checkConnectivity();
                     mediaProvider.fetchHomeData();
                   },
-                  icon: const Icon(Icons.refresh, color: Colors.white60, size: 18),
-                  label: const Text('Check Connection Again', style: TextStyle(color: Colors.white60)),
+                  icon: const Icon(Icons.refresh, color: Colors.white54, size: 16),
+                  label: const Text('Tap to check internet connection', style: TextStyle(color: Colors.white54, fontSize: 12)),
                 ),
               ),
+              const SizedBox(height: 24),
             ],
           ),
         ),
@@ -746,41 +875,159 @@ class _HomeScreenState extends State<HomeScreen> {
 
     return Scaffold(
       backgroundColor: Colors.black,
-      body: Center(
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 32),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.wifi_off_rounded, color: AppTheme.primaryRed, size: 52),
-              const SizedBox(height: 16),
-              const Text(
+      appBar: AppBar(
+        backgroundColor: Colors.black,
+        elevation: 0,
+        title: const Text(
+          'Voidflix',
+          style: TextStyle(
+            color: AppTheme.primaryRed,
+            fontWeight: FontWeight.bold,
+            fontSize: 22,
+            letterSpacing: 1.5,
+          ),
+        ),
+      ),
+      body: SafeArea(
+        child: Column(
+          children: [
+            const Spacer(flex: 3),
+            CustomPaint(
+              size: const Size(180, 180),
+              painter: _OfflineNoConnectionBadgePainter(),
+            ),
+            const SizedBox(height: 28),
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 40),
+              child: Text(
                 "You're Offline",
-                style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
-              ),
-              const SizedBox(height: 8),
-              const Text(
-                'Connect to the internet or Wi-Fi to browse movies and TV shows, or download titles beforehand to watch offline.',
                 textAlign: TextAlign.center,
-                style: TextStyle(color: Colors.white60, fontSize: 13, height: 1.4),
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                ),
               ),
-              const SizedBox(height: 20),
-              ElevatedButton(
+            ),
+            const SizedBox(height: 10),
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 40),
+              child: Text(
+                'Connect to the internet to stream, or watch titles you have downloaded.',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  color: Colors.white70,
+                  fontSize: 14,
+                  height: 1.4,
+                  fontWeight: FontWeight.w400,
+                ),
+              ),
+            ),
+            const SizedBox(height: 34),
+            SizedBox(
+              width: 210,
+              height: 44,
+              child: ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.white,
+                  foregroundColor: Colors.black,
+                  elevation: 0,
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                ),
                 onPressed: () {
                   _checkConnectivity();
                   mediaProvider.fetchHomeData();
                 },
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: AppTheme.primaryRed,
-                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                child: const Text(
+                  'Check Connection',
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 14,
+                    letterSpacing: 0.2,
+                  ),
                 ),
-                child: const Text('Try Again', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
               ),
-            ],
-          ),
+            ),
+            const SizedBox(height: 14),
+            SizedBox(
+              width: 210,
+              height: 40,
+              child: OutlinedButton(
+                style: OutlinedButton.styleFrom(
+                  foregroundColor: Colors.white70,
+                  side: const BorderSide(color: Colors.white24),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
+                ),
+                onPressed: () => Navigator.push(
+                  context,
+                  MaterialPageRoute(builder: (_) => const DownloadsScreen()),
+                ),
+                child: const Text(
+                  'Go to Downloads',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
+                ),
+              ),
+            ),
+            const Spacer(flex: 4),
+          ],
         ),
       ),
     );
   }
+}
+
+/// Circular Badge for Offline State (Matching _NetflixDownloadBadgePainter design language)
+class _OfflineNoConnectionBadgePainter extends CustomPainter {
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width / 2, size.height / 2);
+    final radius = size.width / 2;
+
+    // 1. Dark charcoal circle background (exact match to Netflix badge)
+    final circlePaint = Paint()
+      ..color = const Color(0xFF424248)
+      ..style = PaintingStyle.fill;
+    canvas.drawCircle(center, radius, circlePaint);
+
+    // 2. Dark inner glyph paint
+    final glyphPaint = Paint()
+      ..color = const Color(0xFF141416)
+      ..strokeWidth = 6.0
+      ..strokeCap = StrokeCap.round
+      ..style = PaintingStyle.stroke;
+
+    final dotPaint = Paint()
+      ..color = const Color(0xFF141416)
+      ..style = PaintingStyle.fill;
+
+    // Base point of wifi waves
+    final waveCenter = Offset(center.dx, center.dy + 22);
+
+    // Center origin dot
+    canvas.drawCircle(waveCenter, 4.5, dotPaint);
+
+    // Inner wave arc
+    final innerRect = Rect.fromCircle(center: waveCenter, radius: 26);
+    canvas.drawArc(innerRect, -3.14159 * 0.75, 3.14159 * 0.5, false, glyphPaint);
+
+    // Outer wave arc
+    final outerRect = Rect.fromCircle(center: waveCenter, radius: 48);
+    canvas.drawArc(outerRect, -3.14159 * 0.75, 3.14159 * 0.5, false, glyphPaint);
+
+    // Diagonal clean slash bar
+    final slashPaint = Paint()
+      ..color = const Color(0xFF141416)
+      ..strokeWidth = 6.5
+      ..strokeCap = StrokeCap.round
+      ..style = PaintingStyle.stroke;
+
+    canvas.drawLine(
+      Offset(center.dx - 32, center.dy - 30),
+      Offset(center.dx + 32, center.dy + 34),
+      slashPaint,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }

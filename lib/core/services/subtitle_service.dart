@@ -73,10 +73,18 @@ class SubtitleService {
         _cache[url] = cues;
         return cues;
       } else {
-        final path = url.startsWith('file://') ? url.replaceFirst('file://', '') : url;
+        String path = url;
+        if (path.startsWith('file://')) {
+          try {
+            path = Uri.parse(path).toFilePath();
+          } catch (_) {
+            path = path.replaceFirst('file://', '');
+          }
+        }
         final file = File(path);
         if (await file.exists()) {
-          final content = await file.readAsString(encoding: utf8);
+          final bytes = await file.readAsBytes();
+          final content = utf8.decode(bytes, allowMalformed: true);
           final cues = parseSubtitles(content);
           _cache[url] = cues;
           return cues;

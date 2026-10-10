@@ -90,10 +90,41 @@ class DownloadProvider extends ChangeNotifier {
           var current = cleanTitle != d.title ? d.copyWith(title: cleanTitle) : d;
 
           // Attach offline subtitle if available on disk but not yet linked
-          if (current.localSubtitlePath == null || current.localSubtitlePath!.isEmpty) {
-            final subFile = File('${current.localFilePath.replaceAll('.mp4', '')}_sub_en.vtt');
-            if (subFile.existsSync()) {
-              current = current.copyWith(localSubtitlePath: subFile.path);
+          if (current.localSubtitlePath == null || current.localSubtitlePath!.isEmpty || !File(current.localSubtitlePath!).existsSync()) {
+            final downloadDir = File(current.localFilePath).parent;
+            String? resolvedSub;
+            final manifestFile = File('${downloadDir.path}/${current.id}_subs.json');
+            if (manifestFile.existsSync()) {
+              try {
+                final subsList = jsonDecode(manifestFile.readAsStringSync()) as List;
+                if (subsList.isNotEmpty && subsList.first['path'] != null) {
+                  final candidate = subsList.first['path'] as String;
+                  if (File(candidate).existsSync()) {
+                    resolvedSub = candidate;
+                  }
+                }
+              } catch (_) {}
+            }
+            if (resolvedSub == null || !File(resolvedSub).existsSync()) {
+              try {
+                final matching = downloadDir
+                    .listSync()
+                    .whereType<File>()
+                    .where((f) => f.path.contains('${current.id}_sub_') && (f.path.endsWith('.vtt') || f.path.endsWith('.srt')))
+                    .toList();
+                if (matching.isNotEmpty) {
+                  resolvedSub = matching.first.path;
+                }
+              } catch (_) {}
+            }
+            if (resolvedSub == null) {
+              final subFile = File('${current.localFilePath.replaceAll('.mp4', '')}_sub_en.vtt');
+              if (subFile.existsSync()) {
+                resolvedSub = subFile.path;
+              }
+            }
+            if (resolvedSub != null && File(resolvedSub).existsSync()) {
+              current = current.copyWith(localSubtitlePath: resolvedSub);
             }
           }
 
@@ -165,6 +196,10 @@ class DownloadProvider extends ChangeNotifier {
 
   DownloadedItem? getItem(String id) {
     return _items.where((i) => i.id == id).firstOrNull;
+  }
+
+  DownloadedItem? getItemByPath(String path) {
+    return _items.where((i) => i.localFilePath == path).firstOrNull;
   }
 
   /// Launch external browser resolver for web downloads (same as web flowflix-web/src/lib/download.ts)
@@ -311,6 +346,36 @@ class DownloadProvider extends ChangeNotifier {
               }
             }
           }
+        }
+      } catch (_) {}
+    }
+
+    // If still empty, attempt Vidlink extraction for rich multi-lingual captions
+    if (subsToProcess.isEmpty) {
+      try {
+        final vidlink = await StreamExtractor.extractVidlink(
+          type: mediaType,
+          tmdbId: mediaId,
+          season: season,
+          episode: episode,
+        );
+        if (vidlink != null && vidlink.subtitles.isNotEmpty) {
+          subsToProcess.addAll(vidlink.subtitles);
+        }
+      } catch (_) {}
+    }
+
+    // If still empty, check shared cached subtitles
+    if (subsToProcess.isEmpty) {
+      try {
+        final shared = await StreamExtractor.getSharedSubtitles(
+          mediaType,
+          mediaId,
+          season,
+          episode,
+        );
+        if (shared.isNotEmpty) {
+          subsToProcess.addAll(shared);
         }
       } catch (_) {}
     }
@@ -663,8 +728,41 @@ class DownloadProvider extends ChangeNotifier {
       final finalFile = File(targetPath);
       final finalSizeBytes = await finalFile.length();
 
-      final subFile = File('${downloadDir.path}/${id}_sub_en.vtt');
-      final finalSubPath = item.localSubtitlePath ?? (subFile.existsSync() ? subFile.path : null);
+      // Ensure we preserve any subtitle downloaded during background task or scan disk
+      final existingItem = getItem(id);
+      String? finalSubPath = existingItem?.localSubtitlePath ?? item.localSubtitlePath;
+      if (finalSubPath == null || !File(finalSubPath).existsSync()) {
+        final manifestFile = File('${downloadDir.path}/${id}_subs.json');
+        if (manifestFile.existsSync()) {
+          try {
+            final subsList = jsonDecode(manifestFile.readAsStringSync()) as List;
+            if (subsList.isNotEmpty && subsList.first['path'] != null) {
+              final candidate = subsList.first['path'] as String;
+              if (File(candidate).existsSync()) {
+                finalSubPath = candidate;
+              }
+            }
+          } catch (_) {}
+        }
+      }
+      if (finalSubPath == null || !File(finalSubPath).existsSync()) {
+        try {
+          final matching = downloadDir
+              .listSync()
+              .whereType<File>()
+              .where((f) => f.path.contains('${id}_sub_') && (f.path.endsWith('.vtt') || f.path.endsWith('.srt')))
+              .toList();
+          if (matching.isNotEmpty) {
+            finalSubPath = matching.first.path;
+          }
+        } catch (_) {}
+      }
+      if (finalSubPath == null || !File(finalSubPath).existsSync()) {
+        final subFile = File('${downloadDir.path}/${id}_sub_en.vtt');
+        if (subFile.existsSync()) {
+          finalSubPath = subFile.path;
+        }
+      }
 
       item = item.copyWith(
         status: 'completed',
