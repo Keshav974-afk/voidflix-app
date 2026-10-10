@@ -257,9 +257,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
         setState(() {
           _isLoading = false;
         });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('Failed to play local video: $e')),
-        );
       }
     }
   }
@@ -435,16 +432,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
     if (nextNativeIdx != -1) {
       final nextServer = ServerConfig.servers[nextNativeIdx];
       debugPrint('Native server failed. Trying next native server: ${nextServer.name}');
-      if (mounted) {
-        ScaffoldMessenger.of(context).hideCurrentSnackBar();
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Trying next native server: ${nextServer.name}…'),
-            duration: const Duration(seconds: 2),
-            backgroundColor: const Color(0xFF1E1E1E),
-          ),
-        );
-      }
       _loadServerDirect(nextNativeIdx, startPosition: resumePosition);
       return;
     }
@@ -1188,13 +1175,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
               subject: 'Voidflix Moment: ${widget.mediaTitle}',
             ),
           );
-        } else {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text('Could not export clip from stream. Please try again.'),
-              backgroundColor: Colors.redAccent,
-            ),
-          );
         }
       }
     } catch (e) {
@@ -1203,12 +1183,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
         setState(() {
           _isExportingClip = false;
         });
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            content: Text('Failed to save clip: $e'),
-            backgroundColor: Colors.redAccent,
-          ),
-        );
       }
     }
   }
@@ -2640,102 +2614,36 @@ class _PlayerScreenState extends State<PlayerScreen> {
                             ),
                           ),
 
-                        // Selection Window (connecting border)
-                        Positioned(
-                          left: leftPos,
-                          width: (rightPos - leftPos).clamp(28.0, trackWidth),
-                          top: 0,
-                          bottom: 0,
-                          child: IgnorePointer(
-                            child: Container(
-                              decoration: BoxDecoration(
-                                border: Border.all(color: Colors.white, width: 2.0),
+                        // Selection Window (connecting top and bottom white bars)
+                        if (rightPos > leftPos + 10)
+                          Positioned(
+                            left: leftPos,
+                            width: (rightPos - leftPos).clamp(10.0, trackWidth),
+                            top: 0,
+                            bottom: 0,
+                            child: IgnorePointer(
+                              child: Container(
+                                decoration: const BoxDecoration(
+                                  border: Border(
+                                    top: BorderSide(color: Colors.white, width: 2.5),
+                                    bottom: BorderSide(color: Colors.white, width: 2.5),
+                                  ),
+                                ),
                               ),
                             ),
                           ),
-                        ),
 
-                        // Interactive Sliding Stick (draggable scrubber needle with handle)
+                        // -------------------------------------------------------------
+                        // Green Start Handle (draggable, min 2s before end, max 5m range)
+                        // -------------------------------------------------------------
                         Positioned(
-                          left: (playheadPos - 20).clamp(leftPos - 10, rightPos - 20),
-                          top: -6,
-                          bottom: -6,
+                          left: leftPos.clamp(0.0, trackWidth - 36),
+                          top: 0,
+                          bottom: 0,
                           child: GestureDetector(
                             behavior: HitTestBehavior.opaque,
                             onHorizontalDragUpdate: (details) {
-                              final deltaFraction = details.primaryDelta! / trackWidth;
-                              final deltaSec = deltaFraction * totalSec;
-                              final newSec = (curSec + deltaSec).clamp(_clipStartSeconds, _clipEndSeconds);
-                              _videoPlayerController?.seekTo(Duration(seconds: newSec.toInt()));
-                              setState(() {
-                                _currentPosition = Duration(seconds: newSec.toInt());
-                              });
-                            },
-                            child: SizedBox(
-                              width: 40,
-                              child: Stack(
-                                alignment: Alignment.center,
-                                clipBehavior: Clip.none,
-                                children: [
-                                  // White vertical needle line
-                                  Container(
-                                    width: 3.5,
-                                    decoration: BoxDecoration(
-                                      color: Colors.white,
-                                      borderRadius: BorderRadius.circular(2),
-                                      boxShadow: [
-                                        BoxShadow(
-                                          color: Colors.black.withValues(alpha: 0.7),
-                                          blurRadius: 4,
-                                          offset: const Offset(0, 1),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                  // Top draggable handle / knob
-                                  Positioned(
-                                    top: 0,
-                                    child: Container(
-                                      width: 14,
-                                      height: 18,
-                                      decoration: BoxDecoration(
-                                        color: Colors.white,
-                                        borderRadius: BorderRadius.circular(4),
-                                        boxShadow: [
-                                          BoxShadow(
-                                            color: Colors.black.withValues(alpha: 0.6),
-                                            blurRadius: 5,
-                                            offset: const Offset(0, 2),
-                                          ),
-                                        ],
-                                      ),
-                                      child: Center(
-                                        child: Container(
-                                          width: 3,
-                                          height: 10,
-                                          decoration: BoxDecoration(
-                                            color: AppTheme.primaryRed,
-                                            borderRadius: BorderRadius.circular(1.5),
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ),
-                        ),
-
-                        // Green Start Handle (draggable, clamped to max 5 minutes)
-                        Positioned(
-                          left: leftPos.clamp(0.0, trackWidth - 28),
-                          top: 0,
-                          bottom: 0,
-                          child: GestureDetector(
-                            onHorizontalDragUpdate: (details) {
-                              final deltaFraction = details.primaryDelta! / trackWidth;
-                              final deltaSec = deltaFraction * totalSec;
+                              final deltaSec = (details.delta.dx / trackWidth) * totalSec;
                               final minStart = (_clipEndSeconds - 300.0).clamp(0.0, totalSec);
                               final maxStart = _clipEndSeconds - 2.0;
                               setState(() {
@@ -2744,34 +2652,57 @@ class _PlayerScreenState extends State<PlayerScreen> {
                               _videoPlayerController?.seekTo(Duration(seconds: _clipStartSeconds.toInt()));
                             },
                             child: Container(
-                              width: 26,
-                              decoration: const BoxDecoration(
-                                color: Color(0xFF2ECC71),
-                                borderRadius: BorderRadius.horizontal(left: Radius.circular(6)),
-                              ),
-                              child: const Center(
-                                child: Text(
-                                  '◀ ▶',
-                                  style: TextStyle(
-                                    color: Colors.black,
-                                    fontSize: 8,
-                                    fontWeight: FontWeight.bold,
+                              width: 34,
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF00C853),
+                                borderRadius: const BorderRadius.horizontal(left: Radius.circular(8)),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withValues(alpha: 0.4),
+                                    blurRadius: 4,
+                                    offset: const Offset(-1, 0),
                                   ),
+                                ],
+                              ),
+                              child: Center(
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Container(
+                                      width: 2.5,
+                                      height: 18,
+                                      decoration: BoxDecoration(
+                                        color: Colors.white,
+                                        borderRadius: BorderRadius.circular(1.5),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 3.5),
+                                    Container(
+                                      width: 2.5,
+                                      height: 18,
+                                      decoration: BoxDecoration(
+                                        color: Colors.white,
+                                        borderRadius: BorderRadius.circular(1.5),
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ),
                             ),
                           ),
                         ),
 
-                        // Red End Handle (draggable, clamped to max 5 minutes)
+                        // -------------------------------------------------------------
+                        // Red End Handle (draggable, min 2s after start, max 5m range)
+                        // -------------------------------------------------------------
                         Positioned(
-                          left: (rightPos - 26).clamp(leftPos + 26, trackWidth - 26),
+                          left: (rightPos - 34).clamp(leftPos + 34, trackWidth - 34),
                           top: 0,
                           bottom: 0,
                           child: GestureDetector(
+                            behavior: HitTestBehavior.opaque,
                             onHorizontalDragUpdate: (details) {
-                              final deltaFraction = details.primaryDelta! / trackWidth;
-                              final deltaSec = deltaFraction * totalSec;
+                              final deltaSec = (details.delta.dx / trackWidth) * totalSec;
                               final minEnd = _clipStartSeconds + 2.0;
                               final maxEnd = (_clipStartSeconds + 300.0).clamp(0.0, totalSec);
                               setState(() {
@@ -2780,20 +2711,114 @@ class _PlayerScreenState extends State<PlayerScreen> {
                               _videoPlayerController?.seekTo(Duration(seconds: _clipEndSeconds.toInt()));
                             },
                             child: Container(
-                              width: 26,
-                              decoration: const BoxDecoration(
-                                color: Color(0xFFE50914),
-                                borderRadius: BorderRadius.horizontal(right: Radius.circular(6)),
-                              ),
-                              child: const Center(
-                                child: Text(
-                                  '◀ ▶',
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 8,
-                                    fontWeight: FontWeight.bold,
+                              width: 34,
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFE50914),
+                                borderRadius: const BorderRadius.horizontal(right: Radius.circular(8)),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withValues(alpha: 0.4),
+                                    blurRadius: 4,
+                                    offset: const Offset(1, 0),
                                   ),
+                                ],
+                              ),
+                              child: Center(
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Container(
+                                      width: 2.5,
+                                      height: 18,
+                                      decoration: BoxDecoration(
+                                        color: Colors.white,
+                                        borderRadius: BorderRadius.circular(1.5),
+                                      ),
+                                    ),
+                                    const SizedBox(width: 3.5),
+                                    Container(
+                                      width: 2.5,
+                                      height: 18,
+                                      decoration: BoxDecoration(
+                                        color: Colors.white,
+                                        borderRadius: BorderRadius.circular(1.5),
+                                      ),
+                                    ),
+                                  ],
                                 ),
+                              ),
+                            ),
+                          ),
+                        ),
+
+                        // -------------------------------------------------------------
+                        // Interactive Sliding Stick Scrubber (LAST in Stack = on TOP)
+                        // -------------------------------------------------------------
+                        Positioned(
+                          left: (playheadPos - 24).clamp(leftPos - 12, rightPos - 20),
+                          top: -8,
+                          bottom: -8,
+                          child: GestureDetector(
+                            behavior: HitTestBehavior.opaque,
+                            onHorizontalDragUpdate: (details) {
+                              final deltaSec = (details.delta.dx / trackWidth) * totalSec;
+                              final newSec = (curSec + deltaSec).clamp(_clipStartSeconds, _clipEndSeconds);
+                              _videoPlayerController?.seekTo(Duration(seconds: newSec.toInt()));
+                              setState(() {
+                                _currentPosition = Duration(seconds: newSec.toInt());
+                              });
+                            },
+                            child: SizedBox(
+                              width: 48,
+                              child: Stack(
+                                alignment: Alignment.center,
+                                clipBehavior: Clip.none,
+                                children: [
+                                  // White vertical scrubber needle
+                                  Container(
+                                    width: 3.5,
+                                    decoration: BoxDecoration(
+                                      color: Colors.white,
+                                      borderRadius: BorderRadius.circular(2),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: Colors.black.withValues(alpha: 0.8),
+                                          blurRadius: 4,
+                                          offset: const Offset(0, 1),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  // Top draggable circular grab knob
+                                  Positioned(
+                                    top: 0,
+                                    child: Container(
+                                      width: 18,
+                                      height: 18,
+                                      decoration: BoxDecoration(
+                                        color: Colors.white,
+                                        shape: BoxShape.circle,
+                                        boxShadow: [
+                                          BoxShadow(
+                                            color: Colors.black.withValues(alpha: 0.7),
+                                            blurRadius: 5,
+                                            offset: const Offset(0, 2),
+                                          ),
+                                        ],
+                                      ),
+                                      child: Center(
+                                        child: Container(
+                                          width: 8,
+                                          height: 8,
+                                          decoration: const BoxDecoration(
+                                            color: Color(0xFFE50914),
+                                            shape: BoxShape.circle,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
                               ),
                             ),
                           ),
@@ -3667,14 +3692,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
     return Positioned.fill(
       child: Container(
-        color: const Color(0xFF0A0A0F),
+        color: Colors.black,
         child: Stack(
           fit: StackFit.expand,
           children: [
             if (widget.backdropPath != null && widget.backdropPath!.isNotEmpty)
               Positioned.fill(
                 child: Opacity(
-                  opacity: 0.22,
+                  opacity: 0.15,
                   child: CachedNetworkImage(
                     imageUrl: 'https://image.tmdb.org/t/p/w780${widget.backdropPath}',
                     fit: BoxFit.cover,
@@ -3687,10 +3712,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 decoration: const BoxDecoration(
                   gradient: RadialGradient(
                     center: Alignment.center,
-                    radius: 1.1,
+                    radius: 1.2,
                     colors: [
-                      Color(0xE60D0D14),
-                      Color(0xFF050508),
+                      Color(0xCC000000),
+                      Colors.black,
                     ],
                   ),
                 ),
@@ -3702,11 +3727,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
               child: SafeArea(
                 child: Container(
                   decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.5),
+                    color: Colors.black.withValues(alpha: 0.6),
                     shape: BoxShape.circle,
+                    border: Border.all(color: Colors.white12, width: 1),
                   ),
                   child: IconButton(
-                    icon: const Icon(Icons.arrow_back, color: Colors.white, size: 24),
+                    icon: const Icon(Icons.arrow_back, color: Colors.white, size: 22),
                     onPressed: _handleSmoothBack,
                   ),
                 ),
@@ -3714,37 +3740,38 @@ class _PlayerScreenState extends State<PlayerScreen> {
             ),
             Center(
               child: SingleChildScrollView(
-                padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 20),
+                padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 24),
                 child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 520),
+                  constraints: const BoxConstraints(maxWidth: 480),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       Container(
-                        padding: const EdgeInsets.all(18),
+                        width: 72,
+                        height: 72,
                         decoration: BoxDecoration(
-                          color: AppTheme.primaryRed.withValues(alpha: 0.12),
+                          color: Colors.white.withValues(alpha: 0.06),
                           shape: BoxShape.circle,
                           border: Border.all(
-                            color: AppTheme.primaryRed.withValues(alpha: 0.4),
-                            width: 1.5,
+                            color: Colors.white.withValues(alpha: 0.15),
+                            width: 1.2,
                           ),
                         ),
                         child: const Icon(
-                          Icons.videocam_off_rounded,
-                          color: AppTheme.primaryRed,
-                          size: 40,
+                          Icons.cloud_off_rounded,
+                          color: Colors.white70,
+                          size: 34,
                         ),
                       ),
-                      const SizedBox(height: 18),
+                      const SizedBox(height: 20),
                       const Text(
-                        'Sorry, this stream is currently unavailable',
+                        'Stream Unavailable',
                         textAlign: TextAlign.center,
                         style: TextStyle(
                           color: Colors.white,
-                          fontSize: 19,
-                          fontWeight: FontWeight.bold,
-                          letterSpacing: 0.2,
+                          fontSize: 20,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 0.3,
                         ),
                       ),
                       const SizedBox(height: 10),
@@ -3752,28 +3779,32 @@ class _PlayerScreenState extends State<PlayerScreen> {
                         'We searched all direct streaming servers for "$title", but no active native stream could be established right now.',
                         textAlign: TextAlign.center,
                         style: const TextStyle(
-                          color: Colors.white70,
+                          color: Colors.white60,
                           fontSize: 13,
-                          height: 1.45,
+                          height: 1.5,
                         ),
                       ),
-                      const SizedBox(height: 24),
+                      const SizedBox(height: 28),
                       Wrap(
                         alignment: WrapAlignment.center,
                         spacing: 12,
-                        runSpacing: 10,
+                        runSpacing: 12,
                         children: [
                           ElevatedButton.icon(
                             style: ElevatedButton.styleFrom(
-                              backgroundColor: AppTheme.primaryRed,
-                              foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                              backgroundColor: Colors.white,
+                              foregroundColor: Colors.black,
+                              padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 13),
                               shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(8),
+                                borderRadius: BorderRadius.circular(24),
                               ),
+                              elevation: 0,
                             ),
-                            icon: const Icon(Icons.refresh, size: 18),
-                            label: const Text('Try Again', style: TextStyle(fontWeight: FontWeight.bold)),
+                            icon: const Icon(Icons.refresh_rounded, size: 18),
+                            label: const Text(
+                              'Try Again',
+                              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                            ),
                             onPressed: () {
                               setState(() {
                                 _isStreamUnavailable = false;
@@ -3783,30 +3814,38 @@ class _PlayerScreenState extends State<PlayerScreen> {
                               _loadMedia();
                             },
                           ),
-                          OutlinedButton.icon(
-                            style: OutlinedButton.styleFrom(
+                          ElevatedButton.icon(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.white.withValues(alpha: 0.12),
                               foregroundColor: Colors.white,
-                              side: const BorderSide(color: Colors.white38),
-                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 13),
                               shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(8),
+                                borderRadius: BorderRadius.circular(24),
+                                side: BorderSide(color: Colors.white.withValues(alpha: 0.15)),
                               ),
+                              elevation: 0,
                             ),
                             icon: const Icon(Icons.dns_outlined, size: 18),
-                            label: const Text('Servers'),
+                            label: const Text(
+                              'Switch Server',
+                              style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
+                            ),
                             onPressed: _openServerPicker,
                           ),
                           OutlinedButton.icon(
                             style: OutlinedButton.styleFrom(
                               foregroundColor: Colors.white70,
-                              side: const BorderSide(color: Colors.white24),
-                              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                              side: BorderSide(color: Colors.white.withValues(alpha: 0.15)),
+                              padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 13),
                               shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(8),
+                                borderRadius: BorderRadius.circular(24),
                               ),
                             ),
-                            icon: const Icon(Icons.arrow_back, size: 18),
-                            label: const Text('Go Back'),
+                            icon: const Icon(Icons.arrow_back, size: 16),
+                            label: const Text(
+                              'Go Back',
+                              style: TextStyle(fontSize: 13),
+                            ),
                             onPressed: _handleSmoothBack,
                           ),
                         ],

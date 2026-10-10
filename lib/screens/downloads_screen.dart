@@ -2,11 +2,37 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:path_provider/path_provider.dart';
+import 'package:share_plus/share_plus.dart';
 
 import '../core/constants/theme_constants.dart';
 import '../models/downloaded_item.dart';
 import '../providers/download_provider.dart';
 import 'player_screen.dart';
+
+class _SavedClip {
+  final File file;
+  final String title;
+  final String timeRange;
+  final int fileSizeBytes;
+  final DateTime modifiedAt;
+
+  _SavedClip({
+    required this.file,
+    required this.title,
+    required this.timeRange,
+    required this.fileSizeBytes,
+    required this.modifiedAt,
+  });
+
+  String get formattedSize {
+    final mb = fileSizeBytes / (1024 * 1024);
+    if (mb >= 1024) {
+      return '${(mb / 1024).toStringAsFixed(1)} GB';
+    }
+    return '${mb.toStringAsFixed(1)} MB';
+  }
+}
 
 /// Downloads Screen matching Netflix mobile application design.
 ///
@@ -44,6 +70,113 @@ class DownloadsScreen extends StatefulWidget {
 
 class _DownloadsScreenState extends State<DownloadsScreen> {
   bool _isEditing = false;
+  List<_SavedClip> _savedClips = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _refreshSavedClips();
+  }
+
+  Future<void> _refreshSavedClips() async {
+    final clips = <_SavedClip>[];
+    final dirsToScan = <Directory>[
+      Directory('/storage/emulated/0/Movies/Voidflix'),
+      Directory('/storage/emulated/0/Download/Voidflix'),
+    ];
+
+    try {
+      final appDocDir = await getApplicationDocumentsDirectory();
+      dirsToScan.add(Directory('${appDocDir.path}/clips'));
+    } catch (_) {}
+
+    final seenPaths = <String>{};
+
+    for (final dir in dirsToScan) {
+      if (dir.existsSync()) {
+        try {
+          final files = dir.listSync();
+          for (final f in files) {
+            if (f is File && f.path.endsWith('.mp4') && f.lengthSync() > 1000) {
+              if (seenPaths.contains(f.path)) continue;
+              seenPaths.add(f.path);
+
+              final basename = f.uri.pathSegments.last;
+              String cleanTitle = basename.replaceAll('.mp4', '');
+              String timeRange = '';
+
+              if (cleanTitle.startsWith('Voidflix_')) {
+                cleanTitle = cleanTitle.substring(9);
+              }
+
+              final timeMatch = RegExp(r'_(\d+)s-(\d+)s$').firstMatch(cleanTitle);
+              if (timeMatch != null) {
+                final sSec = int.tryParse(timeMatch.group(1)!) ?? 0;
+                final eSec = int.tryParse(timeMatch.group(2)!) ?? 0;
+                final dur = eSec - sSec;
+                timeRange = '${_formatClipSec(sSec)} - ${_formatClipSec(eSec)} (${dur}s)';
+                cleanTitle = cleanTitle.substring(0, timeMatch.start).replaceAll('_', ' ').trim();
+              } else {
+                cleanTitle = cleanTitle.replaceAll('_', ' ').trim();
+              }
+
+              clips.add(_SavedClip(
+                file: f,
+                title: cleanTitle.isEmpty ? 'Moment Clip' : cleanTitle,
+                timeRange: timeRange,
+                fileSizeBytes: f.lengthSync(),
+                modifiedAt: f.lastModifiedSync(),
+              ));
+            }
+          }
+        } catch (_) {}
+      }
+    }
+
+    clips.sort((a, b) => b.modifiedAt.compareTo(a.modifiedAt));
+    if (mounted) {
+      setState(() {
+        _savedClips = clips;
+      });
+    }
+  }
+
+  static String _formatClipSec(int sec) {
+    final m = sec ~/ 60;
+    final s = sec % 60;
+    return '${m.toString().padLeft(2, '0')}:${s.toString().padLeft(2, '0')}';
+  }
+
+  void _playClip(BuildContext context, _SavedClip clip) {
+    Navigator.of(context).push(
+      PageRouteBuilder(
+        pageBuilder: (context, animation, secondaryAnimation) => PlayerScreen(
+          mediaId: clip.file.path.hashCode.abs(),
+          mediaTitle: clip.title,
+          mediaType: 'movie',
+          localFilePath: clip.file.path,
+        ),
+        transitionsBuilder: (context, animation, secondaryAnimation, child) {
+          return FadeTransition(opacity: animation, child: child);
+        },
+        transitionDuration: const Duration(milliseconds: 250),
+      ),
+    );
+  }
+
+  void _deleteClip(_SavedClip clip) {
+    try {
+      if (clip.file.existsSync()) {
+        clip.file.deleteSync();
+      }
+      final srtPath = clip.file.path.replaceAll(RegExp(r'\.mp4$'), '.srt');
+      final srtFile = File(srtPath);
+      if (srtFile.existsSync()) {
+        srtFile.deleteSync();
+      }
+    } catch (_) {}
+    _refreshSavedClips();
+  }
 
   void _playOffline(BuildContext context, DownloadedItem item) {
     if (item.status != 'completed') {
@@ -162,7 +295,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
           ),
         ),
         actions: [
-          if (items.isNotEmpty)
+          if (items.isNotEmpty || _savedClips.isNotEmpty)
             IconButton(
               icon: Icon(
                 _isEditing ? Icons.check : Icons.edit_outlined,
@@ -175,7 +308,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
             ),
         ],
       ),
-      body: items.isEmpty
+      body: (items.isEmpty && _savedClips.isEmpty)
           ? _buildEmptyState(context)
           : isSeriesSubView
               ? _buildSeriesDetailView(context, items, downloadProvider)
@@ -599,6 +732,156 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
                         )
                       else
                         const Icon(Icons.check_circle_rounded, color: Colors.white70, size: 24),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          }),
+        ],
+
+        // --- Saved Clips & Moments ---
+        if (_savedClips.isNotEmpty) ...[
+          const Padding(
+            padding: EdgeInsets.fromLTRB(18, 20, 18, 6),
+            child: Row(
+              children: [
+                Icon(Icons.content_cut_rounded, color: Colors.white54, size: 16),
+                SizedBox(width: 8),
+                Text(
+                  'SAVED CLIPS & MOMENTS',
+                  style: TextStyle(
+                    color: Colors.white54,
+                    fontSize: 12,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 1.2,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          ..._savedClips.map((clip) {
+            return Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(8),
+                onTap: () => _playClip(context, clip),
+                child: Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF16161A),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.white12, width: 0.8),
+                  ),
+                  child: Row(
+                    children: [
+                      // Clip Thumbnail with Play Icon & Clapper
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(6),
+                        child: Container(
+                          width: 100,
+                          height: 60,
+                          decoration: const BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                              colors: [
+                                Color(0xFF2C1417),
+                                Color(0xFF141416),
+                              ],
+                            ),
+                          ),
+                          child: Stack(
+                            alignment: Alignment.center,
+                            children: [
+                              Positioned(
+                                right: 6,
+                                bottom: 6,
+                                child: Text(
+                                  'CLIP',
+                                  style: TextStyle(
+                                    color: AppTheme.primaryRed.withValues(alpha: 0.35),
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.w900,
+                                    letterSpacing: 1.2,
+                                  ),
+                                ),
+                              ),
+                              Container(
+                                width: 32,
+                                height: 32,
+                                decoration: BoxDecoration(
+                                  color: Colors.black.withValues(alpha: 0.65),
+                                  shape: BoxShape.circle,
+                                  border: Border.all(color: Colors.white70, width: 1.2),
+                                ),
+                                child: const Icon(Icons.play_arrow_rounded, color: Colors.white, size: 20),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 14),
+
+                      // Clip metadata
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              clip.title,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 15,
+                                fontWeight: FontWeight.bold,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              clip.timeRange.isNotEmpty
+                                  ? '${clip.timeRange} • ${clip.formattedSize}'
+                                  : 'Clip • ${clip.formattedSize}',
+                              style: const TextStyle(
+                                color: Colors.white70,
+                                fontSize: 12,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            const Text(
+                              'Saved Moment • Tap to play',
+                              style: TextStyle(
+                                color: Color(0xFF2ECC71),
+                                fontSize: 11,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+
+                      // Share action
+                      IconButton(
+                        icon: const Icon(Icons.share_outlined, color: Colors.white70, size: 20),
+                        tooltip: 'Share Clip',
+                        onPressed: () {
+                          SharePlus.instance.share(
+                            ShareParams(
+                              files: [XFile(clip.file.path)],
+                              text: 'Watch this moment from "${clip.title}" on Voidflix!',
+                              subject: 'Voidflix Clip: ${clip.title}',
+                            ),
+                          );
+                        },
+                      ),
+
+                      // Delete action
+                      if (_isEditing)
+                        IconButton(
+                          icon: const Icon(Icons.delete_outline, color: AppTheme.primaryRed, size: 22),
+                          onPressed: () => _deleteClip(clip),
+                        ),
                     ],
                   ),
                 ),

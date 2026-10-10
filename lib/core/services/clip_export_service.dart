@@ -194,40 +194,61 @@ class ClipExportService {
                 if (lastIdx < parsedSegments.length - 1) lastIdx++; // 1 segment lead-out
 
                 final targetSegments = parsedSegments.sublist(firstIdx, lastIdx + 1);
-                tempSourceFile = File('${cacheDir.path}/temp_clip_${DateTime.now().millisecondsSinceEpoch}.ts');
-                final raf = await tempSourceFile.open(mode: FileMode.write);
+                final segDir = Directory('${cacheDir.path}/clip_segs_${DateTime.now().millisecondsSinceEpoch}');
+                await segDir.create(recursive: true);
 
-                try {
-                  for (int i = 0; i < targetSegments.length; i++) {
-                    final segP = 0.2 + (0.5 * (i / targetSegments.length));
-                    onProgress?.call(segP, 'Downloading stream (${(segP * 100).toInt()}%)…');
+                // Multi-worker parallel segment downloader (concurrency = 6)
+                const concurrency = 6;
+                int queueCursor = 0;
+                int completedCount = 0;
 
-                    bool downloaded = false;
-                    for (int attempt = 0; attempt < 2; attempt++) {
+                Future<void> runWorker() async {
+                  while (true) {
+                    if (queueCursor >= targetSegments.length) break;
+                    final idx = queueCursor++;
+
+                    final segUri = targetSegments[idx].uri;
+                    final segFile = File('${segDir.path}/seg_${idx.toString().padLeft(5, '0')}.ts');
+
+                    for (int attempt = 0; attempt < 3; attempt++) {
                       try {
-                        final req = http.Request('GET', targetSegments[i].uri);
-                        req.headers.addAll(headers);
-                        final streamedRes = await client.send(req).timeout(const Duration(seconds: 12));
-                        if (streamedRes.statusCode == 200) {
-                          await for (final chunk in streamedRes.stream) {
-                            await raf.writeFrom(chunk);
-                          }
-                          await raf.flush();
-                          downloaded = true;
+                        final segRes = await client.get(segUri, headers: headers).timeout(const Duration(seconds: 15));
+                        if (segRes.statusCode == 200 && segRes.bodyBytes.isNotEmpty) {
+                          await segFile.writeAsBytes(segRes.bodyBytes, flush: true);
+                          completedCount++;
+                          final segP = 0.2 + (0.5 * (completedCount / targetSegments.length));
+                          onProgress?.call(segP, 'Downloading stream (${(segP * 100).toInt()}%)…');
                           break;
                         }
                       } catch (e) {
-                        debugPrint('Segment $i download retry ${attempt + 1}: $e');
-                        await Future.delayed(const Duration(milliseconds: 150));
+                        debugPrint('Segment $idx download attempt ${attempt + 1} error: $e');
+                        await Future.delayed(const Duration(milliseconds: 100));
                       }
                     }
-                    if (!downloaded) {
-                      debugPrint('Segment $i skipped after retries');
-                    }
                   }
-                } finally {
-                  await raf.close();
                 }
+
+                final workerCount = targetSegments.length < concurrency ? targetSegments.length : concurrency;
+                if (workerCount > 0) {
+                  await Future.wait(List.generate(workerCount, (_) => runWorker()));
+                }
+
+                // High-efficiency stream piping into tempSourceFile
+                tempSourceFile = File('${cacheDir.path}/temp_clip_${DateTime.now().millisecondsSinceEpoch}.ts');
+                final sink = tempSourceFile.openWrite(mode: FileMode.write);
+                for (int i = 0; i < targetSegments.length; i++) {
+                  final segFile = File('${segDir.path}/seg_${i.toString().padLeft(5, '0')}.ts');
+                  if (segFile.existsSync()) {
+                    await sink.addStream(segFile.openRead());
+                  }
+                }
+                await sink.flush();
+                await sink.close();
+
+                // Clean up temporary segments directory
+                try {
+                  await segDir.delete(recursive: true);
+                } catch (_) {}
 
                 inputVideoPath = tempSourceFile.path;
                 final clipDurMs = ((endSeconds - startSeconds) * 1000).toInt();
@@ -276,7 +297,7 @@ class ClipExportService {
 
         final isPreTrimmed = inputVideoPath == tempSourceFile?.path;
         try {
-          final res = await _channel.invokeMethod('trimAndExportClip', {
+          await _channel.invokeMethod('trimAndExportClip', {
             'inputPath': inputVideoPath,
             'outputPath': outputFile.absolute.path,
             'startMs': startMs,
@@ -285,13 +306,25 @@ class ClipExportService {
             'burnSubtitles': burnSubtitles,
             'subtitles': adjustedCues,
           });
-
-          if (res != null && outputFile.existsSync() && outputFile.lengthSync() > 500) {
-            onProgress?.call(1.0, 'Clip saved to Gallery!');
-            return outputFile;
-          }
         } catch (nativeErr) {
           debugPrint('Native clip export error: $nativeErr');
+        }
+
+        // Resilient fallback: If native remuxing didn't produce file, copy pre-trimmed source directly
+        if ((!outputFile.existsSync() || outputFile.lengthSync() < 500) && tempSourceFile != null && tempSourceFile.existsSync()) {
+          try {
+            await tempSourceFile.copy(outputFile.path);
+            try {
+              await _channel.invokeMethod('scanFileIntoGallery', {
+                'filePath': outputFile.absolute.path,
+              });
+            } catch (_) {}
+          } catch (_) {}
+        }
+
+        if (outputFile.existsSync() && outputFile.lengthSync() > 500) {
+          onProgress?.call(1.0, 'Clip saved to Gallery!');
+          return outputFile;
         }
       }
 

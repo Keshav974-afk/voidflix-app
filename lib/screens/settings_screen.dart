@@ -122,13 +122,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     _deviceTapCount++;
 
     if (_isDeveloperMode) {
-      ScaffoldMessenger.of(context).hideCurrentSnackBar();
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Developer mode is already active.'),
-          duration: Duration(seconds: 1),
-        ),
-      );
       return;
     }
 
@@ -138,23 +131,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
       await prefs.setBool('voidflix_developer_mode', true);
       if (!mounted) return;
       setState(() => _isDeveloperMode = true);
-      ScaffoldMessenger.of(context).hideCurrentSnackBar();
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text('Developer mode enabled! Web servers unlocked.'),
-          backgroundColor: Color(0xFFE50914),
-          duration: Duration(seconds: 3),
-        ),
-      );
-    } else if (_deviceTapCount >= 2) {
-      final remaining = 5 - _deviceTapCount;
-      ScaffoldMessenger.of(context).hideCurrentSnackBar();
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Tap $remaining more times to unlock Developer options.'),
-          duration: const Duration(milliseconds: 900),
-        ),
-      );
     }
   }
 
@@ -163,13 +139,6 @@ class _SettingsScreenState extends State<SettingsScreen> {
     await prefs.setBool('voidflix_developer_mode', false);
     if (!mounted) return;
     setState(() => _isDeveloperMode = false);
-    ScaffoldMessenger.of(context).hideCurrentSnackBar();
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Developer mode turned off.'),
-        duration: Duration(seconds: 2),
-      ),
-    );
   }
 
   Future<void> _calculateCacheSize() async {
@@ -770,59 +739,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
           // ═══════════════════════════════════════════════
           if (_isDeveloperMode) ...[
             _buildCategoryHeader('Developer Options'),
-            Container(
-              margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(
-                color: const Color(0xFF1B1824),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: Colors.amber.withValues(alpha: 0.6), width: 1.2),
-              ),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    children: [
-                      const Icon(Icons.developer_mode, color: Colors.amber, size: 24),
-                      const SizedBox(width: 12),
-                      const Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Developer Mode Active',
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 15,
-                                fontWeight: FontWeight.bold,
-                              ),
-                            ),
-                            SizedBox(height: 2),
-                            Text(
-                              'Web embed servers and WebView fallbacks are unlocked in player.',
-                              style: TextStyle(color: Colors.white60, fontSize: 12),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      ElevatedButton(
-                        onPressed: _turnOffDeveloperMode,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: const Color(0xFFE50914),
-                          foregroundColor: Colors.white,
-                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-                        ),
-                        child: const Text(
-                          'TURN OFF',
-                          style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, letterSpacing: 0.5),
-                        ),
-                      ),
-                    ],
+            _buildSettingTile(
+              leading: Icons.code_rounded,
+              title: 'Developer Options',
+              subtitle: 'Web servers and WebView fallback active',
+              trailing: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                decoration: BoxDecoration(
+                  color: Colors.white.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: Colors.white24, width: 0.8),
+                ),
+                child: const Text(
+                  'Turn Off',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
                   ),
-                ],
+                ),
               ),
+              onTap: _turnOffDeveloperMode,
             ),
             const Divider(height: 1, color: Color(0xFF1E1E1E)),
           ],

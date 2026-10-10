@@ -180,6 +180,40 @@ class MainActivity : FlutterActivity() {
         }
     }
 
+    data class NalUnit(val offset: Int, val length: Int, val type: Int)
+
+    private fun findAnnexBNalUnits(bytes: ByteArray, size: Int): List<NalUnit> {
+        val nals = ArrayList<NalUnit>()
+        var i = 0
+        var currentStart = -1
+
+        while (i <= size - 4) {
+            val is4Byte = bytes[i] == 0.toByte() && bytes[i + 1] == 0.toByte() && bytes[i + 2] == 0.toByte() && bytes[i + 3] == 1.toByte()
+            val is3Byte = !is4Byte && bytes[i] == 0.toByte() && bytes[i + 1] == 0.toByte() && bytes[i + 2] == 1.toByte()
+
+            if (is4Byte || is3Byte) {
+                val prefixLen = if (is4Byte) 4 else 3
+                if (currentStart != -1) {
+                    val nalLen = i - currentStart
+                    if (nalLen > 0) {
+                        val type = (bytes[currentStart].toInt() and 0x1F)
+                        nals.add(NalUnit(currentStart, nalLen, type))
+                    }
+                }
+                currentStart = i + prefixLen
+                i += prefixLen
+            } else {
+                i++
+            }
+        }
+        if (currentStart != -1 && currentStart < size) {
+            val nalLen = size - currentStart
+            val type = (bytes[currentStart].toInt() and 0x1F)
+            nals.add(NalUnit(currentStart, nalLen, type))
+        }
+        return nals
+    }
+
     private fun fallbackMuxerTrim(
         inputPath: String,
         outputPath: String,
@@ -198,22 +232,89 @@ class MainActivity : FlutterActivity() {
             muxer = MediaMuxer(outputPath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
 
             val trackIndexMap = HashMap<Int, Int>()
-            var bufferSize = 1024 * 1024
+            val isVideoTrack = HashMap<Int, Boolean>()
+            val isAnnexBVideo = HashMap<Int, Boolean>()
+            val isAacAudio = HashMap<Int, Boolean>()
+            var bufferSize = 2 * 1024 * 1024
 
             for (i in 0 until trackCount) {
                 val format = extractor.getTrackFormat(i)
                 val mime = format.getString(MediaFormat.KEY_MIME) ?: ""
-                if (mime.startsWith("video/") || mime.startsWith("audio/")) {
+
+                if (mime.startsWith("video/")) {
+                    isVideoTrack[i] = true
+                    // If video format lacks csd-0 (e.g. from MPEG-TS), scan for SPS (type 7) and PPS (type 8)
+                    if (!format.containsKey("csd-0") && mime.contains("avc")) {
+                        val scanBuf = ByteBuffer.allocateDirect(1024 * 1024)
+                        var foundSps: ByteArray? = null
+                        var foundPps: ByteArray? = null
+                        extractor.selectTrack(i)
+                        extractor.seekTo(0, MediaExtractor.SEEK_TO_CLOSEST_SYNC)
+
+                        for (scan in 0 until 80) {
+                            val sz = extractor.readSampleData(scanBuf, 0)
+                            if (sz <= 0) break
+                            if (extractor.sampleTrackIndex == i) {
+                                val bytes = ByteArray(sz)
+                                scanBuf.position(0)
+                                scanBuf.get(bytes, 0, sz)
+                                val nals = findAnnexBNalUnits(bytes, sz)
+                                for (nal in nals) {
+                                    if (nal.type == 7 && foundSps == null) {
+                                        foundSps = ByteArray(nal.length + 4)
+                                        foundSps[0] = 0; foundSps[1] = 0; foundSps[2] = 0; foundSps[3] = 1
+                                        System.arraycopy(bytes, nal.offset, foundSps, 4, nal.length)
+                                    } else if (nal.type == 8 && foundPps == null) {
+                                        foundPps = ByteArray(nal.length + 4)
+                                        foundPps[0] = 0; foundPps[1] = 0; foundPps[2] = 0; foundPps[3] = 1
+                                        System.arraycopy(bytes, nal.offset, foundPps, 4, nal.length)
+                                    }
+                                }
+                                if (foundSps != null && foundPps != null) break
+                            }
+                            extractor.advance()
+                        }
+
+                        if (foundSps != null && foundPps != null) {
+                            format.setByteBuffer("csd-0", ByteBuffer.wrap(foundSps))
+                            format.setByteBuffer("csd-1", ByteBuffer.wrap(foundPps))
+                            isAnnexBVideo[i] = true
+                        }
+                    }
+
                     try {
                         extractor.selectTrack(i)
                         val newTrackIndex = muxer.addTrack(format)
                         trackIndexMap[i] = newTrackIndex
-                        if (format.containsKey(MediaFormat.KEY_MAX_INPUT_SIZE)) {
-                            val size = format.getInteger(MediaFormat.KEY_MAX_INPUT_SIZE)
-                            if (size > bufferSize) bufferSize = size
-                        }
                     } catch (trackEx: Exception) {
-                        android.util.Log.w("Voidflix", "Track $i ($mime) rejected by muxer: ${trackEx.message}")
+                        android.util.Log.w("Voidflix", "Video track rejected by muxer: ${trackEx.message}")
+                        extractor.unselectTrack(i)
+                    }
+                } else if (mime.startsWith("audio/")) {
+                    isVideoTrack[i] = false
+                    if (mime.contains("mp4a") || mime.contains("aac")) {
+                        isAacAudio[i] = true
+                        // Supply AudioSpecificConfig if missing
+                        if (!format.containsKey("csd-0")) {
+                            val sampleRate = if (format.containsKey(MediaFormat.KEY_SAMPLE_RATE)) format.getInteger(MediaFormat.KEY_SAMPLE_RATE) else 44100
+                            val channelCount = if (format.containsKey(MediaFormat.KEY_CHANNEL_COUNT)) format.getInteger(MediaFormat.KEY_CHANNEL_COUNT) else 2
+                            val freqIdx = when (sampleRate) {
+                                96000 -> 0; 88200 -> 1; 64000 -> 2; 48000 -> 3; 44100 -> 4; 32000 -> 5
+                                24000 -> 6; 22050 -> 7; 16000 -> 8; 12000 -> 9; 11025 -> 10; 8000 -> 11; else -> 4
+                            }
+                            val asc = ByteArray(2)
+                            asc[0] = ((2 shl 3) or (freqIdx shr 1)).toByte()
+                            asc[1] = (((freqIdx and 1) shl 7) or (channelCount shl 3)).toByte()
+                            format.setByteBuffer("csd-0", ByteBuffer.wrap(asc))
+                        }
+                    }
+
+                    try {
+                        extractor.selectTrack(i)
+                        val newTrackIndex = muxer.addTrack(format)
+                        trackIndexMap[i] = newTrackIndex
+                    } catch (trackEx: Exception) {
+                        android.util.Log.w("Voidflix", "Audio track rejected by muxer: ${trackEx.message}")
                         extractor.unselectTrack(i)
                     }
                 }
@@ -222,24 +323,27 @@ class MainActivity : FlutterActivity() {
             if (trackIndexMap.isEmpty()) return false
             muxer.start()
 
-            val durationUs = (endMs - startMs).coerceAtLeast(1000L) * 1000L
-            var baseUs = -1L
             val startUs = startMs * 1000L
             val endUs = endMs * 1000L
+            val durationUs = (endMs - startMs).coerceAtLeast(1000L) * 1000L
 
             if (!isPreTrimmed) {
                 extractor.seekTo(startUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
-                baseUs = extractor.sampleTime
-                if (baseUs < 0L) baseUs = startUs
+            } else {
+                extractor.seekTo(0, MediaExtractor.SEEK_TO_CLOSEST_SYNC)
             }
 
-            val buffer = ByteBuffer.allocateDirect(bufferSize)
+            val readBuffer = ByteBuffer.allocateDirect(bufferSize)
+            val writeBuffer = ByteBuffer.allocateDirect(bufferSize + 65536)
             val bufferInfo = MediaCodec.BufferInfo()
+            val trackBaseUs = HashMap<Int, Long>()
+            val trackLastPts = HashMap<Int, Long>()
+            var videoKeyframeSeen = false
             var samplesWritten = 0
 
             while (true) {
-                val sampleSize = extractor.readSampleData(buffer, 0)
-                if (sampleSize < 0) break
+                val sampleSize = extractor.readSampleData(readBuffer, 0)
+                if (sampleSize <= 0) break
 
                 val sampleTimeUs = extractor.sampleTime
                 if (sampleTimeUs < 0) {
@@ -247,11 +351,28 @@ class MainActivity : FlutterActivity() {
                     continue
                 }
 
-                if (isPreTrimmed) {
-                    if (baseUs < 0L) {
-                        baseUs = sampleTimeUs
+                val trackIndex = extractor.sampleTrackIndex
+                if (!trackIndexMap.containsKey(trackIndex)) {
+                    extractor.advance()
+                    continue
+                }
+
+                val isVideo = isVideoTrack[trackIndex] == true
+                val isSyncFrame = (extractor.sampleFlags and MediaExtractor.SAMPLE_FLAG_SYNC) != 0
+
+                // If trimming from an untrimmed source, ensure video starts at a sync frame
+                if (isVideo && !videoKeyframeSeen) {
+                    if (!isSyncFrame) {
+                        extractor.advance()
+                        continue
                     }
-                    if ((sampleTimeUs - baseUs) > durationUs) {
+                    videoKeyframeSeen = true
+                }
+
+                // Check end bounds
+                if (isPreTrimmed) {
+                    val base = trackBaseUs[trackIndex] ?: sampleTimeUs
+                    if ((sampleTimeUs - base) > durationUs + 2000000L) {
                         break
                     }
                 } else {
@@ -260,20 +381,59 @@ class MainActivity : FlutterActivity() {
                     }
                 }
 
-                val trackIndex = extractor.sampleTrackIndex
-                if (trackIndexMap.containsKey(trackIndex)) {
-                    val pts = if (baseUs >= 0L) (sampleTimeUs - baseUs).coerceAtLeast(0L) else 0L
-                    bufferInfo.offset = 0
-                    bufferInfo.size = sampleSize
-                    bufferInfo.presentationTimeUs = pts
-                    bufferInfo.flags = extractor.sampleFlags
-                    try {
-                        muxer.writeSampleData(trackIndexMap[trackIndex]!!, buffer, bufferInfo)
-                        samplesWritten++
-                    } catch (writeEx: Exception) {
-                        android.util.Log.w("Voidflix", "Sample write error: ${writeEx.message}")
+                // Initialize monotonic timestamp base per track
+                val base = trackBaseUs.getOrPut(trackIndex) { sampleTimeUs }
+                val rawPts = (sampleTimeUs - base).coerceAtLeast(0L)
+                val lastPts = trackLastPts[trackIndex] ?: -1L
+                val pts = if (rawPts > lastPts) rawPts else lastPts + 1000L
+                trackLastPts[trackIndex] = pts
+
+                val rawBytes = ByteArray(sampleSize)
+                readBuffer.position(0)
+                readBuffer.get(rawBytes, 0, sampleSize)
+
+                writeBuffer.clear()
+
+                if (isVideo) {
+                    // Check if sample has Annex-B start codes
+                    val hasAnnexB = sampleSize >= 4 && (
+                        (rawBytes[0] == 0.toByte() && rawBytes[1] == 0.toByte() && rawBytes[2] == 0.toByte() && rawBytes[3] == 1.toByte()) ||
+                        (rawBytes[0] == 0.toByte() && rawBytes[1] == 0.toByte() && rawBytes[2] == 1.toByte())
+                    )
+
+                    if (hasAnnexB || isAnnexBVideo[trackIndex] == true) {
+                        // Convert Annex-B to AVCC (4-byte length prefixes)
+                        val nals = findAnnexBNalUnits(rawBytes, sampleSize)
+                        for (nal in nals) {
+                            writeBuffer.putInt(nal.length)
+                            writeBuffer.put(rawBytes, nal.offset, nal.length)
+                        }
+                    } else {
+                        writeBuffer.put(rawBytes, 0, sampleSize)
+                    }
+                } else {
+                    // Audio: check for 7-byte ADTS header and strip it for standard MP4
+                    if (isAacAudio[trackIndex] == true && sampleSize > 7 &&
+                        rawBytes[0] == 0xFF.toByte() && (rawBytes[1].toInt() and 0xF6) == 0xF0) {
+                        writeBuffer.put(rawBytes, 7, sampleSize - 7)
+                    } else {
+                        writeBuffer.put(rawBytes, 0, sampleSize)
                     }
                 }
+
+                writeBuffer.flip()
+                bufferInfo.offset = 0
+                bufferInfo.size = writeBuffer.remaining()
+                bufferInfo.presentationTimeUs = pts
+                bufferInfo.flags = extractor.sampleFlags
+
+                try {
+                    muxer.writeSampleData(trackIndexMap[trackIndex]!!, writeBuffer, bufferInfo)
+                    samplesWritten++
+                } catch (writeEx: Exception) {
+                    android.util.Log.w("Voidflix", "Sample write error on track $trackIndex: ${writeEx.message}")
+                }
+
                 extractor.advance()
             }
 
