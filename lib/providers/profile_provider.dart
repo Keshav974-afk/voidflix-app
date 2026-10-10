@@ -11,6 +11,8 @@ class UserProfile {
   final String? pin;
   final String avatar;
   final List<String> preferredLanguages;
+  final String? preferredAudioLang;
+  final String? preferredSubtitleLang;
   final List<int> preferredGenres;
   final List<String> favoriteActors;
   final List<String> favoriteTitles;
@@ -24,6 +26,8 @@ class UserProfile {
     this.pin,
     this.avatar = '🍿',
     this.preferredLanguages = const [],
+    this.preferredAudioLang,
+    this.preferredSubtitleLang,
     this.preferredGenres = const [],
     this.favoriteActors = const [],
     this.favoriteTitles = const [],
@@ -40,6 +44,8 @@ class UserProfile {
     String? pin,
     String? avatar,
     List<String>? preferredLanguages,
+    String? preferredAudioLang,
+    String? preferredSubtitleLang,
     List<int>? preferredGenres,
     List<String>? favoriteActors,
     List<String>? favoriteTitles,
@@ -54,6 +60,8 @@ class UserProfile {
       pin: clearPin ? null : (pin ?? this.pin),
       avatar: avatar ?? this.avatar,
       preferredLanguages: preferredLanguages ?? this.preferredLanguages,
+      preferredAudioLang: preferredAudioLang ?? this.preferredAudioLang,
+      preferredSubtitleLang: preferredSubtitleLang ?? this.preferredSubtitleLang,
       preferredGenres: preferredGenres ?? this.preferredGenres,
       favoriteActors: favoriteActors ?? this.favoriteActors,
       favoriteTitles: favoriteTitles ?? this.favoriteTitles,
@@ -70,6 +78,8 @@ class UserProfile {
       'pin': pin,
       'avatar': avatar,
       'preferredLanguages': preferredLanguages,
+      'preferredAudioLang': preferredAudioLang,
+      'preferredSubtitleLang': preferredSubtitleLang,
       'preferredGenres': preferredGenres,
       'favoriteActors': favoriteActors,
       'favoriteTitles': favoriteTitles,
@@ -86,6 +96,8 @@ class UserProfile {
       pin: json['pin'] as String?,
       avatar: json['avatar'] as String? ?? '🍿',
       preferredLanguages: (json['preferredLanguages'] as List<dynamic>?)?.map((e) => e.toString()).toList() ?? const [],
+      preferredAudioLang: json['preferredAudioLang'] as String?,
+      preferredSubtitleLang: json['preferredSubtitleLang'] as String?,
       preferredGenres: (json['preferredGenres'] as List<dynamic>?)?.map((e) => (e as num).toInt()).toList() ?? const [],
       favoriteActors: (json['favoriteActors'] as List<dynamic>?)?.map((e) => e.toString()).toList() ?? const [],
       favoriteTitles: (json['favoriteTitles'] as List<dynamic>?)?.map((e) => e.toString()).toList() ?? const [],
@@ -231,6 +243,9 @@ class ProfileProvider extends ChangeNotifier {
     bool? isKids,
     String? pin,
     String? avatar,
+    List<String>? preferredLanguages,
+    String? preferredAudioLang,
+    String? preferredSubtitleLang,
     bool clearPin = false,
   }) async {
     final idx = _profiles.indexWhere((p) => p.id == id);
@@ -242,6 +257,9 @@ class ProfileProvider extends ChangeNotifier {
         isKids: isKids,
         pin: pin,
         avatar: avatar,
+        preferredLanguages: preferredLanguages,
+        preferredAudioLang: preferredAudioLang,
+        preferredSubtitleLang: preferredSubtitleLang,
         clearPin: clearPin,
       );
       _profiles[idx] = updated;

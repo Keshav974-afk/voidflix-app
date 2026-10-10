@@ -8,6 +8,9 @@ class MediaItem {
   final String? releaseDate;
   final String mediaType; // 'movie' or 'tv'
   final List<int> genreIds;
+  final bool isAdult;
+  final String originalLanguage;
+  final double popularity;
 
   MediaItem({
     required this.id,
@@ -19,6 +22,9 @@ class MediaItem {
     this.releaseDate,
     required this.mediaType,
     this.genreIds = const [],
+    this.isAdult = false,
+    this.originalLanguage = 'en',
+    this.popularity = 0.0,
   });
 
   factory MediaItem.fromJson(Map<String, dynamic> json, {String defaultType = 'movie'}) {
@@ -36,6 +42,9 @@ class MediaItem {
       releaseDate: releaseDate,
       mediaType: type == 'tv' ? 'tv' : 'movie',
       genreIds: (json['genre_ids'] as List<dynamic>?)?.map((e) => e as int).toList() ?? [],
+      isAdult: json['adult'] as bool? ?? false,
+      originalLanguage: (json['original_language'] as String?) ?? 'en',
+      popularity: (json['popularity'] as num?)?.toDouble() ?? 0.0,
     );
   }
 
@@ -50,6 +59,9 @@ class MediaItem {
       'release_date': releaseDate,
       'media_type': mediaType,
       'genre_ids': genreIds,
+      'adult': isAdult,
+      'original_language': originalLanguage,
+      'popularity': popularity,
     };
   }
 

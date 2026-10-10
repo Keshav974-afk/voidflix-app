@@ -22,9 +22,21 @@ import 'player_screen.dart';
 ///    - Runtime, file size, status badge.
 ///    - Direct offline playback and resumption support.
 class DownloadsScreen extends StatefulWidget {
+  final int? seriesMediaId;
   final String? seriesTitle;
 
-  const DownloadsScreen({super.key, this.seriesTitle});
+  const DownloadsScreen({
+    super.key,
+    this.seriesMediaId,
+    this.seriesTitle,
+  });
+
+  /// Sanitizes title by removing any attached season/episode tags (e.g. ": S1E2 ...")
+  static String sanitizeTitle(String rawTitle) {
+    if (rawTitle.isEmpty) return rawTitle;
+    final regex = RegExp(r':\s*S\d+.*$', caseSensitive: false);
+    return rawTitle.replaceAll(regex, '').trim();
+  }
 
   @override
   State<DownloadsScreen> createState() => _DownloadsScreenState();
@@ -39,13 +51,13 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
       return;
     }
 
+    final cleanTitle = DownloadsScreen.sanitizeTitle(item.title);
+
     Navigator.of(context).push(
       PageRouteBuilder(
         pageBuilder: (context, animation, secondaryAnimation) => PlayerScreen(
           mediaId: item.mediaId,
-          mediaTitle: item.mediaType == 'tv' && item.episodeTitle != null
-              ? '${item.title}: S${item.season}E${item.episode} "${item.episodeTitle}"'
-              : item.title,
+          mediaTitle: cleanTitle,
           mediaType: item.mediaType,
           season: item.season,
           episode: item.episode,
@@ -113,14 +125,23 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
     final downloadProvider = context.watch<DownloadProvider>();
     final allItems = downloadProvider.items;
 
-    final isSeriesSubView = widget.seriesTitle != null && widget.seriesTitle!.isNotEmpty;
+    final isSeriesSubView = widget.seriesMediaId != null ||
+        (widget.seriesTitle != null && widget.seriesTitle!.isNotEmpty);
 
     // Filter if viewing a specific series
     final items = isSeriesSubView
-        ? allItems.where((i) => i.title.toLowerCase() == widget.seriesTitle!.toLowerCase()).toList()
+        ? allItems.where((i) {
+            if (widget.seriesMediaId != null) {
+              return i.mediaId == widget.seriesMediaId;
+            }
+            return DownloadsScreen.sanitizeTitle(i.title).toLowerCase() ==
+                DownloadsScreen.sanitizeTitle(widget.seriesTitle!).toLowerCase();
+          }).toList()
         : allItems;
 
-    final displayTitle = isSeriesSubView ? widget.seriesTitle! : 'Downloads';
+    final displayTitle = isSeriesSubView
+        ? (widget.seriesTitle ?? (items.isNotEmpty ? DownloadsScreen.sanitizeTitle(items.first.title) : 'Downloads'))
+        : 'Downloads';
 
     return Scaffold(
       backgroundColor: Colors.black,
@@ -240,10 +261,10 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
     final movies = allItems.where((i) => i.mediaType == 'movie').toList();
     final tvItems = allItems.where((i) => i.mediaType == 'tv').toList();
 
-    // 2. Group TV items by Series Title
-    final Map<String, List<DownloadedItem>> seriesGroups = {};
+    // 2. Group TV items by Series mediaId (guarantees exactly 1 card per TV show)
+    final Map<int, List<DownloadedItem>> seriesGroups = {};
     for (final item in tvItems) {
-      seriesGroups.putIfAbsent(item.title, () => []).add(item);
+      seriesGroups.putIfAbsent(item.mediaId, () => []).add(item);
     }
 
     return ListView(
@@ -300,9 +321,14 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
             ),
           ),
           ...seriesGroups.entries.map((entry) {
-            final seriesTitle = entry.key;
+            final seriesMediaId = entry.key;
             final eps = entry.value;
             final first = eps.first;
+
+            // Extract clean series title
+            final seriesTitle = eps
+                .map((e) => DownloadsScreen.sanitizeTitle(e.title))
+                .firstWhere((t) => t.isNotEmpty, orElse: () => first.title);
 
             int totalBytes = 0;
             int completedCount = 0;
@@ -333,7 +359,10 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
                 onTap: () {
                   Navigator.of(context).push(
                     MaterialPageRoute(
-                      builder: (_) => DownloadsScreen(seriesTitle: seriesTitle),
+                      builder: (_) => DownloadsScreen(
+                        seriesMediaId: seriesMediaId,
+                        seriesTitle: seriesTitle,
+                      ),
                     ),
                   );
                 },

@@ -1,3 +1,6 @@
+import '../services/stream_extractor.dart';
+import '../services/subtitle_service.dart';
+
 class LanguageInfo {
   final String flag;
   final String code;
@@ -196,6 +199,11 @@ class LanguageUtils {
     'ben': LanguageInfo(flag: '🇧🇩', code: 'BN', name: 'Bengali'),
     'bengali': LanguageInfo(flag: '🇧🇩', code: 'BN', name: 'Bengali'),
     'বাংলা': LanguageInfo(flag: '🇧🇩', code: 'BN', name: 'Bengali'),
+
+    'ne': LanguageInfo(flag: '🇳🇵', code: 'NE', name: 'Nepali'),
+    'nep': LanguageInfo(flag: '🇳🇵', code: 'NE', name: 'Nepali'),
+    'nepali': LanguageInfo(flag: '🇳🇵', code: 'NE', name: 'Nepali'),
+    'नेपाली': LanguageInfo(flag: '🇳🇵', code: 'NE', name: 'Nepali'),
   };
 
   /// Resolves any language code or label into a structured LanguageInfo with flag, code, and title.
@@ -222,5 +230,95 @@ class LanguageUtils {
       code: shortCode.isNotEmpty ? shortCode : 'SUB',
       name: input.trim().isNotEmpty ? input.trim() : 'Subtitle',
     );
+  }
+
+  /// Returns a clean, user-friendly language name without raw codes or brackets.
+  static String cleanLanguageName(String raw) {
+    if (raw.trim().isEmpty) return 'Default';
+    final cleaned = raw.replaceAll(RegExp(r'\[.*?\]|\(.*?\)', caseSensitive: false), '').trim();
+    final info = getInfo(cleaned);
+    if (info.name.isNotEmpty && info.name != 'Subtitle' && info.name != 'Default') {
+      return info.name;
+    }
+    return cleaned.isNotEmpty ? cleaned : raw;
+  }
+
+  /// Checks if candidate matches target language (handles codes, names, and native scripts)
+  static bool matches(String? candidate, String target) {
+    if (candidate == null) return false;
+    final c = candidate.trim().toLowerCase();
+    final t = target.trim().toLowerCase();
+    if (c.isEmpty || t.isEmpty) return false;
+
+    if (c == t) return true;
+    if (c.contains(t) || t.contains(c)) return true;
+
+    final infoC = getInfo(candidate);
+    final infoT = getInfo(target);
+
+    if (infoC.code.isNotEmpty && infoC.code == infoT.code) return true;
+    if (infoC.name.isNotEmpty && infoC.name.toLowerCase() == infoT.name.toLowerCase()) return true;
+
+    return false;
+  }
+
+  /// Selects the best audio stream index following strict user priority:
+  /// 1. User-selected preferred languages from active profile
+  /// 2. English fallback
+  /// 3. Any / first available stream
+  static int pickBestAudioIndex(
+    List<ExtractedStream> streams, {
+    List<String> preferredLangs = const [],
+  }) {
+    if (streams.isEmpty) return 0;
+
+    // 1. Try user preferred languages in order
+    for (final pref in preferredLangs) {
+      if (pref.trim().isEmpty) continue;
+      final idx = streams.indexWhere(
+        (s) => matches(s.language, pref) || matches(s.sourceName, pref),
+      );
+      if (idx != -1) return idx;
+    }
+
+    // 2. Fallback to English
+    final enIdx = streams.indexWhere(
+      (s) => matches(s.language, 'en') || matches(s.sourceName, 'english'),
+    );
+    if (enIdx != -1) return enIdx;
+
+    // 3. Any / first available
+    return 0;
+  }
+
+  /// Selects the best subtitle track following strict user priority:
+  /// 1. User-selected preferred languages from active profile
+  /// 2. English fallback
+  /// 3. Any / first available subtitle
+  static SubtitleTrack? pickBestSubtitle(
+    List<SubtitleTrack> tracks, {
+    List<String> preferredLangs = const [],
+  }) {
+    if (tracks.isEmpty) return null;
+
+    // 1. Try user preferred languages in order
+    for (final pref in preferredLangs) {
+      if (pref.trim().isEmpty) continue;
+      for (final t in tracks) {
+        if (matches(t.language, pref) || matches(t.label, pref)) {
+          return t;
+        }
+      }
+    }
+
+    // 2. Fallback to English
+    for (final t in tracks) {
+      if (matches(t.language, 'en') || matches(t.label, 'english')) {
+        return t;
+      }
+    }
+
+    // 3. Any / first available
+    return tracks.first;
   }
 }

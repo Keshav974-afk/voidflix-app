@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'package:flutter/material.dart';
 import '../core/network/api_service.dart';
 import '../models/media_item.dart';
@@ -15,7 +16,10 @@ class MediaProvider extends ChangeNotifier {
   List<MediaItem> _anime = [];
   List<MediaItem> _asianDrama = [];
 
-  // Extended Netflix Categories
+  // Extended Netflix & Web Categories
+  List<MediaItem> _nowPlayingMovies = [];
+  List<MediaItem> _romanceMovies = [];
+  List<MediaItem> _crimeTV = [];
   List<MediaItem> _actionMovies = [];
   List<MediaItem> _comedyMovies = [];
   List<MediaItem> _sciFiMovies = [];
@@ -23,6 +27,16 @@ class MediaProvider extends ChangeNotifier {
   List<MediaItem> _thrillerMovies = [];
   List<MediaItem> _documentaries = [];
   List<MediaItem> _upcomingMovies = [];
+
+  // Dedicated Kids Content (G/PG only)
+  List<MediaItem> _kidsCartoons = [];
+  List<MediaItem> _kidsAnimated = [];
+  List<MediaItem> _kidsFamily = [];
+
+  // Linear Programming Recommendations & Dynamic Rails
+  List<MediaItem> _topPicksLinear = [];
+  List<MediaItem> _becauseYouWatched = [];
+  String _becauseYouWatchedTitle = '';
 
   bool _isLoadingHome = false;
   String? _error;
@@ -36,6 +50,9 @@ class MediaProvider extends ChangeNotifier {
   List<MediaItem> get anime => _anime;
   List<MediaItem> get asianDrama => _asianDrama;
 
+  List<MediaItem> get nowPlayingMovies => _nowPlayingMovies;
+  List<MediaItem> get romanceMovies => _romanceMovies;
+  List<MediaItem> get crimeTV => _crimeTV;
   List<MediaItem> get actionMovies => _actionMovies;
   List<MediaItem> get comedyMovies => _comedyMovies;
   List<MediaItem> get sciFiMovies => _sciFiMovies;
@@ -44,50 +61,97 @@ class MediaProvider extends ChangeNotifier {
   List<MediaItem> get documentaries => _documentaries;
   List<MediaItem> get upcomingMovies => _upcomingMovies;
 
+  List<MediaItem> get kidsCartoons => _kidsCartoons;
+  List<MediaItem> get kidsAnimated => _kidsAnimated;
+  List<MediaItem> get kidsFamily => _kidsFamily;
+
+  List<MediaItem> get topPicksLinear => _topPicksLinear;
+  List<MediaItem> get becauseYouWatched => _becauseYouWatched;
+  String get becauseYouWatchedTitle => _becauseYouWatchedTitle;
+
   bool get isLoadingHome => _isLoadingHome;
   String? get error => _error;
 
   MediaItem? get heroItem => _trending.isNotEmpty ? _trending.first : null;
 
-  Future<void> fetchHomeData() async {
+  Future<void> fetchHomeData({UserProfile? profile}) async {
     _isLoadingHome = true;
     _error = null;
     notifyListeners();
 
     try {
-      final results = await Future.wait([
-        _apiService.getTrendingAll(),
-        _apiService.getTrendingTV(),
-        _apiService.getPopularMovies(),
-        _apiService.getTopRatedMovies(),
-        _apiService.getPopularTV(),
-        _apiService.getTopRatedTV(),
-        _apiService.getAnime(),
-        _apiService.getAsianDrama(),
-        _apiService.getActionMovies(),
-        _apiService.getComedyMovies(),
-        _apiService.getSciFiMovies(),
-        _apiService.getHorrorMovies(),
-        _apiService.getThrillerMovies(),
-        _apiService.getDocumentaries(),
-        _apiService.getUpcomingMovies(),
-      ]);
+      final isKids = profile?.isKids ?? false;
 
-      _trending = results[0];
-      _trendingTV = results[1];
-      _popularMovies = results[2];
-      _topRatedMovies = results[3];
-      _popularTV = results[4];
-      _topRatedTV = results[5];
-      _anime = results[6];
-      _asianDrama = results[7];
-      _actionMovies = results[8];
-      _comedyMovies = results[9];
-      _sciFiMovies = results[10];
-      _horrorMovies = results[11];
-      _thrillerMovies = results[12];
-      _documentaries = results[13];
-      _upcomingMovies = results[14];
+      if (isKids) {
+        // Strict Kids Mode: exclusively G/PG family, animation, and cartoons
+        final results = await Future.wait([
+          _apiService.getKidsAnimatedMovies(),
+          _apiService.getKidsCartoons(),
+          _apiService.getKidsFamilyMovies(),
+          _apiService.getAnime(),
+          _apiService.getComedyMovies(),
+        ]);
+
+        _kidsAnimated = results[0];
+        _kidsCartoons = results[1];
+        _kidsFamily = results[2];
+        _anime = results[3].where((m) => !m.isAdult && m.genreIds.contains(16)).toList();
+        _comedyMovies = results[4].where((m) => !m.isAdult && (m.genreIds.contains(10751) || m.genreIds.contains(16))).toList();
+
+        // Populate rails with clean kids content
+        _trending = [..._kidsAnimated, ..._kidsCartoons]..shuffle();
+        _trendingTV = _kidsCartoons;
+        _popularMovies = _kidsAnimated;
+        _popularTV = _kidsCartoons;
+        _topRatedMovies = _kidsAnimated;
+        _topRatedTV = _kidsCartoons;
+
+        // Clear out mature/horror rails
+        _horrorMovies = [];
+        _thrillerMovies = [];
+        _actionMovies = [];
+        _crimeTV = [];
+      } else {
+        final results = await Future.wait([
+          _apiService.getTrendingAll(),
+          _apiService.getTrendingTV(),
+          _apiService.getPopularMovies(),
+          _apiService.getTopRatedMovies(),
+          _apiService.getPopularTV(),
+          _apiService.getTopRatedTV(),
+          _apiService.getAnime(),
+          _apiService.getAsianDrama(),
+          _apiService.getActionMovies(),
+          _apiService.getComedyMovies(),
+          _apiService.getSciFiMovies(),
+          _apiService.getHorrorMovies(),
+          _apiService.getThrillerMovies(),
+          _apiService.getDocumentaries(),
+          _apiService.getUpcomingMovies(),
+          _apiService.getNowPlayingMovies(),
+          _apiService.getRomanceMovies(),
+          _apiService.getCrimeTV(),
+        ]);
+
+        _trending = results[0];
+        _trendingTV = results[1];
+        _popularMovies = results[2];
+        _topRatedMovies = results[3];
+        _popularTV = results[4];
+        _topRatedTV = results[5];
+        _anime = results[6];
+        _asianDrama = results[7];
+        _actionMovies = results[8];
+        _comedyMovies = results[9];
+        _sciFiMovies = results[10];
+        _horrorMovies = results[11];
+        _thrillerMovies = results[12];
+        _documentaries = results[13];
+        _upcomingMovies = results[14];
+        _nowPlayingMovies = results[15];
+        _romanceMovies = results[16];
+        _crimeTV = results[17];
+      }
     } catch (e) {
       _error = e.toString();
     } finally {
@@ -123,7 +187,14 @@ class MediaProvider extends ChangeNotifier {
     }
   }
 
-  Future<void> fetchPersonalizedForProfile(UserProfile profile, {bool force = false}) async {
+  Future<void> fetchPersonalizedForProfile(
+    UserProfile profile, {
+    List<int>? watchedIds,
+    String? latestWatchedTitle,
+    int? latestWatchedId,
+    String? latestWatchedType,
+    bool force = false,
+  }) async {
     if (!force && _lastPersonalizedProfileId == profile.id && _personalizedSections.isNotEmpty) {
       return;
     }
@@ -135,6 +206,42 @@ class MediaProvider extends ChangeNotifier {
     try {
       final List<PersonalizedSection> sections = [];
       final Set<int> seenMediaIds = {};
+
+      // If Kids Mode, provide strictly curated kids sections
+      if (profile.isKids) {
+        if (_kidsAnimated.isNotEmpty) {
+          sections.add(
+            PersonalizedSection(
+              title: 'Animated Blockbusters',
+              subtitle: 'Top cartoons and animations for kids',
+              items: _kidsAnimated.where((m) => seenMediaIds.add(m.id)).toList(),
+              forceType: 'movie',
+            ),
+          );
+        }
+        if (_kidsCartoons.isNotEmpty) {
+          sections.add(
+            PersonalizedSection(
+              title: 'Fun Cartoons & Kids TV',
+              subtitle: 'Exciting series and episodes for young minds',
+              items: _kidsCartoons.where((m) => seenMediaIds.add(m.id)).toList(),
+              forceType: 'tv',
+            ),
+          );
+        }
+        if (_kidsFamily.isNotEmpty) {
+          sections.add(
+            PersonalizedSection(
+              title: 'Family Movie Night',
+              subtitle: 'Wholesome movies the whole family can enjoy together',
+              items: _kidsFamily.where((m) => seenMediaIds.add(m.id)).toList(),
+              forceType: 'movie',
+            ),
+          );
+        }
+        _personalizedSections = sections;
+        return;
+      }
 
       // 1. Language-based personalized sections
       for (final lang in profile.preferredLanguages) {
@@ -235,7 +342,7 @@ class MediaProvider extends ChangeNotifier {
           case 10749: // Romance
             genreTitle = 'Romance & Heartwarming Dramas';
             genreSubtitle = 'Emotional depth, chemistry, and captivating love stories';
-            genreItems = await _apiService.discoverByGenre('movie', 10749);
+            genreItems = _romanceMovies.isNotEmpty ? _romanceMovies : await _apiService.discoverByGenre('movie', 10749);
             break;
           case 14: // Fantasy
             genreTitle = 'Mythic Fantasy & Mythological Legends';
@@ -245,7 +352,8 @@ class MediaProvider extends ChangeNotifier {
           case 80: // Crime
             genreTitle = 'Crime, Mafia & Underworld Chronicles';
             genreSubtitle = 'Heists, noir investigations, and gritty crime sagas';
-            genreItems = await _apiService.discoverByGenre('movie', 80);
+            genreItems = _crimeTV.isNotEmpty ? _crimeTV : await _apiService.discoverByGenre('tv', 80);
+            forceType = 'tv';
             break;
           case 99: // Documentary
             genreTitle = 'Eye-Opening Documentaries & Docuseries';
@@ -301,25 +409,72 @@ class MediaProvider extends ChangeNotifier {
         }
       }
 
-      // 5. Curated Top Recommendations for the Profile
-      final List<MediaItem> topPicks = [];
-      for (final sec in sections) {
-        if (sec.items.isNotEmpty) {
-          topPicks.add(sec.items.first);
-          if (sec.items.length > 1) {
-            topPicks.add(sec.items[1]);
-          }
+      // 5. Linear Scoring Optimization Model for Top Picks
+      final pool = <MediaItem>{
+        ..._trending,
+        ..._popularMovies,
+        ..._popularTV,
+        ..._topRatedMovies,
+        ..._nowPlayingMovies,
+        ..._actionMovies,
+        ..._sciFiMovies,
+        ..._comedyMovies,
+      }.toList();
+
+      final genreCounts = <int, int>{};
+      final scoredCandidates = <MapEntry<MediaItem, double>>[];
+
+      for (final m in pool) {
+        if (watchedIds != null && watchedIds.contains(m.id)) continue;
+
+        double score = 0.0;
+        final genreMatch = m.genreIds.where((g) => profile.preferredGenres.contains(g)).length;
+        score += genreMatch * 2.5;
+
+        if (profile.preferredLanguages.contains(m.originalLanguage)) {
+          score += 2.0;
         }
+
+        score += (m.voteAverage / 10.0) * 1.5;
+        final pop = m.popularity > 1.0 ? m.popularity : 1.0;
+        score += (math.log(pop) / math.ln10) * 1.0;
+
+        scoredCandidates.add(MapEntry(m, score));
       }
-      if (topPicks.isNotEmpty) {
+
+      scoredCandidates.sort((a, b) => b.value.compareTo(a.value));
+
+      final selectedTopPicks = <MediaItem>[];
+      for (final entry in scoredCandidates) {
+        final item = entry.key;
+        final primaryGenre = item.genreIds.isNotEmpty ? item.genreIds.first : 0;
+        final currentCount = genreCounts[primaryGenre] ?? 0;
+        if (currentCount < 4) {
+          selectedTopPicks.add(item);
+          genreCounts[primaryGenre] = currentCount + 1;
+        }
+        if (selectedTopPicks.length >= 15) break;
+      }
+      _topPicksLinear = selectedTopPicks;
+
+      if (_topPicksLinear.isNotEmpty) {
         sections.insert(
           0,
           PersonalizedSection(
-            title: 'Recommended For ${profile.name}',
-            subtitle: 'Specially tuned to your favorite cinema tastes',
-            items: topPicks,
+            title: 'Top Picks For ${profile.name}',
+            subtitle: 'Personalized based on your viewing tastes & preferences',
+            items: _topPicksLinear,
           ),
         );
+      }
+
+      // 6. Because You Watched {Title}
+      if (latestWatchedId != null && latestWatchedTitle != null && latestWatchedTitle.isNotEmpty) {
+        _becauseYouWatchedTitle = latestWatchedTitle;
+        try {
+          final recs = await _apiService.getRecommendations(latestWatchedType ?? 'movie', latestWatchedId);
+          _becauseYouWatched = recs.where((m) => !seenMediaIds.contains(m.id)).take(12).toList();
+        } catch (_) {}
       }
 
       _personalizedSections = sections;

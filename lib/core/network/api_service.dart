@@ -110,13 +110,69 @@ class ApiService {
     return results.map((e) => MediaItem.fromJson(e as Map<String, dynamic>, defaultType: type)).toList();
   }
 
+  Future<List<MediaItem>> getNowPlayingMovies({int page = 1}) async {
+    final data = await _get('/movie/now_playing', {'page': '$page'});
+    final results = data['results'] as List<dynamic>? ?? [];
+    return results.map((e) => MediaItem.fromJson(e as Map<String, dynamic>, defaultType: 'movie')).toList();
+  }
+
   Future<List<MediaItem>> getActionMovies({int page = 1}) => discoverByGenre('movie', 28, page: page);
   Future<List<MediaItem>> getComedyMovies({int page = 1}) => discoverByGenre('movie', 35, page: page);
   Future<List<MediaItem>> getSciFiMovies({int page = 1}) => discoverByGenre('movie', 878, page: page);
   Future<List<MediaItem>> getHorrorMovies({int page = 1}) => discoverByGenre('movie', 27, page: page);
   Future<List<MediaItem>> getThrillerMovies({int page = 1}) => discoverByGenre('movie', 53, page: page);
+  Future<List<MediaItem>> getRomanceMovies({int page = 1}) => discoverByGenre('movie', 10749, page: page);
+  Future<List<MediaItem>> getCrimeTV({int page = 1}) => discoverByGenre('tv', 80, page: page);
   Future<List<MediaItem>> getDocumentaries({int page = 1}) => discoverByGenre('movie', 99, page: page);
   Future<List<MediaItem>> getFamilyMovies({int page = 1}) => discoverByGenre('movie', 10751, page: page);
+
+  // Dedicated Kids Zone Endpoints (G and PG certified, no adult content)
+  Future<List<MediaItem>> getKidsCartoons({int page = 1}) async {
+    final data = await _get('/discover/tv', {
+      'page': '$page',
+      'with_genres': '16,10762',
+      'include_adult': 'false',
+      'sort_by': 'popularity.desc',
+    });
+    final results = data['results'] as List<dynamic>? ?? [];
+    return results.map((e) => MediaItem.fromJson(e as Map<String, dynamic>, defaultType: 'tv')).toList();
+  }
+
+  Future<List<MediaItem>> getKidsAnimatedMovies({int page = 1}) async {
+    final data = await _get('/discover/movie', {
+      'page': '$page',
+      'with_genres': '16',
+      'certification_country': 'US',
+      'certification.lte': 'PG',
+      'include_adult': 'false',
+      'sort_by': 'popularity.desc',
+    });
+    final results = data['results'] as List<dynamic>? ?? [];
+    return results.map((e) => MediaItem.fromJson(e as Map<String, dynamic>, defaultType: 'movie')).toList();
+  }
+
+  Future<List<MediaItem>> getKidsFamilyMovies({int page = 1}) async {
+    final data = await _get('/discover/movie', {
+      'page': '$page',
+      'with_genres': '10751',
+      'certification_country': 'US',
+      'certification.lte': 'PG',
+      'include_adult': 'false',
+      'sort_by': 'popularity.desc',
+    });
+    final results = data['results'] as List<dynamic>? ?? [];
+    return results.map((e) => MediaItem.fromJson(e as Map<String, dynamic>, defaultType: 'movie')).toList();
+  }
+
+  Future<List<MediaItem>> getRecommendations(String type, int id) async {
+    try {
+      final data = await _get('/$type/$id/recommendations');
+      final results = data['results'] as List<dynamic>? ?? [];
+      return results.map((e) => MediaItem.fromJson(e as Map<String, dynamic>, defaultType: type)).toList();
+    } catch (_) {
+      return [];
+    }
+  }
 
   Future<List<MediaItem>> discoverByLanguage(String type, String langCode, {int page = 1}) async {
     final data = await _get('/discover/$type', {

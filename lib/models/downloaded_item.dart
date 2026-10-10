@@ -13,6 +13,7 @@ class DownloadedItem {
   final int runtime;
   final String localFilePath;
   final String? localThumbnailPath;
+  final String? localSubtitlePath;
   final int fileSizeBytes;
   final int downloadedBytes;
   final int totalBytes;
@@ -36,6 +37,7 @@ class DownloadedItem {
     this.runtime = 0,
     required this.localFilePath,
     this.localThumbnailPath,
+    this.localSubtitlePath,
     this.fileSizeBytes = 0,
     this.downloadedBytes = 0,
     this.totalBytes = 0,
@@ -46,6 +48,7 @@ class DownloadedItem {
   });
 
   DownloadedItem copyWith({
+    String? title,
     String? status,
     double? progress,
     int? fileSizeBytes,
@@ -53,6 +56,7 @@ class DownloadedItem {
     int? totalBytes,
     String? localFilePath,
     String? localThumbnailPath,
+    String? localSubtitlePath,
     String? quality,
     String? episodeDescription,
     String? stillPath,
@@ -61,7 +65,7 @@ class DownloadedItem {
     return DownloadedItem(
       id: id,
       mediaId: mediaId,
-      title: title,
+      title: title ?? this.title,
       mediaType: mediaType,
       season: season,
       episode: episode,
@@ -73,6 +77,7 @@ class DownloadedItem {
       runtime: runtime ?? this.runtime,
       localFilePath: localFilePath ?? this.localFilePath,
       localThumbnailPath: localThumbnailPath ?? this.localThumbnailPath,
+      localSubtitlePath: localSubtitlePath ?? this.localSubtitlePath,
       fileSizeBytes: fileSizeBytes ?? this.fileSizeBytes,
       downloadedBytes: downloadedBytes ?? this.downloadedBytes,
       totalBytes: totalBytes ?? this.totalBytes,
@@ -98,6 +103,7 @@ class DownloadedItem {
         'runtime': runtime,
         'localFilePath': localFilePath,
         'localThumbnailPath': localThumbnailPath,
+        'localSubtitlePath': localSubtitlePath,
         'fileSizeBytes': fileSizeBytes,
         'downloadedBytes': downloadedBytes,
         'totalBytes': totalBytes,
@@ -122,6 +128,7 @@ class DownloadedItem {
         runtime: json['runtime'] as int? ?? 0,
         localFilePath: json['localFilePath'] as String? ?? '',
         localThumbnailPath: json['localThumbnailPath'] as String?,
+        localSubtitlePath: json['localSubtitlePath'] as String?,
         fileSizeBytes: json['fileSizeBytes'] as int? ?? 0,
         downloadedBytes: json['downloadedBytes'] as int? ?? 0,
         totalBytes: json['totalBytes'] as int? ?? 0,

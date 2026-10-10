@@ -47,7 +47,9 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       _gameHandle = prefs.getString('profile_${widget.profile.id}_game_handle') ?? '';
       _maturityRating = prefs.getString('profile_${widget.profile.id}_maturity') ?? (_isKids ? 'Kids (TV-Y, TV-G)' : 'No restrictions');
       _displayLanguage = prefs.getString('profile_${widget.profile.id}_lang') ?? 'English';
-      _audioLanguages = prefs.getString('profile_${widget.profile.id}_audio_lang') ?? 'English, Original';
+      _audioLanguages = widget.profile.preferredAudioLang != null && widget.profile.preferredAudioLang!.isNotEmpty
+          ? '${widget.profile.preferredAudioLang}, English'
+          : (prefs.getString('profile_${widget.profile.id}_audio_lang') ?? 'English, Original');
       _autoplayNext = prefs.getBool('profile_${widget.profile.id}_autoplay_next') ?? true;
       _autoplayPreviews = prefs.getBool('profile_${widget.profile.id}_autoplay_previews') ?? true;
     });
@@ -73,6 +75,14 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     final name = _nameController.text.trim();
     if (name.isEmpty) return;
 
+    final parts = _audioLanguages
+        .split(',')
+        .map((p) => p.trim())
+        .where((p) => p.isNotEmpty && p.toLowerCase() != 'original' && !p.toLowerCase().contains('all languages'))
+        .toList();
+    final primaryAudio = parts.isNotEmpty ? parts.first : 'English';
+    final primarySub = parts.isNotEmpty ? parts.first : 'English';
+
     final profileProv = context.read<ProfileProvider>();
     profileProv.updateProfile(
       widget.profile.id,
@@ -81,6 +91,9 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       avatar: _avatar,
       isKids: _isKids,
       pin: _pin,
+      preferredAudioLang: primaryAudio,
+      preferredSubtitleLang: primarySub,
+      preferredLanguages: parts.isNotEmpty ? parts : ['English'],
       clearPin: _pin == null || _pin!.isEmpty,
     );
 
@@ -273,7 +286,20 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   }
 
   void _showLanguageDialog() {
-    final languages = ['English', 'Español', 'Français', 'Deutsch', 'Italiano', 'Hindi', '日本語', '한국어', 'Português'];
+    final languages = [
+      'English',
+      'Hindi',
+      'Urdu',
+      'Nepali',
+      'Español',
+      'Français',
+      'Deutsch',
+      'Italiano',
+      '日本語',
+      '한국어',
+      'Português',
+      'العربية',
+    ];
     showModalBottomSheet(
       context: context,
       backgroundColor: const Color(0xFF1E1E28),
@@ -311,10 +337,15 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   void _showAudioLanguagesDialog() {
     final audioOptions = [
       'English, Original',
+      'Urdu, English',
       'Hindi, English',
+      'Nepali, English',
       'Japanese, English',
       'Korean, English',
       'Spanish, English',
+      'French, English',
+      'German, English',
+      'Arabic, English',
       'All Languages (Multi-Audio)',
     ];
     showModalBottomSheet(

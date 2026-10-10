@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -7,8 +8,6 @@ import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
-
-import 'dart:io';
 
 import '../core/constants/theme_constants.dart';
 import '../core/network/api_service.dart';
@@ -136,7 +135,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
     super.initState();
     _currentSeason = widget.season;
     _currentEpisode = widget.episode;
-    _selectedServerIndex = context.read<ProfileProvider>().selectedServerIndex;
+    final savedServer = context.read<ProfileProvider>().selectedServerIndex;
+    _selectedServerIndex = (savedServer >= 0 && savedServer < ServerConfig.servers.length)
+        ? savedServer
+        : 0;
 
     // Lock firmly to immersive fullscreen landscape mode
     SystemChrome.setPreferredOrientations([
@@ -190,41 +192,28 @@ class _PlayerScreenState extends State<PlayerScreen> {
   // Media Loading Pipeline
   // ---------------------------------------------------------------------------
 
-  Future<void> _loadMedia() async {
-    _cancelAutoplayTimer();
-
-    // Check if playing an offline in-app download
-    if (widget.localFilePath != null && File(widget.localFilePath!).existsSync()) {
-      await _loadLocalFile(widget.localFilePath!);
-      return;
-    }
-
-    // Always attempt native stream extraction first
-    await _loadDirectStream();
-  }
-
-  Future<void> _loadLocalFile(String path) async {
+  Future<void> _loadLocalFile(String filePath) async {
+    _disposeVideoController();
     setState(() {
-      _isNativeMode = true;
       _isExtracting = false;
       _isLoading = true;
-      _activeCueText = null;
+      _isNativeMode = true;
       _availableQualities = [
-        StreamQuality(label: 'Offline (Downloaded)', height: 1080, url: path),
+        StreamQuality(label: 'Offline (Downloaded)', height: 1080, url: filePath),
       ];
       _selectedQualityIndex = 0;
     });
 
-    _disposeVideoController();
-
     try {
-      final controller = VideoPlayerController.file(File(path));
+      final controller = VideoPlayerController.file(File(filePath));
       _videoPlayerController = controller;
       await controller.initialize();
 
       if (!mounted) return;
 
-      // Resume from saved progress if available
+      controller.addListener(_videoPlayerListener);
+
+      Duration? resumePos;
       final saved = context.read<HistoryProvider>().getProgress(widget.mediaId);
       if (saved != null &&
           (widget.mediaType != 'tv' || (saved.season == _currentSeason && saved.episode == _currentEpisode)) &&
@@ -232,12 +221,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
           saved.progress < 0.95) {
         final totalMs = controller.value.duration.inMilliseconds;
         if (totalMs > 0) {
-          final resumePos = Duration(milliseconds: (saved.progress * totalMs).round());
-          await controller.seekTo(resumePos);
+          resumePos = Duration(milliseconds: (saved.progress * totalMs).round());
         }
       }
 
-      controller.addListener(_videoPlayerListener);
+      if (resumePos != null && resumePos > Duration.zero) {
+        await controller.seekTo(resumePos);
+      }
+
       await controller.setPlaybackSpeed(_playbackSpeed);
       await controller.play();
 
@@ -247,15 +238,45 @@ class _PlayerScreenState extends State<PlayerScreen> {
         _totalDuration = controller.value.duration;
         _currentPosition = controller.value.position;
       });
+
       _startHideControlsTimer();
     } catch (e) {
-      debugPrint('Local file playback error: $e');
-      setState(() => _isLoading = false);
+      debugPrint('Error loading local file video: $e');
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Failed to play local video: $e')),
+        );
+      }
     }
   }
 
-  Future<void> _loadDirectStream() async {
+  Future<void> _loadMedia() async {
+    _cancelAutoplayTimer();
+
+    // Check if playing an offline in-app download
+    if (widget.localFilePath != null && File(widget.localFilePath!).existsSync()) {
+      await _loadLocalFile(widget.localFilePath!);
+      return;
+    }
+
+    final safeIdx = (_selectedServerIndex >= 0 && _selectedServerIndex < ServerConfig.servers.length)
+        ? _selectedServerIndex
+        : 0;
+    final server = ServerConfig.servers[safeIdx];
+    if (server.isDirectPlay) {
+      await _loadServerDirect(safeIdx);
+    } else {
+      _loadWebEmbed();
+    }
+  }
+
+  Future<void> _loadServerDirect(int serverIdx) async {
+    final server = ServerConfig.servers[serverIdx];
     setState(() {
+      _selectedServerIndex = serverIdx;
       _isNativeMode = true;
       _isExtracting = true;
       _isLoading = true;
@@ -265,18 +286,77 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _disposeVideoController();
 
     try {
-      final streams = await StreamExtractor.extractAll(
-        type: widget.mediaType,
-        tmdbId: widget.mediaId,
-        season: _currentSeason,
-        episode: _currentEpisode,
-      );
+      List<ExtractedStream> streams = [];
+      if (server.name.contains('VoidHD')) {
+        final v = await StreamExtractor.extractVidlink(
+          type: widget.mediaType,
+          tmdbId: widget.mediaId,
+          season: _currentSeason,
+          episode: _currentEpisode,
+        );
+        if (v != null) streams = [v];
+      } else if (server.name.contains('PulsarHD')) {
+        streams = await StreamExtractor.extractVidrock(
+          type: widget.mediaType,
+          tmdbId: widget.mediaId,
+          season: _currentSeason,
+          episode: _currentEpisode,
+        );
+      } else if (server.name.contains('NovaStream')) {
+        final all = await StreamExtractor.extractVidrock(
+          type: widget.mediaType,
+          tmdbId: widget.mediaId,
+          season: _currentSeason,
+          episode: _currentEpisode,
+        );
+        streams = all.where((s) => s.sourceName.toLowerCase() == 'nova').toList();
+        if (streams.isEmpty) streams = all;
+      } else if (server.name.contains('AtlasStream')) {
+        final all = await StreamExtractor.extractVidrock(
+          type: widget.mediaType,
+          tmdbId: widget.mediaId,
+          season: _currentSeason,
+          episode: _currentEpisode,
+        );
+        streams = all.where((s) => s.sourceName.toLowerCase() == 'atlas').toList();
+        if (streams.isEmpty) streams = all;
+      } else {
+        // VoidDirect / default: multi-source extraction
+        streams = await StreamExtractor.extractAll(
+          type: widget.mediaType,
+          tmdbId: widget.mediaId,
+          season: _currentSeason,
+          episode: _currentEpisode,
+        );
+      }
 
       if (!mounted) return;
 
       if (streams.isNotEmpty) {
         _directStreams = streams;
-        _selectedStreamIndex = 0;
+
+        // Retrieve active profile language preferences
+        final profile = context.read<ProfileProvider>().activeProfile;
+        final preferredAudio = profile.preferredAudioLang;
+        final preferredSub = profile.preferredSubtitleLang;
+        final preferredList = profile.preferredLanguages;
+
+        final audioPrefs = [
+          if (preferredAudio != null && preferredAudio.isNotEmpty) preferredAudio,
+          ...preferredList,
+        ];
+        final subPrefs = [
+          if (preferredSub != null && preferredSub.isNotEmpty) preferredSub,
+          if (preferredAudio != null && preferredAudio.isNotEmpty) preferredAudio,
+          ...preferredList,
+        ];
+
+        // 1. Pick audio stream index with user priority (profile -> English -> any)
+        final chosenAudioIdx = LanguageUtils.pickBestAudioIndex(
+          streams,
+          preferredLangs: audioPrefs,
+        );
+        _selectedStreamIndex = chosenAudioIdx;
 
         // Aggregate subtitles from all sources
         final allSubs = <SubtitleTrack>[];
@@ -289,21 +369,41 @@ class _PlayerScreenState extends State<PlayerScreen> {
             }
           }
         }
+
+        // If the extracted stream cluster (e.g. NovaStream, AtlasStream, PulsarHD) has no embedded subtitles,
+        // borrow cached subtitles from other providers (Vidlink, Voidflix)
+        if (allSubs.isEmpty) {
+          final shared = await StreamExtractor.getSharedSubtitles(
+            widget.mediaType,
+            widget.mediaId,
+            _currentSeason,
+            _currentEpisode,
+          );
+          for (final sub in shared) {
+            if (!seenSubUrls.contains(sub.url)) {
+              seenSubUrls.add(sub.url);
+              allSubs.add(sub);
+            }
+          }
+        }
         _subtitles = allSubs;
 
-        // Auto-select English subtitle if available
-        final defaultSub = allSubs.where((s) => s.label.toLowerCase().contains('english') || s.language == 'en').firstOrNull;
-        if (defaultSub != null) {
-          _selectSubtitle(defaultSub);
+        // 2. Pick subtitle with user priority (profile -> English -> any)
+        final bestSub = LanguageUtils.pickBestSubtitle(
+          allSubs,
+          preferredLangs: subPrefs,
+        );
+        if (bestSub != null) {
+          _selectSubtitle(bestSub);
         }
 
-        await _initNativePlayer(streams[0]);
+        await _initNativePlayer(streams[chosenAudioIdx]);
       } else {
-        debugPrint('Direct extraction returned 0 streams. Falling back to web embed.');
+        debugPrint('Direct extraction for ${server.name} returned 0 streams. Falling back to web embed.');
         _switchToEmbedFallback();
       }
     } catch (e) {
-      debugPrint('Direct extraction error: $e');
+      debugPrint('Direct extraction error for ${server.name}: $e');
       if (mounted) {
         _switchToEmbedFallback();
       }
@@ -378,6 +478,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
         _selectedStreamIndex++;
         await _initNativePlayer(_directStreams[_selectedStreamIndex], startPosition: startPosition, autoPlay: autoPlay);
       } else {
+        StreamExtractor.invalidateCache(widget.mediaType, widget.mediaId, _currentSeason, _currentEpisode);
         _switchToEmbedFallback();
       }
     }
@@ -494,8 +595,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _isNativeMode = false;
       _isExtracting = false;
     });
-    if (ServerConfig.servers[_selectedServerIndex].isDirectPlay) {
-      _selectedServerIndex = 1;
+    if (_selectedServerIndex < 0 ||
+        _selectedServerIndex >= ServerConfig.servers.length ||
+        ServerConfig.servers[_selectedServerIndex].isDirectPlay) {
+      final firstEmbed = ServerConfig.servers.indexWhere((s) => !s.isDirectPlay);
+      _selectedServerIndex = firstEmbed != -1 ? firstEmbed : 0;
     }
     _loadWebEmbed();
   }
@@ -512,6 +616,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   String _buildCurrentEmbedUrl() {
+    if (_selectedServerIndex < 0 || _selectedServerIndex >= ServerConfig.servers.length) {
+      final firstEmbed = ServerConfig.servers.indexWhere((s) => !s.isDirectPlay);
+      _selectedServerIndex = firstEmbed != -1 ? firstEmbed : 0;
+    }
     final server = ServerConfig.servers[_selectedServerIndex];
     return ServerConfig.getEmbedUrl(
       server: server,
@@ -976,9 +1084,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _lastProgressSaveTime = now;
     _lastSavedProgress = prog;
 
+    final cleanTitle = widget.mediaTitle.replaceAll(RegExp(r':\s*S\d+.*$', caseSensitive: false), '').trim();
     final progress = WatchProgress(
       id: widget.mediaId,
-      title: widget.mediaTitle,
+      title: cleanTitle.isNotEmpty ? cleanTitle : widget.mediaTitle,
       posterPath: widget.posterPath,
       backdropPath: widget.backdropPath,
       mediaType: widget.mediaType,
@@ -1142,7 +1251,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 const Padding(
-                                  padding: EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                                  padding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
                                   child: Text(
                                     'AUDIO',
                                     style: TextStyle(
@@ -1160,80 +1269,32 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                       final isSelected = idx == _selectedStreamIndex;
                                       final stream = _directStreams.isNotEmpty ? _directStreams[idx] : null;
                                       final langRaw = stream?.language ?? 'English';
-                                      final langInfo = LanguageUtils.getInfo(langRaw);
+                                      final langName = LanguageUtils.cleanLanguageName(langRaw);
                                       final sourceName = stream != null ? stream.sourceName : 'Original (Stereo)';
 
-                                      return InkWell(
+                                      return ListTile(
+                                        dense: true,
+                                        contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
+                                        title: Text(
+                                          langName,
+                                          style: TextStyle(
+                                            color: isSelected ? Colors.white : Colors.white70,
+                                            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                                            fontSize: 14,
+                                          ),
+                                        ),
+                                        subtitle: Text(
+                                          sourceName,
+                                          style: const TextStyle(fontSize: 11, color: Colors.white38),
+                                        ),
+                                        trailing: isSelected
+                                            ? const Icon(Icons.check, color: AppTheme.primaryRed, size: 20)
+                                            : null,
                                         onTap: () {
                                           setSheetState(() {});
                                           _selectAudioSource(idx);
                                           Navigator.pop(ctx);
                                         },
-                                        borderRadius: BorderRadius.circular(8),
-                                        child: Container(
-                                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                                          margin: const EdgeInsets.symmetric(vertical: 2),
-                                          decoration: BoxDecoration(
-                                            color: isSelected
-                                                ? Colors.white.withValues(alpha: 0.08)
-                                                : Colors.transparent,
-                                            borderRadius: BorderRadius.circular(8),
-                                            border: isSelected
-                                                ? Border.all(
-                                                    color: AppTheme.primaryRed.withValues(alpha: 0.6),
-                                                    width: 1,
-                                                  )
-                                                : null,
-                                          ),
-                                          child: Row(
-                                            children: [
-                                              Text(langInfo.flag, style: const TextStyle(fontSize: 18)),
-                                              const SizedBox(width: 8),
-                                              Container(
-                                                padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
-                                                decoration: BoxDecoration(
-                                                  color: Colors.white12,
-                                                  borderRadius: BorderRadius.circular(4),
-                                                ),
-                                                child: Text(
-                                                  langInfo.code,
-                                                  style: const TextStyle(
-                                                    fontSize: 10,
-                                                    fontWeight: FontWeight.bold,
-                                                    color: Colors.white70,
-                                                  ),
-                                                ),
-                                              ),
-                                              const SizedBox(width: 8),
-                                              Expanded(
-                                                child: Column(
-                                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                                  mainAxisSize: MainAxisSize.min,
-                                                  children: [
-                                                    Text(
-                                                      langInfo.name,
-                                                      style: TextStyle(
-                                                        color: isSelected ? Colors.white : Colors.white70,
-                                                        fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                                                        fontSize: 13,
-                                                      ),
-                                                      maxLines: 1,
-                                                      overflow: TextOverflow.ellipsis,
-                                                    ),
-                                                    Text(
-                                                      sourceName,
-                                                      style: const TextStyle(fontSize: 11, color: Colors.white38),
-                                                      maxLines: 1,
-                                                      overflow: TextOverflow.ellipsis,
-                                                    ),
-                                                  ],
-                                                ),
-                                              ),
-                                              if (isSelected)
-                                                const Icon(Icons.check_rounded, color: AppTheme.primaryRed, size: 18),
-                                            ],
-                                          ),
-                                        ),
                                       );
                                     },
                                   ),
@@ -1242,14 +1303,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
                             ),
                           ),
                           Container(width: 1, color: Colors.white12),
-                          const SizedBox(width: 16),
+                          const SizedBox(width: 12),
                           // Right Column: SUBTITLES
                           Expanded(
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 const Padding(
-                                  padding: EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                                  padding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
                                   child: Text(
                                     'SUBTITLES',
                                     style: TextStyle(
@@ -1264,112 +1325,50 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                   child: ListView(
                                     children: [
                                       // Off Option
-                                      InkWell(
+                                      ListTile(
+                                        dense: true,
+                                        contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
+                                        title: Text(
+                                          'Off',
+                                          style: TextStyle(
+                                            color: _selectedSubtitle == null ? Colors.white : Colors.white70,
+                                            fontWeight: _selectedSubtitle == null ? FontWeight.bold : FontWeight.normal,
+                                            fontSize: 14,
+                                          ),
+                                        ),
+                                        trailing: _selectedSubtitle == null
+                                            ? const Icon(Icons.check, color: AppTheme.primaryRed, size: 20)
+                                            : null,
                                         onTap: () {
                                           _selectSubtitle(null);
                                           Navigator.pop(ctx);
                                         },
-                                        borderRadius: BorderRadius.circular(8),
-                                        child: Container(
-                                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 9),
-                                          margin: const EdgeInsets.symmetric(vertical: 2),
-                                          decoration: BoxDecoration(
-                                            color: _selectedSubtitle == null
-                                                ? Colors.white.withValues(alpha: 0.08)
-                                                : Colors.transparent,
-                                            borderRadius: BorderRadius.circular(8),
-                                            border: _selectedSubtitle == null
-                                                ? Border.all(
-                                                    color: AppTheme.primaryRed.withValues(alpha: 0.6),
-                                                    width: 1,
-                                                  )
-                                                : null,
-                                          ),
-                                          child: Row(
-                                            children: [
-                                              const Icon(Icons.subtitles_off_outlined, color: Colors.white70, size: 18),
-                                              const SizedBox(width: 10),
-                                              Expanded(
-                                                child: Text(
-                                                  'Off',
-                                                  style: TextStyle(
-                                                    color: _selectedSubtitle == null ? Colors.white : Colors.white70,
-                                                    fontWeight: _selectedSubtitle == null ? FontWeight.bold : FontWeight.normal,
-                                                    fontSize: 13,
-                                                  ),
-                                                ),
-                                              ),
-                                              if (_selectedSubtitle == null)
-                                                const Icon(Icons.check_rounded, color: AppTheme.primaryRed, size: 18),
-                                            ],
-                                          ),
-                                        ),
                                       ),
                                       if (_subtitles.isNotEmpty)
                                         ..._subtitles.map((track) {
                                           final isSelected = _selectedSubtitle?.url == track.url;
-                                          final langInfo = LanguageUtils.getInfo(
-                                            track.language.isNotEmpty ? track.language : track.label,
+                                          final label = LanguageUtils.cleanLanguageName(
+                                            track.label.isNotEmpty ? track.label : track.language,
                                           );
 
-                                          return InkWell(
+                                          return ListTile(
+                                            dense: true,
+                                            contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
+                                            title: Text(
+                                              label,
+                                              style: TextStyle(
+                                                color: isSelected ? Colors.white : Colors.white70,
+                                                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                                                fontSize: 14,
+                                              ),
+                                            ),
+                                            trailing: isSelected
+                                                ? const Icon(Icons.check, color: AppTheme.primaryRed, size: 20)
+                                                : null,
                                             onTap: () {
                                               _selectSubtitle(track);
                                               Navigator.pop(ctx);
                                             },
-                                            borderRadius: BorderRadius.circular(8),
-                                            child: Container(
-                                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-                                              margin: const EdgeInsets.symmetric(vertical: 2),
-                                              decoration: BoxDecoration(
-                                                color: isSelected
-                                                    ? Colors.white.withValues(alpha: 0.08)
-                                                    : Colors.transparent,
-                                                borderRadius: BorderRadius.circular(8),
-                                                border: isSelected
-                                                    ? Border.all(
-                                                        color: AppTheme.primaryRed.withValues(alpha: 0.6),
-                                                        width: 1,
-                                                      )
-                                                    : null,
-                                              ),
-                                              child: Row(
-                                                children: [
-                                                  Text(langInfo.flag, style: const TextStyle(fontSize: 18)),
-                                                  const SizedBox(width: 8),
-                                                  Container(
-                                                    padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
-                                                    decoration: BoxDecoration(
-                                                      color: Colors.white12,
-                                                      borderRadius: BorderRadius.circular(4),
-                                                    ),
-                                                    child: Text(
-                                                      langInfo.code,
-                                                      style: const TextStyle(
-                                                        fontSize: 10,
-                                                        fontWeight: FontWeight.bold,
-                                                        color: Colors.white70,
-                                                      ),
-                                                    ),
-                                                  ),
-                                                  const SizedBox(width: 8),
-                                                  Expanded(
-                                                    child: Text(
-                                                      track.label.isNotEmpty ? track.label : langInfo.name,
-                                                      style: TextStyle(
-                                                        color: isSelected ? Colors.white : Colors.white70,
-                                                        fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                                                        fontSize: 13,
-                                                      ),
-                                                      maxLines: 1,
-                                                      overflow: TextOverflow.ellipsis,
-                                                    ),
-                                                  ),
-                                                  if (isSelected)
-                                                    const Icon(Icons.check_rounded, color: AppTheme.primaryRed, size: 18),
-                                                ],
-                                              ),
-                                            ),
                                           );
                                         })
                                       else
@@ -1781,55 +1780,80 @@ class _PlayerScreenState extends State<PlayerScreen> {
                       const Padding(
                         padding: EdgeInsets.fromLTRB(16, 6, 16, 4),
                         child: Text(
-                          'DIRECT HIGH-SPEED (NO ADS)',
+                          'DIRECT NATIVE SERVERS (EXTRACTABLE • NO ADS)',
                           style: TextStyle(color: AppTheme.primaryRed, fontSize: 11, fontWeight: FontWeight.bold),
                         ),
                       ),
-                      if (_directStreams.isNotEmpty)
+                      ...List.generate(ServerConfig.servers.length, (idx) {
+                        final s = ServerConfig.servers[idx];
+                        if (!s.isDirectPlay) return const SizedBox.shrink();
+                        final isSel = _isNativeMode && idx == _selectedServerIndex;
+                        return ListTile(
+                          dense: true,
+                          leading: Icon(
+                            isSel ? Icons.radio_button_checked : Icons.radio_button_off,
+                            color: isSel ? AppTheme.primaryRed : Colors.white54,
+                          ),
+                          title: Text(
+                            s.name,
+                            style: TextStyle(
+                              color: isSel ? Colors.white : Colors.white70,
+                              fontWeight: isSel ? FontWeight.bold : FontWeight.normal,
+                            ),
+                          ),
+                          subtitle: Text(s.description, style: const TextStyle(fontSize: 11, color: Colors.white38)),
+                          trailing: isSel
+                              ? Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: AppTheme.primaryRed.withValues(alpha: 0.2),
+                                    borderRadius: BorderRadius.circular(4),
+                                    border: Border.all(color: AppTheme.primaryRed, width: 0.8),
+                                  ),
+                                  child: const Text('ACTIVE', style: TextStyle(color: AppTheme.primaryRed, fontSize: 10, fontWeight: FontWeight.bold)),
+                                )
+                              : null,
+                          onTap: () {
+                            Navigator.pop(ctx);
+                            context.read<ProfileProvider>().setSelectedServer(idx);
+                            _loadServerDirect(idx);
+                          },
+                        );
+                      }),
+                      if (_directStreams.isNotEmpty && _directStreams.length > 1) ...[
+                        const Padding(
+                          padding: EdgeInsets.fromLTRB(16, 10, 16, 4),
+                          child: Text(
+                            'EXTRACTED AUDIO & CDN FEEDS',
+                            style: TextStyle(color: Colors.white38, fontSize: 10, fontWeight: FontWeight.bold),
+                          ),
+                        ),
                         ...List.generate(_directStreams.length, (idx) {
                           final s = _directStreams[idx];
                           final isSel = _isNativeMode && idx == _selectedStreamIndex;
                           return ListTile(
                             dense: true,
                             leading: Icon(
-                              isSel ? Icons.radio_button_checked : Icons.radio_button_off,
-                              color: isSel ? AppTheme.primaryRed : Colors.white54,
+                              isSel ? Icons.check_circle : Icons.circle_outlined,
+                              size: 18,
+                              color: isSel ? AppTheme.primaryRed : Colors.white38,
                             ),
                             title: Text(
                               '${s.sourceName} • ${s.language}',
                               style: TextStyle(
-                                color: isSel ? Colors.white : Colors.white70,
+                                color: isSel ? Colors.white : Colors.white60,
+                                fontSize: 13,
                                 fontWeight: isSel ? FontWeight.bold : FontWeight.normal,
                               ),
                             ),
-                            subtitle: Text('Direct ${s.type.toUpperCase()} stream', style: const TextStyle(fontSize: 11, color: Colors.white38)),
+                            subtitle: Text('Direct ${s.type.toUpperCase()} stream', style: const TextStyle(fontSize: 10, color: Colors.white30)),
                             onTap: () {
                               Navigator.pop(ctx);
                               _selectAudioSource(idx);
                             },
                           );
-                        })
-                      else
-                        ListTile(
-                          dense: true,
-                          leading: Icon(
-                            _isNativeMode ? Icons.radio_button_checked : Icons.radio_button_off,
-                            color: _isNativeMode ? AppTheme.primaryRed : Colors.white54,
-                          ),
-                          title: const Text(
-                            'VoidDirect (Try Native Stream)',
-                            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-                          ),
-                          subtitle: const Text('Attempt multi-source direct extraction', style: TextStyle(fontSize: 11, color: Colors.white38)),
-                          onTap: () {
-                            Navigator.pop(ctx);
-                            setState(() {
-                              _selectedServerIndex = 0;
-                              _isNativeMode = true;
-                            });
-                            _loadDirectStream();
-                          },
-                        ),
+                        }),
+                      ],
                       const Divider(color: Colors.white12),
                       // Embed Fallbacks
                       const Padding(
@@ -2114,14 +2138,27 @@ class _PlayerScreenState extends State<PlayerScreen> {
                               left: 12,
                               right: 12,
                               bottom: 24,
-                              child: Text(
-                                _activeCueText!,
-                                textAlign: TextAlign.center,
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 11,
-                                  fontWeight: FontWeight.w600,
-                                  shadows: [Shadow(color: Colors.black, blurRadius: 4)],
+                              child: Directionality(
+                                textDirection: RegExp(r'[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF\u0590-\u05FF]').hasMatch(_activeCueText!)
+                                    ? TextDirection.rtl
+                                    : TextDirection.ltr,
+                                child: Text(
+                                  _activeCueText!,
+                                  textAlign: TextAlign.center,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                    fontFamilyFallback: [
+                                      'Noto Sans Devanagari',
+                                      'Noto Nastaliq Urdu',
+                                      'Noto Sans Arabic',
+                                      'Mangal',
+                                      'Arial',
+                                      'sans-serif',
+                                    ],
+                                    shadows: [Shadow(color: Colors.black, blurRadius: 4)],
+                                  ),
                                 ),
                               ),
                             ),
@@ -2500,7 +2537,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final currentServer = ServerConfig.servers[_selectedServerIndex];
+    final safeIndex = (_selectedServerIndex >= 0 && _selectedServerIndex < ServerConfig.servers.length)
+        ? _selectedServerIndex
+        : 0;
+    final currentServer = ServerConfig.servers[safeIndex];
 
     return PopScope(
       canPop: false,
@@ -2666,16 +2706,30 @@ class _PlayerScreenState extends State<PlayerScreen> {
                           color: Colors.black.withValues(alpha: 0.78),
                           borderRadius: BorderRadius.circular(6),
                         ),
-                        child: Text(
-                          _activeCueText!,
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 16,
-                            fontWeight: FontWeight.w600,
-                            shadows: [
-                              Shadow(color: Colors.black, blurRadius: 6),
-                            ],
+                        child: Directionality(
+                          textDirection: RegExp(r'[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF\u0590-\u05FF]').hasMatch(_activeCueText!)
+                              ? TextDirection.rtl
+                              : TextDirection.ltr,
+                          child: Text(
+                            _activeCueText!,
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 16,
+                              fontWeight: FontWeight.w600,
+                              fontFamilyFallback: [
+                                'Noto Sans Devanagari',
+                                'Noto Nastaliq Urdu',
+                                'Noto Sans Arabic',
+                                'Mangal',
+                                'Kokila',
+                                'Arial',
+                                'sans-serif',
+                              ],
+                              shadows: [
+                                Shadow(color: Colors.black, blurRadius: 6),
+                              ],
+                            ),
                           ),
                         ),
                       ),

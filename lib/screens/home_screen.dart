@@ -1,12 +1,18 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../core/constants/theme_constants.dart';
+import '../models/downloaded_item.dart';
+import '../providers/download_provider.dart';
+import '../providers/history_provider.dart';
 import '../providers/media_provider.dart';
 import '../providers/profile_provider.dart';
 import '../widgets/continue_watching_row.dart';
 import '../widgets/hero_banner.dart';
 import '../widgets/media_row.dart';
 import '../widgets/top10_row.dart';
+import 'downloads_screen.dart';
+import 'player_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -17,33 +23,72 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   String _selectedCategoryFilter = 'All'; // 'All', 'TV Shows', 'Movies'
+  bool _isOffline = false;
+  String? _lastProfileId;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) {
-        final profileProv = context.read<ProfileProvider>();
-        final mediaProv = context.read<MediaProvider>();
-        mediaProv.fetchPersonalizedForProfile(profileProv.activeProfile);
-      }
-    });
+    _checkConnectivity();
   }
 
-  void _showCategoriesPicker(BuildContext context, MediaProvider mediaProvider) {
-    final categories = [
-      {'name': 'All', 'type': 'all', 'id': 0},
-      {'name': 'Action & Adventure', 'type': 'movie', 'id': 28},
-      {'name': 'Anime & Animation', 'type': 'tv', 'id': 16},
-      {'name': 'Comedy Hits', 'type': 'movie', 'id': 35},
-      {'name': 'Critically Acclaimed', 'type': 'movie', 'id': 18},
-      {'name': 'Documentaries', 'type': 'movie', 'id': 99},
-      {'name': 'Horror & Paranormal', 'type': 'movie', 'id': 27},
-      {'name': 'K-Drama & Asian Series', 'type': 'tv', 'id': 10759},
-      {'name': 'Sci-Fi & Fantasy', 'type': 'movie', 'id': 878},
-      {'name': 'Thrillers & Mystery', 'type': 'movie', 'id': 53},
-      {'name': 'Family & Kids', 'type': 'movie', 'id': 10751},
-    ];
+  Future<void> _checkConnectivity() async {
+    try {
+      final result = await InternetAddress.lookup('google.com').timeout(const Duration(seconds: 3));
+      final hasNet = result.isNotEmpty && result[0].rawAddress.isNotEmpty;
+      if (mounted && _isOffline != !hasNet) {
+        setState(() => _isOffline = !hasNet);
+      }
+    } catch (_) {
+      if (mounted && !_isOffline) {
+        setState(() => _isOffline = true);
+      }
+    }
+  }
+
+  void _playOffline(DownloadedItem item) {
+    if (item.localFilePath.isEmpty) return;
+    final cleanTitle = DownloadsScreen.sanitizeTitle(item.title);
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => PlayerScreen(
+          mediaId: item.mediaId,
+          mediaTitle: cleanTitle,
+          mediaType: item.mediaType,
+          season: item.season,
+          episode: item.episode,
+          posterPath: item.posterPath,
+          backdropPath: item.backdropPath,
+          localFilePath: item.localFilePath,
+        ),
+      ),
+    );
+  }
+
+  void _showCategoriesPicker(BuildContext context, MediaProvider mediaProvider, {bool isKids = false}) {
+    final categories = isKids
+        ? [
+            {'name': 'All Kids Content', 'type': 'all', 'id': 0},
+            {'name': 'Animated Movies', 'type': 'movie', 'id': 16},
+            {'name': 'Cartoons & Kids TV', 'type': 'tv', 'id': 10762},
+            {'name': 'Family Movie Classics', 'type': 'movie', 'id': 10751},
+            {'name': 'Laughs & Joyful Fun', 'type': 'movie', 'id': 35},
+          ]
+        : [
+            {'name': 'All', 'type': 'all', 'id': 0},
+            {'name': 'Action & Adventure', 'type': 'movie', 'id': 28},
+            {'name': 'Anime & Animation', 'type': 'tv', 'id': 16},
+            {'name': 'Comedy Hits', 'type': 'movie', 'id': 35},
+            {'name': 'Crime & Mystery', 'type': 'tv', 'id': 80},
+            {'name': 'Critically Acclaimed', 'type': 'movie', 'id': 18},
+            {'name': 'Documentaries', 'type': 'movie', 'id': 99},
+            {'name': 'Horror & Paranormal', 'type': 'movie', 'id': 27},
+            {'name': 'K-Drama & Asian Series', 'type': 'tv', 'id': 10759},
+            {'name': 'Romance & Heartfelt', 'type': 'movie', 'id': 10749},
+            {'name': 'Sci-Fi & Fantasy', 'type': 'movie', 'id': 878},
+            {'name': 'Thrillers & Mystery', 'type': 'movie', 'id': 53},
+            {'name': 'Family & Kids', 'type': 'movie', 'id': 10751},
+          ];
 
     showModalBottomSheet(
       context: context,
@@ -119,41 +164,66 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final downloadProvider = context.watch<DownloadProvider>();
+    final completedDownloads = downloadProvider.completedItems;
+    final profileProv = context.watch<ProfileProvider>();
+    final activeProfile = profileProv.activeProfile;
+    final isKids = activeProfile.isKids;
+
+    if (_lastProfileId != activeProfile.id) {
+      _lastProfileId = activeProfile.id;
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) {
+          final historyProv = context.read<HistoryProvider>();
+          final watchedIds = historyProv.history.map((h) => h.id).toList();
+          final latest = historyProv.history.isNotEmpty ? historyProv.history.first : null;
+
+          final mediaProv = context.read<MediaProvider>();
+          mediaProv.fetchHomeData(profile: activeProfile);
+          mediaProv.fetchPersonalizedForProfile(
+            activeProfile,
+            watchedIds: watchedIds,
+            latestWatchedId: latest?.id,
+            latestWatchedTitle: latest?.title,
+            latestWatchedType: latest?.mediaType,
+          );
+        }
+      });
+    }
+
     return Consumer<MediaProvider>(
       builder: (context, mediaProvider, child) {
-        if (mediaProvider.isLoadingHome && mediaProvider.trending.isEmpty) {
+        final isOffline = _isOffline || (mediaProvider.error != null && mediaProvider.trending.isEmpty);
+
+        if (mediaProvider.isLoadingHome && mediaProvider.trending.isEmpty && !isOffline) {
           return const Center(
             child: CircularProgressIndicator(color: AppTheme.primaryRed),
           );
         }
 
-        if (mediaProvider.error != null && mediaProvider.trending.isEmpty) {
-          return Center(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Icon(Icons.wifi_off, color: AppTheme.primaryRed, size: 48),
-                const SizedBox(height: 16),
-                const Text('Failed to load content', style: TextStyle(color: Colors.white)),
-                const SizedBox(height: 12),
-                ElevatedButton(
-                  onPressed: () => mediaProvider.fetchHomeData(),
-                  style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryRed),
-                  child: const Text('Try Again'),
-                ),
-              ],
-            ),
-          );
+        if (isOffline && mediaProvider.trending.isEmpty) {
+          return _buildOfflineView(context, completedDownloads, mediaProvider);
         }
 
         return RefreshIndicator(
           color: AppTheme.primaryRed,
           backgroundColor: AppTheme.surfaceVariant,
           onRefresh: () async {
-            final profileProv = context.read<ProfileProvider>();
+            _checkConnectivity();
+            final historyProv = context.read<HistoryProvider>();
+            final watchedIds = historyProv.history.map((h) => h.id).toList();
+            final latest = historyProv.history.isNotEmpty ? historyProv.history.first : null;
+
             await Future.wait([
-              mediaProvider.fetchHomeData(),
-              mediaProvider.fetchPersonalizedForProfile(profileProv.activeProfile, force: true),
+              mediaProvider.fetchHomeData(profile: activeProfile),
+              mediaProvider.fetchPersonalizedForProfile(
+                activeProfile,
+                watchedIds: watchedIds,
+                latestWatchedId: latest?.id,
+                latestWatchedTitle: latest?.title,
+                latestWatchedType: latest?.mediaType,
+                force: true,
+              ),
             ]);
           },
           child: SingleChildScrollView(
@@ -178,7 +248,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       _buildFilterChip('Movies'),
                       const SizedBox(width: 8),
                       GestureDetector(
-                        onTap: () => _showCategoriesPicker(context, mediaProvider),
+                        onTap: () => _showCategoriesPicker(context, mediaProvider, isKids: isKids),
                         child: Container(
                           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
                           decoration: BoxDecoration(
@@ -207,133 +277,257 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ),
 
-                // 2. Hero Banner (Spotlight)
-                if (mediaProvider.trending.isNotEmpty && _selectedCategoryFilter == 'All')
-                  HeroBanner(items: mediaProvider.trending)
-                else if (mediaProvider.trendingTV.isNotEmpty && _selectedCategoryFilter == 'TV Shows')
-                  HeroBanner(items: mediaProvider.trendingTV)
-                else if (mediaProvider.popularMovies.isNotEmpty && _selectedCategoryFilter == 'Movies')
-                  HeroBanner(items: mediaProvider.popularMovies),
+                // Offline Notice Banner if cached feed is active but network disconnected
+                if (_isOffline && completedDownloads.isNotEmpty)
+                  Container(
+                    margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF1E1E28),
+                      borderRadius: BorderRadius.circular(10),
+                      border: Border.all(color: AppTheme.primaryRed.withValues(alpha: 0.4)),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.wifi_off_rounded, color: AppTheme.primaryRed, size: 20),
+                        const SizedBox(width: 10),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              const Text(
+                                "You're currently offline",
+                                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 12),
+                              ),
+                              Text(
+                                "Watch ${completedDownloads.length} downloaded title${completedDownloads.length > 1 ? 's' : ''} without Wi-Fi",
+                                style: const TextStyle(color: Colors.white70, fontSize: 11),
+                              ),
+                            ],
+                          ),
+                        ),
+                        TextButton(
+                          onPressed: () => Navigator.push(
+                            context,
+                            MaterialPageRoute(builder: (_) => const DownloadsScreen()),
+                          ),
+                          style: TextButton.styleFrom(visualDensity: VisualDensity.compact),
+                          child: const Text(
+                            'Watch Downloads',
+                            style: TextStyle(color: AppTheme.primaryRed, fontWeight: FontWeight.bold, fontSize: 12),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
 
-                const SizedBox(height: 6),
+                if (isKids) ...[
+                  // ==========================================
+                  // KIDS PROFILE: 100% G/PG SAFE RAILS
+                  // ==========================================
+                  if (mediaProvider.kidsAnimated.isNotEmpty)
+                    HeroBanner(items: mediaProvider.kidsAnimated)
+                  else if (mediaProvider.trending.isNotEmpty)
+                    HeroBanner(items: mediaProvider.trending),
 
-                // 3. Continue Watching (isolated per active profile!)
-                const ContinueWatchingRow(),
+                  const SizedBox(height: 6),
 
-                // 3.5. Personalized Recommendations Curated For Active Profile
-                if (mediaProvider.personalizedSections.isNotEmpty) ...[
-                  for (final sec in mediaProvider.personalizedSections)
-                    if (_selectedCategoryFilter == 'All' ||
-                        (_selectedCategoryFilter == 'TV Shows' && sec.forceType == 'tv') ||
-                        (_selectedCategoryFilter == 'Movies' && sec.forceType == 'movie'))
-                      MediaRow(
-                        title: sec.title,
-                        items: sec.items,
-                        forceType: sec.forceType,
-                      ),
-                ],
+                  const ContinueWatchingRow(),
 
-                // 4. Content Sections based on category filter
-                if (_selectedCategoryFilter == 'All' || _selectedCategoryFilter == 'TV Shows') ...[
-                  if (_selectedCategoryFilter == 'All')
-                    MediaRow(
-                      title: 'Trending Now',
-                      items: mediaProvider.trending.skip(1).toList(),
+                  if (mediaProvider.kidsAnimated.isNotEmpty)
+                    Top10Row(
+                      title: 'Top 10 Kids Movies Today',
+                      items: mediaProvider.kidsAnimated,
+                      forceType: 'movie',
                     ),
 
-                  Top10Row(
-                    title: 'Top 10 TV Shows Today',
-                    items: mediaProvider.popularTV,
-                    forceType: 'tv',
-                  ),
+                  if (mediaProvider.kidsCartoons.isNotEmpty)
+                    MediaRow(
+                      title: 'Cartoons & Fun TV Series',
+                      items: mediaProvider.kidsCartoons,
+                      forceType: 'tv',
+                    ),
 
-                  MediaRow(
-                    title: 'Binge-Worthy TV Series',
-                    items: mediaProvider.trendingTV,
-                    forceType: 'tv',
-                  ),
+                  if (mediaProvider.kidsFamily.isNotEmpty)
+                    MediaRow(
+                      title: 'Family Movie Night',
+                      items: mediaProvider.kidsFamily,
+                      forceType: 'movie',
+                    ),
 
-                  MediaRow(
-                    title: 'Popular Shows on Voidflix',
-                    items: mediaProvider.popularTV,
-                    forceType: 'tv',
-                  ),
+                  if (mediaProvider.comedyMovies.isNotEmpty)
+                    MediaRow(
+                      title: 'Laughs & Joyful Adventures',
+                      items: mediaProvider.comedyMovies,
+                      forceType: 'movie',
+                    ),
 
-                  MediaRow(
-                    title: 'Japanese Anime Spotlight',
-                    items: mediaProvider.anime,
-                    forceType: 'tv',
-                  ),
+                  if (mediaProvider.anime.isNotEmpty)
+                    MediaRow(
+                      title: 'Kids Anime & Animation Favorites',
+                      items: mediaProvider.anime,
+                      forceType: 'tv',
+                    ),
+                ] else ...[
+                  // ==========================================
+                  // STANDARD PROFILE: FULL RAILS & RECOMMENDATIONS
+                  // ==========================================
+                  if (mediaProvider.trending.isNotEmpty && _selectedCategoryFilter == 'All')
+                    HeroBanner(items: mediaProvider.trending)
+                  else if (mediaProvider.trendingTV.isNotEmpty && _selectedCategoryFilter == 'TV Shows')
+                    HeroBanner(items: mediaProvider.trendingTV)
+                  else if (mediaProvider.popularMovies.isNotEmpty && _selectedCategoryFilter == 'Movies')
+                    HeroBanner(items: mediaProvider.popularMovies),
 
-                  MediaRow(
-                    title: 'Spotlight K-Dramas & Asian Series',
-                    items: mediaProvider.asianDrama,
-                    forceType: 'tv',
-                  ),
+                  const SizedBox(height: 6),
 
-                  MediaRow(
-                    title: 'Highest Rated TV Masterpieces',
-                    items: mediaProvider.topRatedTV,
-                    forceType: 'tv',
-                  ),
-                ],
+                  // Continue Watching (isolated per active profile!)
+                  const ContinueWatchingRow(),
 
-                if (_selectedCategoryFilter == 'All' || _selectedCategoryFilter == 'Movies') ...[
-                  Top10Row(
-                    title: 'Top 10 Movies Today',
-                    items: mediaProvider.popularMovies,
-                    forceType: 'movie',
-                  ),
+                  // Personalized Recommendations Curated For Active Profile
+                  if (mediaProvider.personalizedSections.isNotEmpty) ...[
+                    for (final sec in mediaProvider.personalizedSections)
+                      if (_selectedCategoryFilter == 'All' ||
+                          (_selectedCategoryFilter == 'TV Shows' && sec.forceType == 'tv') ||
+                          (_selectedCategoryFilter == 'Movies' && sec.forceType == 'movie'))
+                        MediaRow(
+                          title: sec.title,
+                          items: sec.items,
+                          forceType: sec.forceType,
+                        ),
+                  ],
 
-                  MediaRow(
-                    title: 'Blockbuster Action & Adventure',
-                    items: mediaProvider.actionMovies.isNotEmpty
-                        ? mediaProvider.actionMovies
-                        : mediaProvider.popularMovies,
-                    forceType: 'movie',
-                  ),
+                  // "Because You Watched" Row
+                  if (mediaProvider.becauseYouWatched.isNotEmpty && (_selectedCategoryFilter == 'All' || _selectedCategoryFilter == 'Movies'))
+                    MediaRow(
+                      title: 'Because You Watched ${mediaProvider.becauseYouWatchedTitle}',
+                      items: mediaProvider.becauseYouWatched,
+                    ),
 
-                  MediaRow(
-                    title: 'Laugh-Out-Loud Comedies',
-                    items: mediaProvider.comedyMovies,
-                    forceType: 'movie',
-                  ),
+                  // TV Shows Category Sections
+                  if (_selectedCategoryFilter == 'All' || _selectedCategoryFilter == 'TV Shows') ...[
+                    if (_selectedCategoryFilter == 'All')
+                      MediaRow(
+                        title: 'Trending Now',
+                        items: mediaProvider.trending.skip(1).toList(),
+                      ),
 
-                  MediaRow(
-                    title: 'Sci-Fi & Fantasy Epics',
-                    items: mediaProvider.sciFiMovies,
-                    forceType: 'movie',
-                  ),
+                    Top10Row(
+                      title: 'Top 10 TV Shows Today',
+                      items: mediaProvider.popularTV,
+                      forceType: 'tv',
+                    ),
 
-                  MediaRow(
-                    title: 'Chilling Horror & Paranormal',
-                    items: mediaProvider.horrorMovies,
-                    forceType: 'movie',
-                  ),
+                    MediaRow(
+                      title: 'Binge-Worthy TV Series',
+                      items: mediaProvider.trendingTV,
+                      forceType: 'tv',
+                    ),
 
-                  MediaRow(
-                    title: 'Edge-of-Your-Seat Thrillers',
-                    items: mediaProvider.thrillerMovies,
-                    forceType: 'movie',
-                  ),
+                    MediaRow(
+                      title: 'Popular Shows on Voidflix',
+                      items: mediaProvider.popularTV,
+                      forceType: 'tv',
+                    ),
 
-                  MediaRow(
-                    title: 'Critically Acclaimed Movies',
-                    items: mediaProvider.topRatedMovies,
-                    forceType: 'movie',
-                  ),
+                    if (mediaProvider.crimeTV.isNotEmpty)
+                      MediaRow(
+                        title: 'Crime & Investigative TV Series',
+                        items: mediaProvider.crimeTV,
+                        forceType: 'tv',
+                      ),
 
-                  MediaRow(
-                    title: 'Fascinating Documentaries',
-                    items: mediaProvider.documentaries,
-                    forceType: 'movie',
-                  ),
+                    MediaRow(
+                      title: 'Japanese Anime Spotlight',
+                      items: mediaProvider.anime,
+                      forceType: 'tv',
+                    ),
 
-                  MediaRow(
-                    title: 'Coming Soon to Voidflix',
-                    items: mediaProvider.upcomingMovies,
-                    forceType: 'movie',
-                  ),
+                    MediaRow(
+                      title: 'Spotlight K-Dramas & Asian Series',
+                      items: mediaProvider.asianDrama,
+                      forceType: 'tv',
+                    ),
+
+                    MediaRow(
+                      title: 'Highest Rated TV Masterpieces',
+                      items: mediaProvider.topRatedTV,
+                      forceType: 'tv',
+                    ),
+                  ],
+
+                  // Movies Category Sections
+                  if (_selectedCategoryFilter == 'All' || _selectedCategoryFilter == 'Movies') ...[
+                    Top10Row(
+                      title: 'Top 10 Movies Today',
+                      items: mediaProvider.popularMovies,
+                      forceType: 'movie',
+                    ),
+
+                    if (mediaProvider.nowPlayingMovies.isNotEmpty)
+                      MediaRow(
+                        title: 'Now Playing in Theaters',
+                        items: mediaProvider.nowPlayingMovies,
+                        forceType: 'movie',
+                      ),
+
+                    MediaRow(
+                      title: 'Blockbuster Action & Adventure',
+                      items: mediaProvider.actionMovies.isNotEmpty
+                          ? mediaProvider.actionMovies
+                          : mediaProvider.popularMovies,
+                      forceType: 'movie',
+                    ),
+
+                    if (mediaProvider.romanceMovies.isNotEmpty)
+                      MediaRow(
+                        title: 'Romance & Heartfelt Stories',
+                        items: mediaProvider.romanceMovies,
+                        forceType: 'movie',
+                      ),
+
+                    MediaRow(
+                      title: 'Laugh-Out-Loud Comedies',
+                      items: mediaProvider.comedyMovies,
+                      forceType: 'movie',
+                    ),
+
+                    MediaRow(
+                      title: 'Sci-Fi & Fantasy Epics',
+                      items: mediaProvider.sciFiMovies,
+                      forceType: 'movie',
+                    ),
+
+                    MediaRow(
+                      title: 'Chilling Horror & Paranormal',
+                      items: mediaProvider.horrorMovies,
+                      forceType: 'movie',
+                    ),
+
+                    MediaRow(
+                      title: 'Edge-of-Your-Seat Thrillers',
+                      items: mediaProvider.thrillerMovies,
+                      forceType: 'movie',
+                    ),
+
+                    MediaRow(
+                      title: 'Critically Acclaimed Movies',
+                      items: mediaProvider.topRatedMovies,
+                      forceType: 'movie',
+                    ),
+
+                    MediaRow(
+                      title: 'Fascinating Documentaries',
+                      items: mediaProvider.documentaries,
+                      forceType: 'movie',
+                    ),
+
+                    MediaRow(
+                      title: 'Coming Soon to Voidflix',
+                      items: mediaProvider.upcomingMovies,
+                      forceType: 'movie',
+                    ),
+                  ],
                 ],
 
                 const SizedBox(height: 96),
@@ -367,6 +561,223 @@ class _HomeScreenState extends State<HomeScreen> {
             color: isSelected ? Colors.black : Colors.white,
             fontSize: 13,
             fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildOfflineView(BuildContext context, List<DownloadedItem> downloads, MediaProvider mediaProvider) {
+    if (downloads.isNotEmpty) {
+      return Scaffold(
+        backgroundColor: Colors.black,
+        appBar: AppBar(
+          backgroundColor: Colors.black,
+          elevation: 0,
+          title: const Text(
+            'Voidflix',
+            style: TextStyle(
+              color: AppTheme.primaryRed,
+              fontWeight: FontWeight.bold,
+              fontSize: 22,
+              letterSpacing: 1.5,
+            ),
+          ),
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.download_rounded, color: Colors.white),
+              onPressed: () => Navigator.push(
+                context,
+                MaterialPageRoute(builder: (_) => const DownloadsScreen()),
+              ),
+            ),
+          ],
+        ),
+        body: SafeArea(
+          child: ListView(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+            children: [
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  gradient: LinearGradient(
+                    colors: [
+                      AppTheme.primaryRed.withValues(alpha: 0.18),
+                      Colors.white.withValues(alpha: 0.04),
+                    ],
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                  ),
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(color: AppTheme.primaryRed.withValues(alpha: 0.3)),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Container(
+                          padding: const EdgeInsets.all(8),
+                          decoration: BoxDecoration(
+                            color: AppTheme.primaryRed.withValues(alpha: 0.25),
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(Icons.wifi_off_rounded, color: AppTheme.primaryRed, size: 24),
+                        ),
+                        const SizedBox(width: 12),
+                        const Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                "You're Offline",
+                                style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.bold),
+                              ),
+                              SizedBox(height: 2),
+                              Text(
+                                "Watch your downloaded movies and series without Wi-Fi",
+                                style: TextStyle(color: Colors.white70, fontSize: 12),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+                    ElevatedButton.icon(
+                      onPressed: () => Navigator.push(
+                        context,
+                        MaterialPageRoute(builder: (_) => const DownloadsScreen()),
+                      ),
+                      icon: const Icon(Icons.download_done_rounded, size: 18, color: Colors.white),
+                      label: const Text('Go to All Downloads', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppTheme.primaryRed,
+                        minimumSize: const Size(double.infinity, 42),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 20),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  const Text(
+                    'Available Offline',
+                    style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                  ),
+                  Text(
+                    '${downloads.length} title${downloads.length > 1 ? 's' : ''}',
+                    style: const TextStyle(color: Colors.white38, fontSize: 13),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              ...downloads.map((item) {
+                final cleanTitle = DownloadsScreen.sanitizeTitle(item.title);
+                final episodeInfo = item.mediaType == 'tv'
+                    ? 'S${item.season}E${item.episode}${item.episodeTitle != null ? ' - ${item.episodeTitle}' : ''}'
+                    : (item.quality.isNotEmpty ? '${item.quality} • Movie' : 'Movie');
+                final hasThumb = item.localThumbnailPath != null && File(item.localThumbnailPath!).existsSync();
+
+                return Container(
+                  margin: const EdgeInsets.only(bottom: 10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF14141E),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Colors.white12),
+                  ),
+                  child: ListTile(
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    leading: ClipRRect(
+                      borderRadius: BorderRadius.circular(6),
+                      child: SizedBox(
+                        width: 70,
+                        height: 48,
+                        child: hasThumb
+                            ? Image.file(File(item.localThumbnailPath!), fit: BoxFit.cover)
+                            : (item.posterPath != null
+                                ? Image.network(
+                                    'https://image.tmdb.org/t/p/w200${item.posterPath}',
+                                    fit: BoxFit.cover,
+                                    errorBuilder: (_, __, ___) => const Icon(Icons.movie, color: Colors.white30),
+                                  )
+                                : const Icon(Icons.movie, color: Colors.white30)),
+                      ),
+                    ),
+                    title: Text(
+                      cleanTitle,
+                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 14),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    subtitle: Text(
+                      episodeInfo,
+                      style: const TextStyle(color: Colors.white60, fontSize: 12),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    trailing: IconButton(
+                      icon: const Icon(Icons.play_circle_fill, color: AppTheme.primaryRed, size: 34),
+                      onPressed: () => _playOffline(item),
+                    ),
+                    onTap: () => _playOffline(item),
+                  ),
+                );
+              }),
+              const SizedBox(height: 20),
+              Center(
+                child: TextButton.icon(
+                  onPressed: () {
+                    _checkConnectivity();
+                    mediaProvider.fetchHomeData();
+                  },
+                  icon: const Icon(Icons.refresh, color: Colors.white60, size: 18),
+                  label: const Text('Check Connection Again', style: TextStyle(color: Colors.white60)),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return Scaffold(
+      backgroundColor: Colors.black,
+      body: Center(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.wifi_off_rounded, color: AppTheme.primaryRed, size: 52),
+              const SizedBox(height: 16),
+              const Text(
+                "You're Offline",
+                style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Connect to the internet or Wi-Fi to browse movies and TV shows, or download titles beforehand to watch offline.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.white60, fontSize: 13, height: 1.4),
+              ),
+              const SizedBox(height: 20),
+              ElevatedButton(
+                onPressed: () {
+                  _checkConnectivity();
+                  mediaProvider.fetchHomeData();
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: AppTheme.primaryRed,
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                ),
+                child: const Text('Try Again', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+              ),
+            ],
           ),
         ),
       ),

@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
@@ -16,6 +18,11 @@ class SubtitleCue {
   bool matches(int positionMs) {
     return positionMs >= startMs && positionMs <= endMs;
   }
+
+  /// Whether the text contains Right-To-Left characters (Urdu, Arabic, Persian, Hebrew)
+  bool get isRtl {
+    return RegExp(r'[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF\u0590-\u05FF]').hasMatch(text);
+  }
 }
 
 class SubtitleTrack {
@@ -29,6 +36,18 @@ class SubtitleTrack {
     required this.url,
   });
 
+  Map<String, dynamic> toJson() => {
+        'label': label,
+        'language': language,
+        'url': url,
+      };
+
+  factory SubtitleTrack.fromJson(Map<String, dynamic> json) => SubtitleTrack(
+        label: (json['label'] as String?) ?? 'Sub',
+        language: (json['language'] as String?) ?? 'en',
+        url: (json['url'] as String?) ?? '',
+      );
+
   @override
   String toString() => 'SubtitleTrack($label - $language)';
 }
@@ -36,19 +55,34 @@ class SubtitleTrack {
 class SubtitleService {
   final Map<String, List<SubtitleCue>> _cache = {};
 
-  /// Loads and parses subtitle cues from a remote URL (.srt or .vtt).
+  /// Loads and parses subtitle cues from a remote URL or local file path (.srt or .vtt).
   Future<List<SubtitleCue>> loadTrack(String url) async {
     if (_cache.containsKey(url)) {
       return _cache[url]!;
     }
 
     try {
-      final res = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 8));
-      if (res.statusCode != 200) return [];
+      if (url.startsWith('http://') || url.startsWith('https://')) {
+        final res = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 8));
+        if (res.statusCode != 200) return [];
 
-      final cues = parseSubtitles(res.body);
-      _cache[url] = cues;
-      return cues;
+        // Always decode response bytes using UTF-8 to prevent character corruption
+        // in languages like Urdu, Hindi, Nepali, etc.
+        final text = utf8.decode(res.bodyBytes, allowMalformed: true);
+        final cues = parseSubtitles(text);
+        _cache[url] = cues;
+        return cues;
+      } else {
+        final path = url.startsWith('file://') ? url.replaceFirst('file://', '') : url;
+        final file = File(path);
+        if (await file.exists()) {
+          final content = await file.readAsString(encoding: utf8);
+          final cues = parseSubtitles(content);
+          _cache[url] = cues;
+          return cues;
+        }
+      }
+      return [];
     } catch (e) {
       debugPrint('Failed to load subtitle track ($url): $e');
       return [];
@@ -118,13 +152,58 @@ class SubtitleService {
     return (h * 3600000) + (m * 60000) + (s * 1000) + ms;
   }
 
-  static String _cleanSubtitleText(String text) {
-    return text
-        // Remove HTML-like tags: <i>, </i>, <b>, <font color="...">, etc.
-        .replaceAll(RegExp(r'<[^>]+>'), '')
-        // Remove ASS/SSA style tags: {\an8}, {\pos(x,y)}, etc.
-        .replaceAll(RegExp(r'\{[^}]+\}'), '')
-        .trim();
+  /// Cleans subtitle lines by removing WebVTT/HTML/SSA formatting and unescaping
+  /// all HTML numeric entities, hex entities, and unicode characters so languages like
+  /// Urdu, Hindi, Nepali, etc. compile and render into pure native text.
+  static String _cleanSubtitleText(String raw) {
+    String text = raw;
+
+    // 1. Remove WebVTT intra-line timestamps e.g. <00:01:23.456>
+    text = text.replaceAll(RegExp(r'<\d{2}:\d{2}:\d{2}[.,]\d{3}>'), '');
+
+    // 2. Remove HTML-like tags: <i>, </i>, <b>, <font color="...">, <v Speaker>, <c.yellow>
+    text = text.replaceAll(RegExp(r'<[^>]+>'), '');
+
+    // 3. Remove ASS/SSA style tags: {\an8}, {\pos(x,y)}, etc.
+    text = text.replaceAll(RegExp(r'\{[^}]+\}'), '');
+
+    // 4. Decode hex entities: &#x0627; or &#X627; (Urdu/Arabic/Devanagari characters)
+    text = text.replaceAllMapped(RegExp(r'&#[xX]([0-9a-fA-F]+);'), (match) {
+      final hex = match.group(1);
+      if (hex == null) return '';
+      final code = int.tryParse(hex, radix: 16);
+      return code != null ? String.fromCharCode(code) : match.group(0)!;
+    });
+
+    // 5. Decode decimal entities: &#1575; or &#2344;
+    text = text.replaceAllMapped(RegExp(r'&#(\d+);'), (match) {
+      final dec = match.group(1);
+      if (dec == null) return '';
+      final code = int.tryParse(dec);
+      return code != null ? String.fromCharCode(code) : match.group(0)!;
+    });
+
+    // 6. Decode Unicode escape sequences: \u0627 or \u0915
+    text = text.replaceAllMapped(RegExp(r'\\u([0-9a-fA-F]{4})'), (match) {
+      final hex = match.group(1);
+      if (hex == null) return '';
+      final code = int.tryParse(hex, radix: 16);
+      return code != null ? String.fromCharCode(code) : match.group(0)!;
+    });
+
+    // 7. Decode common named HTML entities
+    text = text
+        .replaceAll('&amp;', '&')
+        .replaceAll('&quot;', '"')
+        .replaceAll('&apos;', "'")
+        .replaceAll('&#39;', "'")
+        .replaceAll('&lt;', '<')
+        .replaceAll('&gt;', '>')
+        .replaceAll('&nbsp;', ' ')
+        .replaceAll('&lrm;', '')
+        .replaceAll('&rlm;', '');
+
+    return text.trim();
   }
 
   /// Returns the text for the cue matching the given playback position.

@@ -9,6 +9,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 
 import '../core/services/stream_extractor.dart';
+import '../core/services/subtitle_service.dart';
+import '../core/utils/language_utils.dart';
 import '../models/downloaded_item.dart';
 
 class _DownloadCandidate {
@@ -36,6 +38,13 @@ class DownloadProvider extends ChangeNotifier {
 
   List<DownloadedItem> get completedItems =>
       _items.where((i) => i.status == 'completed').toList();
+
+  /// Sanitizes title by removing any attached season/episode tags (e.g. ": S1E2 ...")
+  static String sanitizeTitle(String rawTitle) {
+    if (rawTitle.isEmpty) return rawTitle;
+    final regex = RegExp(r':\s*S\d+.*$', caseSensitive: false);
+    return rawTitle.replaceAll(regex, '').trim();
+  }
 
   static String generateId(String mediaType, int mediaId, {int season = 1, int episode = 1}) {
     if (mediaType == 'tv') {
@@ -77,14 +86,25 @@ class DownloadProvider extends ChangeNotifier {
         _items.clear();
         for (final item in list) {
           final d = DownloadedItem.fromJson(item as Map<String, dynamic>);
-          final file = File(d.localFilePath);
-          final partFile = File('${d.localFilePath}.part');
-          final segDir = Directory('${d.localFilePath}.segments');
+          final cleanTitle = sanitizeTitle(d.title);
+          var current = cleanTitle != d.title ? d.copyWith(title: cleanTitle) : d;
+
+          // Attach offline subtitle if available on disk but not yet linked
+          if (current.localSubtitlePath == null || current.localSubtitlePath!.isEmpty) {
+            final subFile = File('${current.localFilePath.replaceAll('.mp4', '')}_sub_en.vtt');
+            if (subFile.existsSync()) {
+              current = current.copyWith(localSubtitlePath: subFile.path);
+            }
+          }
+
+          final file = File(current.localFilePath);
+          final partFile = File('${current.localFilePath}.part');
+          final segDir = Directory('${current.localFilePath}.segments');
 
           // Verify completed items actually exist and are non-empty (> 100KB)
-          if (d.status == 'completed') {
+          if (current.status == 'completed') {
             if (file.existsSync() && file.lengthSync() > 100000) {
-              _items.add(d);
+              _items.add(current);
             } else {
               // File was missing or corrupted while app was closed
               if (file.existsSync()) {
@@ -92,21 +112,21 @@ class DownloadProvider extends ChangeNotifier {
                   file.deleteSync();
                 } catch (_) {}
               }
-              _items.add(d.copyWith(status: 'failed', progress: 0.0));
+              _items.add(current.copyWith(status: 'failed', progress: 0.0));
             }
-          } else if (d.status == 'downloading') {
+          } else if (current.status == 'downloading') {
             // App was closed or killed while download was in progress.
             // Check if we have partial downloaded content to resume from.
             final hasPart = partFile.existsSync() && partFile.lengthSync() > 0;
             final hasSegs = segDir.existsSync() && segDir.listSync().isNotEmpty;
 
             if (hasPart || hasSegs) {
-              _items.add(d.copyWith(status: 'paused'));
+              _items.add(current.copyWith(status: 'paused'));
             } else {
-              _items.add(d.copyWith(status: 'failed', progress: 0.0));
+              _items.add(current.copyWith(status: 'failed', progress: 0.0));
             }
           } else {
-            _items.add(d);
+            _items.add(current);
           }
         }
         notifyListeners();
@@ -176,6 +196,58 @@ class DownloadProvider extends ChangeNotifier {
     return false;
   }
 
+  /// Retrieves user preferred audio and subtitle languages from active profile settings
+  Future<List<String>> _getPreferredLanguages() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final activeId = prefs.getString('voidflix_active_profile');
+      if (activeId != null) {
+        final audioLangPref = prefs.getString('profile_${activeId}_audio_lang');
+        final profilesListStr = prefs.getString('voidflix_profiles_list');
+        final langs = <String>[];
+        if (audioLangPref != null && audioLangPref.isNotEmpty) {
+          final parts = audioLangPref
+              .split(',')
+              .map((p) => p.trim())
+              .where((p) => p.isNotEmpty && p.toLowerCase() != 'original' && !p.toLowerCase().contains('all languages'));
+          langs.addAll(parts);
+        }
+        if (profilesListStr != null && profilesListStr.isNotEmpty) {
+          final list = jsonDecode(profilesListStr) as List<dynamic>;
+          for (final item in list) {
+            if (item is Map<String, dynamic> && item['id'] == activeId) {
+              if (item['preferredAudioLang'] != null) langs.add(item['preferredAudioLang'] as String);
+              if (item['preferredSubtitleLang'] != null) langs.add(item['preferredSubtitleLang'] as String);
+              if (item['preferredLanguages'] is List) {
+                langs.addAll((item['preferredLanguages'] as List).map((e) => e.toString()));
+              }
+              break;
+            }
+          }
+        }
+        return langs.toSet().toList();
+      }
+    } catch (_) {}
+    return const [];
+  }
+
+  /// Calculates language priority score:
+  /// - User profile selected language: 100 - index
+  /// - English fallback: 50
+  /// - Any other language: 10
+  int _getLangScore(String? lang, List<String> preferredLangs) {
+    if (lang == null || lang.isEmpty) return 0;
+    for (int i = 0; i < preferredLangs.length; i++) {
+      if (LanguageUtils.matches(lang, preferredLangs[i])) {
+        return 100 - i;
+      }
+    }
+    if (LanguageUtils.matches(lang, 'en') || LanguageUtils.matches(lang, 'english')) {
+      return 50;
+    }
+    return 10;
+  }
+
   /// Downloads and caches the thumbnail locally on disk for 100% offline access
   Future<String?> _downloadLocalThumbnail({
     required String id,
@@ -203,6 +275,105 @@ class DownloadProvider extends ChangeNotifier {
     return null;
   }
 
+  /// Downloads and caches subtitle files (.vtt / .srt) locally on disk for 100% offline access
+  Future<String?> _downloadLocalSubtitle({
+    required String id,
+    required String mediaType,
+    required int mediaId,
+    required int season,
+    required int episode,
+    required Directory downloadDir,
+    required List<SubtitleTrack> availableSubs,
+  }) async {
+    final List<SubtitleTrack> subsToProcess = [...availableSubs];
+
+    // If candidate streams did not have subtitles attached, query Voidflix extract endpoint
+    if (subsToProcess.isEmpty) {
+      try {
+        final uri = Uri.parse(
+          'https://voidflix.org/api/public/extract?type=$mediaType&id=$mediaId&s=$season&e=$episode',
+        );
+        final res = await http.get(uri).timeout(const Duration(seconds: 6));
+        if (res.statusCode == 200) {
+          final data = jsonDecode(res.body);
+          if (data is Map<String, dynamic> && data['subs'] is List) {
+            for (final s in data['subs']) {
+              if (s is Map<String, dynamic> && s['url'] != null) {
+                final subUrl = s['url'] as String;
+                final resolvedUrl = subUrl.startsWith('http')
+                    ? subUrl
+                    : 'https://voidflix.org$subUrl';
+                subsToProcess.add(SubtitleTrack(
+                  label: (s['label'] as String?) ?? 'Sub',
+                  language: (s['lang'] as String?) ?? 'en',
+                  url: resolvedUrl,
+                ));
+              }
+            }
+          }
+        }
+      } catch (_) {}
+    }
+
+    if (subsToProcess.isEmpty) return null;
+
+    final preferredLangs = await _getPreferredLanguages();
+
+    String? primarySubPath;
+    final downloadedTracksMeta = <Map<String, String>>[];
+
+    // Sort tracks prioritizing user profile language, then English, then any
+    final sortedTracks = [...subsToProcess]..sort((a, b) {
+      final aScore = _getLangScore(a.language.isNotEmpty ? a.language : a.label, preferredLangs);
+      final bScore = _getLangScore(b.language.isNotEmpty ? b.language : b.label, preferredLangs);
+      return bScore.compareTo(aScore);
+    });
+
+    final targetTracks = sortedTracks.take(4).toList();
+
+    for (int i = 0; i < targetTracks.length; i++) {
+      final track = targetTracks[i];
+      final lang = track.language.isNotEmpty
+          ? track.language.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '')
+          : 'sub$i';
+      final file = File('${downloadDir.path}/${id}_sub_$lang.vtt');
+
+      if (file.existsSync() && file.lengthSync() > 50) {
+        downloadedTracksMeta.add({
+          'label': track.label,
+          'language': track.language,
+          'path': file.path,
+        });
+        primarySubPath ??= file.path;
+        continue;
+      }
+
+      try {
+        final res = await http.get(Uri.parse(track.url)).timeout(const Duration(seconds: 8));
+        if (res.statusCode == 200 && res.body.trim().isNotEmpty) {
+          await file.writeAsString(res.body, flush: true);
+          downloadedTracksMeta.add({
+            'label': track.label,
+            'language': track.language,
+            'path': file.path,
+          });
+          primarySubPath ??= file.path;
+        }
+      } catch (e) {
+        debugPrint('Failed to download subtitle track (${track.label}): $e');
+      }
+    }
+
+    if (downloadedTracksMeta.isNotEmpty) {
+      try {
+        final manifestFile = File('${downloadDir.path}/${id}_subs.json');
+        await manifestFile.writeAsString(jsonEncode(downloadedTracksMeta), flush: true);
+      } catch (_) {}
+    }
+
+    return primarySubPath;
+  }
+
   /// Resumes a paused or interrupted download from exactly where it stopped
   Future<void> resumeDownload(String id) async {
     final item = getItem(id);
@@ -211,7 +382,7 @@ class DownloadProvider extends ChangeNotifier {
 
     await startDownload(
       mediaId: item.mediaId,
-      title: item.title,
+      title: sanitizeTitle(item.title),
       mediaType: item.mediaType,
       season: item.season,
       episode: item.episode,
@@ -238,6 +409,7 @@ class DownloadProvider extends ChangeNotifier {
     String? stillPath,
     int runtime = 0,
   }) async {
+    final cleanTitle = sanitizeTitle(title);
     final id = generateId(mediaType, mediaId, season: season, episode: episode);
 
     if (isDownloading(id) || isDownloaded(id)) return;
@@ -259,11 +431,12 @@ class DownloadProvider extends ChangeNotifier {
         : 0.05;
 
     String? localThumb = existingItem?.localThumbnailPath;
+    String? localSub = existingItem?.localSubtitlePath;
 
     var item = DownloadedItem(
       id: id,
       mediaId: mediaId,
-      title: title,
+      title: cleanTitle,
       mediaType: mediaType,
       season: season,
       episode: episode,
@@ -275,6 +448,7 @@ class DownloadProvider extends ChangeNotifier {
       runtime: runtime > 0 ? runtime : (existingItem?.runtime ?? 0),
       localFilePath: targetPath,
       localThumbnailPath: localThumb,
+      localSubtitlePath: localSub,
       status: 'downloading',
       progress: initialProgress,
       downloadedAt: DateTime.now(),
@@ -310,7 +484,7 @@ class DownloadProvider extends ChangeNotifier {
 
     _updateSystemNotification(
       id: id.hashCode.abs(),
-      title: title,
+      title: cleanTitle,
       progress: (initialProgress * 100).toInt(),
       isDone: false,
     );
@@ -371,6 +545,17 @@ class DownloadProvider extends ChangeNotifier {
         season: season,
         episode: episode,
       );
+
+      // Prioritize streams matching user selected audio language
+      final profileLangs = await _getPreferredLanguages();
+      if (profileLangs.isNotEmpty) {
+        generalStreams.sort((a, b) {
+          final aScore = _getLangScore(a.language, profileLangs);
+          final bScore = _getLangScore(b.language, profileLangs);
+          return bScore.compareTo(aScore);
+        });
+      }
+
       for (final s in generalStreams) {
         for (final q in s.qualities) {
           candidates.add(_DownloadCandidate(
@@ -392,6 +577,39 @@ class DownloadProvider extends ChangeNotifier {
         throw Exception('No stream candidates available for offline download.');
       }
 
+      // Collect all available subtitles from extracted sources
+      final availableSubs = <SubtitleTrack>[];
+      if (voidflixStream != null && voidflixStream.subtitles.isNotEmpty) {
+        availableSubs.addAll(voidflixStream.subtitles);
+      }
+      for (final s in generalStreams) {
+        for (final sub in s.subtitles) {
+          if (!availableSubs.any((existing) => existing.url == sub.url)) {
+            availableSubs.add(sub);
+          }
+        }
+      }
+
+      // Download and cache offline subtitles in background
+      _downloadLocalSubtitle(
+        id: id,
+        mediaType: mediaType,
+        mediaId: mediaId,
+        season: season,
+        episode: episode,
+        downloadDir: downloadDir,
+        availableSubs: availableSubs,
+      ).then((savedSubPath) {
+        if (savedSubPath != null) {
+          final idx = _items.indexWhere((i) => i.id == id);
+          if (idx != -1) {
+            _items[idx] = _items[idx].copyWith(localSubtitlePath: savedSubPath);
+            notifyListeners();
+            _saveDownloads();
+          }
+        }
+      });
+
       // 3. Attempt download across candidates with resumption
       bool downloadSuccess = false;
       String chosenQuality = 'HD';
@@ -412,7 +630,7 @@ class DownloadProvider extends ChangeNotifier {
             partPath: partPath,
             segmentsDirPath: segmentsDirPath,
             downloadId: id,
-            title: title,
+            title: cleanTitle,
             onProgress: (p, bytes) {
               _updateProgress(id, p, bytes);
             },
@@ -424,7 +642,7 @@ class DownloadProvider extends ChangeNotifier {
             targetPath: targetPath,
             partPath: partPath,
             downloadId: id,
-            title: title,
+            title: cleanTitle,
             onProgress: (p, bytes) {
               _updateProgress(id, p, bytes);
             },
@@ -445,11 +663,15 @@ class DownloadProvider extends ChangeNotifier {
       final finalFile = File(targetPath);
       final finalSizeBytes = await finalFile.length();
 
+      final subFile = File('${downloadDir.path}/${id}_sub_en.vtt');
+      final finalSubPath = item.localSubtitlePath ?? (subFile.existsSync() ? subFile.path : null);
+
       item = item.copyWith(
         status: 'completed',
         progress: 1.0,
         fileSizeBytes: finalSizeBytes,
         quality: chosenQuality,
+        localSubtitlePath: finalSubPath,
       );
 
       final idx = _items.indexWhere((i) => i.id == id);
