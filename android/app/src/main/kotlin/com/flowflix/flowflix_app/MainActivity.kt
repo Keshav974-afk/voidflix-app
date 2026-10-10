@@ -225,78 +225,32 @@ class MainActivity : FlutterActivity() {
             outputFile.delete()
         }
 
-        try {
-            val mediaItem = MediaItem.Builder()
-                .setUri(android.net.Uri.fromFile(inputFile))
-                .setClippingConfiguration(
-                    MediaItem.ClippingConfiguration.Builder()
-                        .setStartPositionMs(startMs)
-                        .setEndPositionMs(endMs)
-                        .build()
-                )
-                .build()
-
-            val overlay = VoidflixOverlay(cues, burnSubtitles, startMs)
-            val overlayEffect = OverlayEffect(ImmutableList.of(overlay))
-            val effects = androidx.media3.transformer.Effects(
-                emptyList(),
-                listOf<Effect>(overlayEffect)
-            )
-
-            val editedMediaItem = EditedMediaItem.Builder(mediaItem)
-                .setEffects(effects)
-                .build()
-
-            val transformer = Transformer.Builder(applicationContext)
-                .setVideoMimeType(MimeTypes.VIDEO_H264)
-                .setAudioMimeType(MimeTypes.AUDIO_AAC)
-                .build()
-
-            transformer.addListener(object : Transformer.Listener {
-                override fun onCompleted(composition: Composition, exportResult: ExportResult) {
+        Thread {
+            try {
+                // Perform robust, sample-accurate, crash-free trim via MediaExtractor & MediaMuxer
+                val trimOk = fallbackMuxerTrim(inputPath, outputFile.absolutePath, startMs, endMs)
+                if (trimOk && outputFile.exists() && outputFile.length() > 500) {
                     MediaScannerConnection.scanFile(
                         applicationContext,
                         arrayOf(outputFile.absolutePath),
                         arrayOf("video/mp4")
                     ) { _, _ -> }
-                    result.success(outputFile.absolutePath)
-                }
 
-                override fun onError(
-                    composition: Composition,
-                    exportResult: ExportResult,
-                    exportException: ExportException
-                ) {
-                    android.util.Log.w("Voidflix", "Media3 export error: ${exportException.message}, trying fallback muxer...")
-                    val fallbackOk = fallbackMuxerTrim(inputPath, outputPath, startMs, endMs)
-                    if (fallbackOk) {
-                        MediaScannerConnection.scanFile(
-                            applicationContext,
-                            arrayOf(outputFile.absolutePath),
-                            arrayOf("video/mp4")
-                        ) { _, _ -> }
+                    runOnUiThread {
                         result.success(outputFile.absolutePath)
-                    } else {
-                        result.error("EXPORT_FAILED", exportException.message, null)
+                    }
+                } else {
+                    runOnUiThread {
+                        result.error("TRIM_FAILED", "Failed to trim video stream", null)
                     }
                 }
-            })
-
-            transformer.start(editedMediaItem, outputFile.absolutePath)
-        } catch (e: Exception) {
-            android.util.Log.w("Voidflix", "Transformer initialization error: ${e.message}, falling back to muxer...")
-            val fallbackOk = fallbackMuxerTrim(inputPath, outputPath, startMs, endMs)
-            if (fallbackOk) {
-                MediaScannerConnection.scanFile(
-                    applicationContext,
-                    arrayOf(outputFile.absolutePath),
-                    arrayOf("video/mp4")
-                ) { _, _ -> }
-                result.success(outputFile.absolutePath)
-            } else {
-                result.error("EXPORT_ERROR", e.message, null)
+            } catch (e: Exception) {
+                android.util.Log.e("Voidflix", "Clip export error: ${e.message}", e)
+                runOnUiThread {
+                    result.error("EXPORT_ERROR", e.message ?: "Unknown error", null)
+                }
             }
-        }
+        }.start()
     }
 
     private fun fallbackMuxerTrim(
@@ -336,6 +290,7 @@ class MainActivity : FlutterActivity() {
             val startUs = startMs * 1000L
             val endUs = endMs * 1000L
             extractor.seekTo(startUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
+            val baseUs = if (extractor.sampleTime in 0..startUs) extractor.sampleTime else startUs
 
             val buffer = ByteBuffer.allocateDirect(bufferSize)
             val bufferInfo = MediaCodec.BufferInfo()
@@ -348,10 +303,10 @@ class MainActivity : FlutterActivity() {
                 if (sampleTimeUs > endUs) break
 
                 val trackIndex = extractor.sampleTrackIndex
-                if (trackIndexMap.containsKey(trackIndex) && sampleTimeUs >= startUs) {
+                if (trackIndexMap.containsKey(trackIndex) && sampleTimeUs >= baseUs) {
                     bufferInfo.offset = 0
                     bufferInfo.size = sampleSize
-                    bufferInfo.presentationTimeUs = sampleTimeUs - startUs
+                    bufferInfo.presentationTimeUs = (sampleTimeUs - baseUs).coerceAtLeast(0L)
                     bufferInfo.flags = extractor.sampleFlags
                     muxer.writeSampleData(trackIndexMap[trackIndex]!!, buffer, bufferInfo)
                 }

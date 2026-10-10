@@ -1081,38 +1081,60 @@ class _PlayerScreenState extends State<PlayerScreen> {
       }
     }
 
-    final exportedFile = await ClipExportService.exportClip(
-      title: widget.mediaTitle,
-      startSeconds: _clipStartSeconds,
-      endSeconds: _clipEndSeconds,
-      localFilePath: widget.localFilePath,
-      streamUrl: playingUrl,
-      streamHeaders: activeStream?.headers,
-      subtitles: subtitleCues,
-      burnSubtitles: hasSubtitles,
-      onProgress: (p, status) {
-        if (mounted) {
-          setState(() {
-            _exportProgress = p;
-          });
+    try {
+      final exportedFile = await ClipExportService.exportClip(
+        title: widget.mediaTitle,
+        startSeconds: _clipStartSeconds,
+        endSeconds: _clipEndSeconds,
+        localFilePath: widget.localFilePath,
+        streamUrl: playingUrl,
+        streamHeaders: activeStream?.headers,
+        subtitles: subtitleCues,
+        burnSubtitles: hasSubtitles,
+        onProgress: (p, status) {
+          if (mounted) {
+            setState(() {
+              _exportProgress = p;
+            });
+          }
+        },
+      );
+
+      if (mounted) {
+        setState(() {
+          _isExportingClip = false;
+          _isClippingMoment = false;
+          _showControls = true;
+        });
+        _startHideControlsTimer();
+
+        if (exportedFile != null) {
+          SharePlus.instance.share(
+            ShareParams(
+              files: [XFile(exportedFile.path)],
+              text: 'Watch this moment from "${widget.mediaTitle}" on Voidflix!\nhttps://voidflix.org/${widget.mediaType}/${widget.mediaId}',
+              subject: 'Voidflix Moment: ${widget.mediaTitle}',
+            ),
+          );
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Could not export clip from stream. Please try again.'),
+              backgroundColor: Colors.redAccent,
+            ),
+          );
         }
-      },
-    );
-
-    if (mounted) {
-      setState(() {
-        _isExportingClip = false;
-        _isClippingMoment = false;
-        _showControls = true;
-      });
-      _startHideControlsTimer();
-
-      if (exportedFile != null) {
-        SharePlus.instance.share(
-          ShareParams(
-            files: [XFile(exportedFile.path)],
-            text: 'Watch this moment from "${widget.mediaTitle}" on Voidflix!\nhttps://voidflix.org/${widget.mediaType}/${widget.mediaId}',
-            subject: 'Voidflix Moment: ${widget.mediaTitle}',
+      }
+    } catch (e) {
+      debugPrint('Error saving clip: $e');
+      if (mounted) {
+        setState(() {
+          _isExportingClip = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Failed to save clip: $e'),
+            backgroundColor: Colors.redAccent,
           ),
         );
       }

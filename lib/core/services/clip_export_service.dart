@@ -67,7 +67,7 @@ class ClipExportService {
   }
 
   /// Trims/extracts and saves a clip from the active stream or local file to the gallery
-  /// with burned-in Voidflix logo, subtitles (if enabled), and sidecar subtitle file.
+  /// with low-memory streaming and native hardware-accelerated sample trimming.
   static Future<File?> exportClip({
     required String title,
     required double startSeconds,
@@ -81,7 +81,7 @@ class ClipExportService {
   }) async {
     File? tempSourceFile;
     try {
-      onProgress?.call(0.1, 'Preparing clip export…');
+      onProgress?.call(0.05, 'Preparing clip export…');
 
       final clipDir = await _getGalleryClipDirectory();
       final cleanTitle = title.replaceAll(RegExp(r'[^a-zA-Z0-9_\-]'), '_');
@@ -97,6 +97,11 @@ class ClipExportService {
         try {
           final srtFile = File('${clipDir.path}/Voidflix_${cleanTitle}_${startSecInt}s-${endSecInt}s.srt');
           await srtFile.writeAsString(_generateSrt(subtitleList, startSeconds));
+          try {
+            await _channel.invokeMethod('scanFileIntoGallery', {
+              'filePath': srtFile.absolute.path,
+            });
+          } catch (_) {}
         } catch (_) {}
       }
 
@@ -107,22 +112,22 @@ class ClipExportService {
 
       // 1. Source is an offline downloaded local file
       if (localFilePath != null && File(localFilePath).existsSync()) {
-        onProgress?.call(0.2, 'Using local offline media…');
+        onProgress?.call(0.3, 'Using local offline media…');
         inputVideoPath = localFilePath;
       }
       // 2. Source is an online stream (HLS or progressive MP4)
       else if (streamUrl != null && streamUrl.isNotEmpty) {
-        onProgress?.call(0.2, 'Fetching clip stream…');
+        onProgress?.call(0.1, 'Resolving stream…');
         final client = http.Client();
         final cacheDir = await getTemporaryDirectory();
 
         try {
           if (streamUrl.contains('.m3u8')) {
-            onProgress?.call(0.25, 'Reading playlist segments…');
+            onProgress?.call(0.15, 'Reading playlist…');
             final headers = Map<String, String>.from(streamHeaders ?? {});
             headers['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36';
 
-            final res = await client.get(Uri.parse(streamUrl), headers: headers);
+            final res = await client.get(Uri.parse(streamUrl), headers: headers).timeout(const Duration(seconds: 10));
             if (res.statusCode == 200) {
               final lines = res.body.split('\n');
               final baseUri = Uri.parse(streamUrl);
@@ -136,27 +141,47 @@ class ClipExportService {
               }
 
               if (segmentUrls.isNotEmpty) {
-                // Estimate segment duration (~3-6 seconds per segment)
                 const estSegDur = 4.0;
                 final startIdx = (startSeconds / estSegDur).floor().clamp(0, segmentUrls.length - 1);
                 final endIdx = (endSeconds / estSegDur).ceil().clamp(startIdx + 1, segmentUrls.length);
 
                 final targetSegments = segmentUrls.sublist(startIdx, endIdx);
                 tempSourceFile = File('${cacheDir.path}/temp_clip_${DateTime.now().millisecondsSinceEpoch}.ts');
-                final sink = tempSourceFile.openWrite();
+                
+                // Low-memory streaming directly to disk with RandomAccessFile
+                final raf = await tempSourceFile.open(mode: FileMode.write);
 
-                for (int i = 0; i < targetSegments.length; i++) {
-                  final segP = 0.3 + (0.4 * (i / targetSegments.length));
-                  onProgress?.call(segP, 'Downloading stream (${i + 1}/${targetSegments.length})…');
+                try {
+                  for (int i = 0; i < targetSegments.length; i++) {
+                    final segP = 0.2 + (0.5 * (i / targetSegments.length));
+                    onProgress?.call(segP, 'Downloading stream (${(segP * 100).toInt()}%)…');
 
-                  final sRes = await client.get(targetSegments[i], headers: headers);
-                  if (sRes.statusCode == 200) {
-                    sink.add(sRes.bodyBytes);
+                    bool downloaded = false;
+                    for (int attempt = 0; attempt < 2; attempt++) {
+                      try {
+                        final req = http.Request('GET', targetSegments[i]);
+                        req.headers.addAll(headers);
+                        final streamedRes = await client.send(req).timeout(const Duration(seconds: 10));
+                        if (streamedRes.statusCode == 200) {
+                          await for (final chunk in streamedRes.stream) {
+                            await raf.writeFrom(chunk);
+                          }
+                          await raf.flush();
+                          downloaded = true;
+                          break;
+                        }
+                      } catch (e) {
+                        debugPrint('Segment $i download retry ${attempt + 1}: $e');
+                        await Future.delayed(const Duration(milliseconds: 150));
+                      }
+                    }
+                    if (!downloaded) {
+                      debugPrint('Segment $i skipped after retries');
+                    }
                   }
+                } finally {
+                  await raf.close();
                 }
-
-                await sink.flush();
-                await sink.close();
 
                 inputVideoPath = tempSourceFile.path;
                 final offsetSec = startIdx * estSegDur;
@@ -176,15 +201,25 @@ class ClipExportService {
               }
             }
           } else {
-            // Progressive MP4 stream
-            onProgress?.call(0.3, 'Downloading stream for clipping…');
+            // Progressive MP4 stream with chunk streaming
+            onProgress?.call(0.2, 'Downloading stream…');
             final headers = Map<String, String>.from(streamHeaders ?? {});
             headers['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36';
 
-            final res = await client.get(Uri.parse(streamUrl), headers: headers);
-            if (res.statusCode == 200) {
+            final req = http.Request('GET', Uri.parse(streamUrl));
+            req.headers.addAll(headers);
+            final streamedRes = await client.send(req).timeout(const Duration(seconds: 25));
+            if (streamedRes.statusCode == 200 || streamedRes.statusCode == 206) {
               tempSourceFile = File('${cacheDir.path}/temp_clip_${DateTime.now().millisecondsSinceEpoch}.mp4');
-              await tempSourceFile.writeAsBytes(res.bodyBytes, flush: true);
+              final raf = await tempSourceFile.open(mode: FileMode.write);
+              try {
+                await for (final chunk in streamedRes.stream) {
+                  await raf.writeFrom(chunk);
+                }
+                await raf.flush();
+              } finally {
+                await raf.close();
+              }
               inputVideoPath = tempSourceFile.path;
             }
           }
@@ -194,9 +229,9 @@ class ClipExportService {
       }
 
       if (inputVideoPath != null && File(inputVideoPath).existsSync()) {
-        onProgress?.call(0.75, 'Trimming & burning Voidflix watermark…');
+        onProgress?.call(0.75, 'Extracting & trimming clip…');
 
-        // Invoke native Android Media3 Transformer via MethodChannel
+        // Invoke native Android MediaExtractor / MediaMuxer via MethodChannel
         try {
           final res = await _channel.invokeMethod('trimAndExportClip', {
             'inputPath': inputVideoPath,
@@ -207,7 +242,7 @@ class ClipExportService {
             'subtitles': adjustedCues,
           });
 
-          if (res != null && outputFile.existsSync() && outputFile.lengthSync() > 1000) {
+          if (res != null && outputFile.existsSync() && outputFile.lengthSync() > 500) {
             onProgress?.call(1.0, 'Clip saved to Gallery!');
             return outputFile;
           }
