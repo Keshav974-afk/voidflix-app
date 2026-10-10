@@ -55,6 +55,62 @@ class SubtitleTrack {
 class SubtitleService {
   final Map<String, List<SubtitleCue>> _cache = {};
 
+  /// Decodes raw subtitle bytes with robust BOM handling, UTF-8 / UTF-16 detection,
+  /// and automatic Mojibake recovery (for subtitles mistakenly encoded as Latin-1).
+  static String decodeSubtitleBytes(Uint8List bytes) {
+    if (bytes.isEmpty) return '';
+
+    // 1. Check for UTF-8 BOM: EF BB BF
+    if (bytes.length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF) {
+      bytes = bytes.sublist(3);
+    }
+    // 2. Check for UTF-16LE BOM: FF FE
+    else if (bytes.length >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE) {
+      final chars = <int>[];
+      for (int i = 2; i + 1 < bytes.length; i += 2) {
+        chars.add(bytes[i] | (bytes[i + 1] << 8));
+      }
+      return fixMojibake(String.fromCharCodes(chars));
+    }
+    // 3. Check for UTF-16BE BOM: FE FF
+    else if (bytes.length >= 2 && bytes[0] == 0xFE && bytes[1] == 0xFF) {
+      final chars = <int>[];
+      for (int i = 2; i + 1 < bytes.length; i += 2) {
+        chars.add((bytes[i] << 8) | bytes[i + 1]);
+      }
+      return fixMojibake(String.fromCharCodes(chars));
+    }
+
+    String text;
+    try {
+      text = utf8.decode(bytes, allowMalformed: false);
+    } catch (_) {
+      try {
+        text = utf8.decode(bytes, allowMalformed: true);
+      } catch (_) {
+        text = latin1.decode(bytes);
+      }
+    }
+
+    return fixMojibake(text);
+  }
+
+  /// Automatically detects and repairs Latin-1 / UTF-8 double-encoded Mojibake strings
+  /// (e.g. "Ã¢â‚¬â„¢" -> "’", "à¤¨à¤®à¤¸à¥à¤¤à¥‡" -> "नमस्ते", etc.).
+  static String fixMojibake(String text) {
+    if (text.isEmpty) return text;
+    if (RegExp(r'[\u00C0-\u00DF][\u0080-\u00BF]|\u00E2\u20AC|\u00E0\u00A4').hasMatch(text)) {
+      try {
+        final latinBytes = latin1.encode(text);
+        final repaired = utf8.decode(latinBytes, allowMalformed: false);
+        if (repaired.isNotEmpty) {
+          return repaired;
+        }
+      } catch (_) {}
+    }
+    return text;
+  }
+
   /// Loads and parses subtitle cues from a remote URL or local file path (.srt or .vtt).
   Future<List<SubtitleCue>> loadTrack(String url) async {
     if (_cache.containsKey(url)) {
@@ -68,7 +124,7 @@ class SubtitleService {
 
         // Always decode response bytes using UTF-8 to prevent character corruption
         // in languages like Urdu, Hindi, Nepali, etc.
-        final text = utf8.decode(res.bodyBytes, allowMalformed: true);
+        final text = decodeSubtitleBytes(res.bodyBytes);
         final cues = parseSubtitles(text);
         _cache[url] = cues;
         return cues;
@@ -84,7 +140,7 @@ class SubtitleService {
         final file = File(path);
         if (await file.exists()) {
           final bytes = await file.readAsBytes();
-          final content = utf8.decode(bytes, allowMalformed: true);
+          final content = decodeSubtitleBytes(bytes);
           final cues = parseSubtitles(content);
           _cache[url] = cues;
           return cues;

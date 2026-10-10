@@ -185,6 +185,7 @@ class MainActivity : FlutterActivity() {
                     val outputPath = call.argument<String>("outputPath") ?: ""
                     val startMs = (call.argument<Number>("startMs"))?.toLong() ?: 0L
                     val endMs = (call.argument<Number>("endMs"))?.toLong() ?: 0L
+                    val isPreTrimmed = call.argument<Boolean>("isPreTrimmed") ?: false
                     val burnSubtitles = call.argument<Boolean>("burnSubtitles") ?: false
                     val rawSubtitles = call.argument<List<Map<String, Any>>>("subtitles") ?: emptyList()
 
@@ -195,7 +196,7 @@ class MainActivity : FlutterActivity() {
                         SubtitleCue(s, e, t)
                     }
 
-                    trimAndExportClipWithTransformer(inputPath, outputPath, startMs, endMs, cues, burnSubtitles, result)
+                    trimAndExportClipWithTransformer(inputPath, outputPath, startMs, endMs, cues, burnSubtitles, isPreTrimmed, result)
                 }
                 else -> {
                     result.notImplemented()
@@ -211,6 +212,7 @@ class MainActivity : FlutterActivity() {
         endMs: Long,
         cues: List<SubtitleCue>,
         burnSubtitles: Boolean,
+        isPreTrimmed: Boolean,
         result: MethodChannel.Result
     ) {
         val inputFile = File(inputPath)
@@ -225,39 +227,94 @@ class MainActivity : FlutterActivity() {
             outputFile.delete()
         }
 
-        Thread {
-            try {
-                // Perform robust, sample-accurate, crash-free trim via MediaExtractor & MediaMuxer
-                val trimOk = fallbackMuxerTrim(inputPath, outputFile.absolutePath, startMs, endMs)
-                if (trimOk && outputFile.exists() && outputFile.length() > 500) {
+        val clipStartMs = if (isPreTrimmed) 0L else startMs
+        val clipEndMs = if (isPreTrimmed) (endMs - startMs).coerceAtLeast(1000L) else endMs
+
+        // 1. Attempt hardware-accelerated Media3 Transformer for Voidflix logo & burned subtitles
+        try {
+            val mediaItem = MediaItem.Builder()
+                .setUri(android.net.Uri.fromFile(inputFile))
+                .setClippingConfiguration(
+                    MediaItem.ClippingConfiguration.Builder()
+                        .setStartPositionMs(clipStartMs)
+                        .setEndPositionMs(clipEndMs)
+                        .build()
+                )
+                .build()
+
+            val overlay = VoidflixOverlay(cues, burnSubtitles, if (isPreTrimmed) 0L else startMs)
+            val overlayEffect = OverlayEffect(ImmutableList.of(overlay))
+            val effects = androidx.media3.transformer.Effects(
+                emptyList(),
+                listOf<Effect>(overlayEffect)
+            )
+
+            val editedMediaItem = EditedMediaItem.Builder(mediaItem)
+                .setEffects(effects)
+                .build()
+
+            val transformer = Transformer.Builder(applicationContext)
+                .setVideoMimeType(MimeTypes.VIDEO_H264)
+                .setAudioMimeType(MimeTypes.AUDIO_AAC)
+                .build()
+
+            transformer.addListener(object : Transformer.Listener {
+                override fun onCompleted(composition: Composition, exportResult: ExportResult) {
                     MediaScannerConnection.scanFile(
                         applicationContext,
                         arrayOf(outputFile.absolutePath),
                         arrayOf("video/mp4")
                     ) { _, _ -> }
+                    result.success(outputFile.absolutePath)
+                }
 
-                    runOnUiThread {
-                        result.success(outputFile.absolutePath)
-                    }
+                override fun onError(
+                    composition: Composition,
+                    exportResult: ExportResult,
+                    exportException: ExportException
+                ) {
+                    android.util.Log.w("Voidflix", "Media3 export error: ${exportException.message}, falling back to muxer...")
+                    Thread {
+                        val fallbackOk = fallbackMuxerTrim(inputPath, outputFile.absolutePath, startMs, endMs, isPreTrimmed)
+                        if (fallbackOk && outputFile.exists() && outputFile.length() > 500) {
+                            MediaScannerConnection.scanFile(
+                                applicationContext,
+                                arrayOf(outputFile.absolutePath),
+                                arrayOf("video/mp4")
+                            ) { _, _ -> }
+                            runOnUiThread { result.success(outputFile.absolutePath) }
+                        } else {
+                            runOnUiThread { result.error("EXPORT_FAILED", exportException.message, null) }
+                        }
+                    }.start()
+                }
+            })
+
+            transformer.start(editedMediaItem, outputFile.absolutePath)
+        } catch (e: Exception) {
+            android.util.Log.w("Voidflix", "Transformer initialization error: ${e.message}, falling back to muxer...")
+            Thread {
+                val fallbackOk = fallbackMuxerTrim(inputPath, outputFile.absolutePath, startMs, endMs, isPreTrimmed)
+                if (fallbackOk && outputFile.exists() && outputFile.length() > 500) {
+                    MediaScannerConnection.scanFile(
+                        applicationContext,
+                        arrayOf(outputFile.absolutePath),
+                        arrayOf("video/mp4")
+                    ) { _, _ -> }
+                    runOnUiThread { result.success(outputFile.absolutePath) }
                 } else {
-                    runOnUiThread {
-                        result.error("TRIM_FAILED", "Failed to trim video stream", null)
-                    }
+                    runOnUiThread { result.error("EXPORT_ERROR", e.message ?: "Unknown error", null) }
                 }
-            } catch (e: Exception) {
-                android.util.Log.e("Voidflix", "Clip export error: ${e.message}", e)
-                runOnUiThread {
-                    result.error("EXPORT_ERROR", e.message ?: "Unknown error", null)
-                }
-            }
-        }.start()
+            }.start()
+        }
     }
 
     private fun fallbackMuxerTrim(
         inputPath: String,
         outputPath: String,
         startMs: Long,
-        endMs: Long
+        endMs: Long,
+        isPreTrimmed: Boolean
     ): Boolean {
         var extractor: MediaExtractor? = null
         var muxer: MediaMuxer? = null
@@ -265,6 +322,8 @@ class MainActivity : FlutterActivity() {
             extractor = MediaExtractor()
             extractor.setDataSource(inputPath)
             val trackCount = extractor.trackCount
+            if (trackCount == 0) return false
+
             muxer = MediaMuxer(outputPath, MediaMuxer.OutputFormat.MUXER_OUTPUT_MPEG_4)
 
             val trackIndexMap = HashMap<Int, Int>()
@@ -274,12 +333,17 @@ class MainActivity : FlutterActivity() {
                 val format = extractor.getTrackFormat(i)
                 val mime = format.getString(MediaFormat.KEY_MIME) ?: ""
                 if (mime.startsWith("video/") || mime.startsWith("audio/")) {
-                    extractor.selectTrack(i)
-                    val newTrackIndex = muxer.addTrack(format)
-                    trackIndexMap[i] = newTrackIndex
-                    if (format.containsKey(MediaFormat.KEY_MAX_INPUT_SIZE)) {
-                        val size = format.getInteger(MediaFormat.KEY_MAX_INPUT_SIZE)
-                        if (size > bufferSize) bufferSize = size
+                    try {
+                        extractor.selectTrack(i)
+                        val newTrackIndex = muxer.addTrack(format)
+                        trackIndexMap[i] = newTrackIndex
+                        if (format.containsKey(MediaFormat.KEY_MAX_INPUT_SIZE)) {
+                            val size = format.getInteger(MediaFormat.KEY_MAX_INPUT_SIZE)
+                            if (size > bufferSize) bufferSize = size
+                        }
+                    } catch (trackEx: Exception) {
+                        android.util.Log.w("Voidflix", "Track $i ($mime) rejected by muxer: ${trackEx.message}")
+                        extractor.unselectTrack(i)
                     }
                 }
             }
@@ -287,33 +351,62 @@ class MainActivity : FlutterActivity() {
             if (trackIndexMap.isEmpty()) return false
             muxer.start()
 
+            val durationUs = (endMs - startMs).coerceAtLeast(1000L) * 1000L
+            var baseUs = -1L
             val startUs = startMs * 1000L
             val endUs = endMs * 1000L
-            extractor.seekTo(startUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
-            val baseUs = if (extractor.sampleTime in 0..startUs) extractor.sampleTime else startUs
+
+            if (!isPreTrimmed) {
+                extractor.seekTo(startUs, MediaExtractor.SEEK_TO_PREVIOUS_SYNC)
+                baseUs = extractor.sampleTime
+                if (baseUs < 0L) baseUs = startUs
+            }
 
             val buffer = ByteBuffer.allocateDirect(bufferSize)
             val bufferInfo = MediaCodec.BufferInfo()
+            var samplesWritten = 0
 
             while (true) {
                 val sampleSize = extractor.readSampleData(buffer, 0)
                 if (sampleSize < 0) break
 
                 val sampleTimeUs = extractor.sampleTime
-                if (sampleTimeUs > endUs) break
+                if (sampleTimeUs < 0) {
+                    extractor.advance()
+                    continue
+                }
+
+                if (isPreTrimmed) {
+                    if (baseUs < 0L) {
+                        baseUs = sampleTimeUs
+                    }
+                    if ((sampleTimeUs - baseUs) > durationUs) {
+                        break
+                    }
+                } else {
+                    if (sampleTimeUs > endUs) {
+                        break
+                    }
+                }
 
                 val trackIndex = extractor.sampleTrackIndex
-                if (trackIndexMap.containsKey(trackIndex) && sampleTimeUs >= baseUs) {
+                if (trackIndexMap.containsKey(trackIndex)) {
+                    val pts = if (baseUs >= 0L) (sampleTimeUs - baseUs).coerceAtLeast(0L) else 0L
                     bufferInfo.offset = 0
                     bufferInfo.size = sampleSize
-                    bufferInfo.presentationTimeUs = (sampleTimeUs - baseUs).coerceAtLeast(0L)
+                    bufferInfo.presentationTimeUs = pts
                     bufferInfo.flags = extractor.sampleFlags
-                    muxer.writeSampleData(trackIndexMap[trackIndex]!!, buffer, bufferInfo)
+                    try {
+                        muxer.writeSampleData(trackIndexMap[trackIndex]!!, buffer, bufferInfo)
+                        samplesWritten++
+                    } catch (writeEx: Exception) {
+                        android.util.Log.w("Voidflix", "Sample write error: ${writeEx.message}")
+                    }
                 }
                 extractor.advance()
             }
 
-            return true
+            return samplesWritten > 0
         } catch (e: Exception) {
             android.util.Log.e("Voidflix", "Fallback muxer trim failed: ${e.message}")
             return false

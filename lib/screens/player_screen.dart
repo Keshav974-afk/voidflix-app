@@ -81,6 +81,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   bool _isExtracting = true;
   List<ExtractedStream> _directStreams = [];
   int _selectedStreamIndex = 0;
+  final Set<int> _triedNativeServerIndices = {};
   bool _isPlaying = false;
   bool _isBuffering = false;
   Duration _currentPosition = Duration.zero;
@@ -392,6 +393,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     final safeIdx = (_selectedServerIndex >= 0 && _selectedServerIndex < ServerConfig.servers.length)
         ? _selectedServerIndex
         : 0;
+    _triedNativeServerIndices.clear();
     final server = ServerConfig.servers[safeIdx];
     if (server.isDirectPlay) {
       await _loadServerDirect(safeIdx);
@@ -400,7 +402,42 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
   }
 
-  Future<void> _loadServerDirect(int serverIdx) async {
+  void _fallbackToNextNativeOrEmbed({Duration? resumePosition}) {
+    if (!mounted) return;
+
+    // Search for another native direct-play server that hasn't been tried yet
+    int nextNativeIdx = -1;
+    for (int i = 0; i < ServerConfig.servers.length; i++) {
+      if (ServerConfig.servers[i].isDirectPlay && !_triedNativeServerIndices.contains(i)) {
+        nextNativeIdx = i;
+        break;
+      }
+    }
+
+    if (nextNativeIdx != -1) {
+      final nextServer = ServerConfig.servers[nextNativeIdx];
+      debugPrint('Native server failed. Trying next native server: ${nextServer.name}');
+      if (mounted) {
+        ScaffoldMessenger.of(context).hideCurrentSnackBar();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Trying next native server: ${nextServer.name}…'),
+            duration: const Duration(seconds: 2),
+            backgroundColor: const Color(0xFF1E1E1E),
+          ),
+        );
+      }
+      _loadServerDirect(nextNativeIdx, startPosition: resumePosition);
+      return;
+    }
+
+    // Only if ALL native direct play servers have been tried, fall back to web view embed
+    debugPrint('All native direct servers exhausted. Falling back to web embed.');
+    _switchToEmbedFallback();
+  }
+
+  Future<void> _loadServerDirect(int serverIdx, {Duration? startPosition}) async {
+    _triedNativeServerIndices.add(serverIdx);
     final server = ServerConfig.servers[serverIdx];
     setState(() {
       _selectedServerIndex = serverIdx;
@@ -524,15 +561,15 @@ class _PlayerScreenState extends State<PlayerScreen> {
           _selectSubtitle(bestSub);
         }
 
-        await _initNativePlayer(streams[chosenAudioIdx]);
+        await _initNativePlayer(streams[chosenAudioIdx], startPosition: startPosition);
       } else {
-        debugPrint('Direct extraction for ${server.name} returned 0 streams. Falling back to web embed.');
-        _switchToEmbedFallback();
+        debugPrint('Direct extraction for ${server.name} returned 0 streams. Trying next native server.');
+        _fallbackToNextNativeOrEmbed(resumePosition: startPosition);
       }
     } catch (e) {
       debugPrint('Direct extraction error for ${server.name}: $e');
       if (mounted) {
-        _switchToEmbedFallback();
+        _fallbackToNextNativeOrEmbed(resumePosition: startPosition);
       }
     }
   }
@@ -606,7 +643,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
         await _initNativePlayer(_directStreams[_selectedStreamIndex], startPosition: startPosition, autoPlay: autoPlay);
       } else {
         StreamExtractor.invalidateCache(widget.mediaType, widget.mediaId, _currentSeason, _currentEpisode);
-        _switchToEmbedFallback();
+        _fallbackToNextNativeOrEmbed(resumePosition: startPosition);
       }
     }
   }
@@ -667,7 +704,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
         _selectedStreamIndex++;
         _initNativePlayer(_directStreams[_selectedStreamIndex], startPosition: _currentPosition, autoPlay: true);
       } else {
-        _switchToEmbedFallback();
+        _fallbackToNextNativeOrEmbed(resumePosition: _currentPosition);
       }
       return;
     }
@@ -1989,6 +2026,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                               : null,
                           onTap: () {
                             Navigator.pop(ctx);
+                            _triedNativeServerIndices.clear();
                             context.read<ProfileProvider>().setSelectedServer(idx);
                             _loadServerDirect(idx);
                           },

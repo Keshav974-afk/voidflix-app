@@ -415,8 +415,8 @@ class DownloadProvider extends ChangeNotifier {
 
       try {
         final res = await http.get(Uri.parse(track.url)).timeout(const Duration(seconds: 8));
-        if (res.statusCode == 200 && res.body.trim().isNotEmpty) {
-          await file.writeAsString(res.body, flush: true);
+        if (res.statusCode == 200 && res.bodyBytes.isNotEmpty) {
+          await file.writeAsBytes(res.bodyBytes, flush: true);
           downloadedTracksMeta.add({
             'label': track.label,
             'language': track.language,

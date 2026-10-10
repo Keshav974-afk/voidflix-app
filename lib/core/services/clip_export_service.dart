@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
@@ -122,33 +123,78 @@ class ClipExportService {
         final cacheDir = await getTemporaryDirectory();
 
         try {
-          if (streamUrl.contains('.m3u8')) {
+          final isHls = streamUrl.contains('.m3u8') || streamUrl.contains('m3u8');
+          if (isHls) {
             onProgress?.call(0.15, 'Reading playlist…');
             final headers = Map<String, String>.from(streamHeaders ?? {});
             headers['User-Agent'] = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36';
 
-            final res = await client.get(Uri.parse(streamUrl), headers: headers).timeout(const Duration(seconds: 10));
+            final res = await client.get(Uri.parse(streamUrl), headers: headers).timeout(const Duration(seconds: 12));
             if (res.statusCode == 200) {
-              final lines = res.body.split('\n');
-              final baseUri = Uri.parse(streamUrl);
-              final segmentUrls = <Uri>[];
+              var playlistContent = res.body;
+              var playlistBaseUri = Uri.parse(streamUrl);
 
-              for (final line in lines) {
-                final trimmed = line.trim();
-                if (trimmed.isNotEmpty && !trimmed.startsWith('#')) {
-                  segmentUrls.add(baseUri.resolve(trimmed));
+              // A. Handle Master Playlist: resolve to highest quality media playlist
+              if (playlistContent.contains('#EXT-X-STREAM-INF')) {
+                final mLines = LineSplitter.split(playlistContent).toList();
+                String? bestVariantUrl;
+                for (int i = 0; i < mLines.length; i++) {
+                  final line = mLines[i].trim();
+                  if (line.startsWith('#EXT-X-STREAM-INF')) {
+                    for (int j = i + 1; j < mLines.length; j++) {
+                      final nextLine = mLines[j].trim();
+                      if (nextLine.isNotEmpty && !nextLine.startsWith('#')) {
+                        bestVariantUrl = playlistBaseUri.resolve(nextLine).toString();
+                        break;
+                      }
+                    }
+                    if (bestVariantUrl != null) break;
+                  }
+                }
+
+                if (bestVariantUrl != null) {
+                  final subRes = await client.get(Uri.parse(bestVariantUrl), headers: headers).timeout(const Duration(seconds: 12));
+                  if (subRes.statusCode == 200) {
+                    playlistContent = subRes.body;
+                    playlistBaseUri = Uri.parse(bestVariantUrl);
+                  }
                 }
               }
 
-              if (segmentUrls.isNotEmpty) {
-                const estSegDur = 4.0;
-                final startIdx = (startSeconds / estSegDur).floor().clamp(0, segmentUrls.length - 1);
-                final endIdx = (endSeconds / estSegDur).ceil().clamp(startIdx + 1, segmentUrls.length);
+              // B. Parse segments with exact #EXTINF durations
+              final pLines = LineSplitter.split(playlistContent).toList();
+              double currentTime = 0.0;
+              double currentSegDur = 6.0;
+              final parsedSegments = <_HlsSegment>[];
 
-                final targetSegments = segmentUrls.sublist(startIdx, endIdx);
+              for (final line in pLines) {
+                final trimmed = line.trim();
+                if (trimmed.startsWith('#EXTINF:')) {
+                  final durPart = trimmed.substring(8).split(',').first.trim();
+                  currentSegDur = double.tryParse(durPart) ?? 6.0;
+                } else if (trimmed.isNotEmpty && !trimmed.startsWith('#')) {
+                  final segUri = playlistBaseUri.resolve(trimmed);
+                  parsedSegments.add(_HlsSegment(
+                    uri: segUri,
+                    duration: currentSegDur,
+                    startTime: currentTime,
+                    endTime: currentTime + currentSegDur,
+                  ));
+                  currentTime += currentSegDur;
+                }
+              }
+
+              if (parsedSegments.isNotEmpty) {
+                int firstIdx = parsedSegments.indexWhere((s) => s.endTime >= startSeconds);
+                if (firstIdx == -1) firstIdx = 0;
+                if (firstIdx > 0) firstIdx--; // 1 segment lead-in for sync keyframe
+
+                int lastIdx = parsedSegments.lastIndexWhere((s) => s.startTime <= endSeconds);
+                if (lastIdx == -1) lastIdx = parsedSegments.length - 1;
+                if (lastIdx < parsedSegments.length - 1) lastIdx++; // 1 segment lead-out
+
+                final targetSegments = parsedSegments.sublist(firstIdx, lastIdx + 1);
                 tempSourceFile = File('${cacheDir.path}/temp_clip_${DateTime.now().millisecondsSinceEpoch}.ts');
-                
-                // Low-memory streaming directly to disk with RandomAccessFile
                 final raf = await tempSourceFile.open(mode: FileMode.write);
 
                 try {
@@ -159,9 +205,9 @@ class ClipExportService {
                     bool downloaded = false;
                     for (int attempt = 0; attempt < 2; attempt++) {
                       try {
-                        final req = http.Request('GET', targetSegments[i]);
+                        final req = http.Request('GET', targetSegments[i].uri);
                         req.headers.addAll(headers);
-                        final streamedRes = await client.send(req).timeout(const Duration(seconds: 10));
+                        final streamedRes = await client.send(req).timeout(const Duration(seconds: 12));
                         if (streamedRes.statusCode == 200) {
                           await for (final chunk in streamedRes.stream) {
                             await raf.writeFrom(chunk);
@@ -184,17 +230,14 @@ class ClipExportService {
                 }
 
                 inputVideoPath = tempSourceFile.path;
-                final offsetSec = startIdx * estSegDur;
-                final relStartSec = (startSeconds - offsetSec).clamp(0.0, double.infinity);
-                final relEndSec = (endSeconds - offsetSec).clamp(relStartSec + 1.0, double.infinity);
-                startMs = (relStartSec * 1000).toInt();
-                endMs = (relEndSec * 1000).toInt();
+                final clipDurMs = ((endSeconds - startSeconds) * 1000).toInt();
+                startMs = 0;
+                endMs = clipDurMs;
 
-                final offsetMs = (offsetSec * 1000).toInt();
                 adjustedCues = subtitleList.map((c) {
                   return {
-                    'start': ((c['start'] as num).toInt() - offsetMs),
-                    'end': ((c['end'] as num).toInt() - offsetMs),
+                    'start': ((c['start'] as num).toInt() - (startSeconds * 1000).toInt()),
+                    'end': ((c['end'] as num).toInt() - (startSeconds * 1000).toInt()),
                     'text': c['text'],
                   };
                 }).toList();
@@ -231,13 +274,14 @@ class ClipExportService {
       if (inputVideoPath != null && File(inputVideoPath).existsSync()) {
         onProgress?.call(0.75, 'Extracting & trimming clip…');
 
-        // Invoke native Android MediaExtractor / MediaMuxer via MethodChannel
+        final isPreTrimmed = inputVideoPath == tempSourceFile?.path;
         try {
           final res = await _channel.invokeMethod('trimAndExportClip', {
             'inputPath': inputVideoPath,
             'outputPath': outputFile.absolute.path,
             'startMs': startMs,
             'endMs': endMs,
+            'isPreTrimmed': isPreTrimmed,
             'burnSubtitles': burnSubtitles,
             'subtitles': adjustedCues,
           });
@@ -264,4 +308,18 @@ class ClipExportService {
       }
     }
   }
+}
+
+class _HlsSegment {
+  final Uri uri;
+  final double duration;
+  final double startTime;
+  final double endTime;
+
+  const _HlsSegment({
+    required this.uri,
+    required this.duration,
+    required this.startTime,
+    required this.endTime,
+  });
 }
