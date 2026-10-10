@@ -452,8 +452,11 @@ class _DetailModalState extends State<DetailModal> {
                                     season: _selectedSeason,
                                     episode: targetEpNum,
                                     episodeTitle: firstEp?.name,
+                                    episodeDescription: firstEp?.overview ?? _detail?.overview,
                                     posterPath: widget.item.posterPath,
                                     backdropPath: widget.item.backdropPath,
+                                    stillPath: firstEp?.stillPath,
+                                    runtime: firstEp != null && firstEp.runtime > 0 ? firstEp.runtime : (_detail?.runtime ?? 0),
                                   );
                                 },
                                 style: ElevatedButton.styleFrom(
@@ -527,8 +530,11 @@ class _DetailModalState extends State<DetailModal> {
                                         season: _selectedSeason,
                                         episode: ep.episodeNumber,
                                         episodeTitle: ep.name,
+                                        episodeDescription: ep.overview,
                                         posterPath: widget.item.posterPath,
                                         backdropPath: widget.item.backdropPath,
+                                        stillPath: ep.stillPath,
+                                        runtime: ep.runtime,
                                       );
                                     }
                                   }
@@ -801,8 +807,11 @@ class _DetailModalState extends State<DetailModal> {
                                                 season: _selectedSeason,
                                                 episode: ep.episodeNumber,
                                                 episodeTitle: ep.name,
+                                                episodeDescription: ep.overview,
                                                 posterPath: widget.item.posterPath,
                                                 backdropPath: widget.item.backdropPath,
+                                                stillPath: ep.stillPath,
+                                                runtime: ep.runtime,
                                               );
                                             },
                                           ),

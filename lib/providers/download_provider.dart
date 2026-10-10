@@ -176,7 +176,34 @@ class DownloadProvider extends ChangeNotifier {
     return false;
   }
 
-  /// Resumes a paused or interrupted download from where it stopped
+  /// Downloads and caches the thumbnail locally on disk for 100% offline access
+  Future<String?> _downloadLocalThumbnail({
+    required String id,
+    required Directory downloadDir,
+    String? stillPath,
+    String? backdropPath,
+    String? posterPath,
+  }) async {
+    final chosenPath = stillPath ?? backdropPath ?? posterPath;
+    if (chosenPath == null || chosenPath.isEmpty) return null;
+
+    final thumbFile = File('${downloadDir.path}/${id}_thumb.jpg');
+    if (thumbFile.existsSync() && thumbFile.lengthSync() > 1000) {
+      return thumbFile.path;
+    }
+
+    try {
+      final url = 'https://image.tmdb.org/t/p/w500$chosenPath';
+      final res = await http.get(Uri.parse(url)).timeout(const Duration(seconds: 12));
+      if (res.statusCode == 200 && res.bodyBytes.length > 500) {
+        await thumbFile.writeAsBytes(res.bodyBytes, flush: true);
+        return thumbFile.path;
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  /// Resumes a paused or interrupted download from exactly where it stopped
   Future<void> resumeDownload(String id) async {
     final item = getItem(id);
     if (item == null) return;
@@ -189,12 +216,15 @@ class DownloadProvider extends ChangeNotifier {
       season: item.season,
       episode: item.episode,
       episodeTitle: item.episodeTitle,
+      episodeDescription: item.episodeDescription,
       posterPath: item.posterPath,
       backdropPath: item.backdropPath,
+      stillPath: item.stillPath,
+      runtime: item.runtime,
     );
   }
 
-  /// Initiates robust multi-source extraction and starts streaming download directly to app storage
+  /// Initiates high-speed parallel multi-source download with local thumbnail & resumption
   Future<void> startDownload({
     required int mediaId,
     required String title,
@@ -202,14 +232,17 @@ class DownloadProvider extends ChangeNotifier {
     int season = 1,
     int episode = 1,
     String? episodeTitle,
+    String? episodeDescription,
     String? posterPath,
     String? backdropPath,
+    String? stillPath,
+    int runtime = 0,
   }) async {
     final id = generateId(mediaType, mediaId, season: season, episode: episode);
 
     if (isDownloading(id) || isDownloaded(id)) return;
 
-    // 1. Create target directory and item in downloading state
+    // 1. Target directory & initial item registration
     final dir = await getApplicationDocumentsDirectory();
     final downloadDir = Directory('${dir.path}/downloads');
     if (!downloadDir.existsSync()) {
@@ -225,6 +258,8 @@ class DownloadProvider extends ChangeNotifier {
         ? existingItem.progress
         : 0.05;
 
+    String? localThumb = existingItem?.localThumbnailPath;
+
     var item = DownloadedItem(
       id: id,
       mediaId: mediaId,
@@ -233,9 +268,13 @@ class DownloadProvider extends ChangeNotifier {
       season: season,
       episode: episode,
       episodeTitle: episodeTitle,
+      episodeDescription: episodeDescription ?? existingItem?.episodeDescription,
       posterPath: posterPath,
       backdropPath: backdropPath,
+      stillPath: stillPath ?? existingItem?.stillPath,
+      runtime: runtime > 0 ? runtime : (existingItem?.runtime ?? 0),
       localFilePath: targetPath,
+      localThumbnailPath: localThumb,
       status: 'downloading',
       progress: initialProgress,
       downloadedAt: DateTime.now(),
@@ -245,6 +284,26 @@ class DownloadProvider extends ChangeNotifier {
     _items.insert(0, item);
     notifyListeners();
     await _saveDownloads();
+
+    // Asynchronously fetch thumbnail if missing
+    if (localThumb == null || !File(localThumb).existsSync()) {
+      _downloadLocalThumbnail(
+        id: id,
+        downloadDir: downloadDir,
+        stillPath: stillPath,
+        backdropPath: backdropPath,
+        posterPath: posterPath,
+      ).then((savedThumbPath) {
+        if (savedThumbPath != null) {
+          final idx = _items.indexWhere((i) => i.id == id);
+          if (idx != -1) {
+            _items[idx] = _items[idx].copyWith(localThumbnailPath: savedThumbPath);
+            notifyListeners();
+            _saveDownloads();
+          }
+        }
+      });
+    }
 
     final client = http.Client();
     _activeClients[id] = client;
@@ -333,17 +392,17 @@ class DownloadProvider extends ChangeNotifier {
         throw Exception('No stream candidates available for offline download.');
       }
 
-      // 3. Attempt download across candidates until one succeeds
+      // 3. Attempt download across candidates with resumption
       bool downloadSuccess = false;
       String chosenQuality = 'HD';
 
       for (final candidate in candidates) {
         if (!_activeClients.containsKey(id)) {
-          // Download was cancelled by user
+          // Cancelled by user
           return;
         }
 
-        debugPrint('Attempting download from: ${candidate.url} (HLS: ${candidate.isHls})');
+        debugPrint('Attempting high-efficiency download from: ${candidate.url} (HLS: ${candidate.isHls})');
 
         if (candidate.isHls) {
           downloadSuccess = await _downloadHlsStream(
@@ -379,7 +438,7 @@ class DownloadProvider extends ChangeNotifier {
       }
 
       if (!downloadSuccess) {
-        throw Exception('All stream providers failed to download or rate-limited.');
+        throw Exception('All stream providers failed or rate-limited.');
       }
 
       // 4. Mark download as completed
@@ -433,7 +492,7 @@ class DownloadProvider extends ChangeNotifier {
     final idx = _items.indexWhere((i) => i.id == id);
     if (idx != -1) {
       final current = _items[idx];
-      if ((p - current.progress).abs() > 0.02 || p >= 0.99) {
+      if ((p - current.progress).abs() > 0.015 || p >= 0.99) {
         _items[idx] = current.copyWith(
           progress: p,
           fileSizeBytes: bytes,
@@ -443,7 +502,7 @@ class DownloadProvider extends ChangeNotifier {
     }
   }
 
-  /// Downloads and concatenates HLS MPEG-TS segments with resumption support
+  /// High-speed parallel HLS MPEG-TS segment downloader with chunk concurrency & exact resumption
   Future<bool> _downloadHlsStream({
     required String m3u8Url,
     required Map<String, String> headers,
@@ -464,13 +523,13 @@ class DownloadProvider extends ChangeNotifier {
 
       final res = await client
           .get(Uri.parse(m3u8Url), headers: reqHeaders)
-          .timeout(const Duration(seconds: 10));
+          .timeout(const Duration(seconds: 12));
       if (res.statusCode != 200) return false;
 
       var playlistContent = res.body;
       var playlistBaseUri = Uri.parse(m3u8Url);
 
-      // Handle Master Playlist (pick best variant)
+      // Handle Master Playlist (pick highest quality stream variant)
       if (playlistContent.contains('#EXT-X-STREAM-INF')) {
         final lines = LineSplitter.split(playlistContent).toList();
         String? bestVariantUrl;
@@ -491,7 +550,7 @@ class DownloadProvider extends ChangeNotifier {
         if (bestVariantUrl != null) {
           final subRes = await client
               .get(Uri.parse(bestVariantUrl), headers: reqHeaders)
-              .timeout(const Duration(seconds: 10));
+              .timeout(const Duration(seconds: 12));
           if (subRes.statusCode == 200) {
             playlistContent = subRes.body;
             playlistBaseUri = Uri.parse(bestVariantUrl);
@@ -516,48 +575,114 @@ class DownloadProvider extends ChangeNotifier {
         await segDir.create(recursive: true);
       }
 
+      // Check existing downloaded segments to resume exactly from where left off
+      int alreadyDownloaded = 0;
       int totalDownloadedBytes = 0;
-      int notifTick = 0;
+      final missingIndices = <int>[];
 
       for (int i = 0; i < segmentUris.length; i++) {
-        if (!_activeClients.containsKey(downloadId)) {
-          return false;
-        }
-
         final segFileName = 'seg_${i.toString().padLeft(6, '0')}.ts';
         final segFile = File('${segDir.path}/$segFileName');
-
         if (segFile.existsSync() && segFile.lengthSync() > 0) {
+          alreadyDownloaded++;
           totalDownloadedBytes += segFile.lengthSync();
-          final p = ((i + 1) / segmentUris.length).clamp(0.05, 0.99);
-          onProgress(p, totalDownloadedBytes);
-          continue;
+        } else {
+          missingIndices.add(i);
         }
-
-        final segUri = segmentUris[i];
-        try {
-          final segRes = await client
-              .get(segUri, headers: reqHeaders)
-              .timeout(const Duration(seconds: 15));
-          if (segRes.statusCode == 200) {
-            await segFile.writeAsBytes(segRes.bodyBytes, flush: true);
-            totalDownloadedBytes += segRes.bodyBytes.length;
-
-            final p = ((i + 1) / segmentUris.length).clamp(0.05, 0.99);
-            onProgress(p, totalDownloadedBytes);
-
-            if (++notifTick % 10 == 0) {
-              _updateSystemNotification(
-                id: downloadId.hashCode.abs(),
-                title: title,
-                progress: (p * 100).toInt(),
-              );
-            }
-          }
-        } catch (_) {}
       }
 
-      // Assemble all segments into part file
+      if (alreadyDownloaded > 0) {
+        final initialP = (alreadyDownloaded / segmentUris.length).clamp(0.05, 0.99);
+        onProgress(initialP, totalDownloadedBytes);
+      }
+
+      // Multi-connection Parallel Worker Pool (Concurrency = 6 for maximum throughput)
+      const concurrency = 6;
+      int queueCursor = 0;
+      int completedSegments = alreadyDownloaded;
+      int notifTick = 0;
+      bool hasAborted = false;
+
+      Future<void> runWorker() async {
+        while (!hasAborted) {
+          if (!_activeClients.containsKey(downloadId)) {
+            hasAborted = true;
+            return;
+          }
+
+          int idx;
+          // Thread-safe index retrieval
+          if (queueCursor >= missingIndices.length) {
+            break;
+          }
+          idx = missingIndices[queueCursor++];
+
+          final segUri = segmentUris[idx];
+          final segFileName = 'seg_${idx.toString().padLeft(6, '0')}.ts';
+          final segFile = File('${segDir.path}/$segFileName');
+
+          bool segSuccess = false;
+          for (int attempt = 0; attempt < 3; attempt++) {
+            if (!_activeClients.containsKey(downloadId)) {
+              hasAborted = true;
+              return;
+            }
+            try {
+              final segRes = await client
+                  .get(segUri, headers: reqHeaders)
+                  .timeout(const Duration(seconds: 15));
+              if (segRes.statusCode == 200 && segRes.bodyBytes.isNotEmpty) {
+                await segFile.writeAsBytes(segRes.bodyBytes, flush: true);
+                totalDownloadedBytes += segRes.bodyBytes.length;
+                completedSegments++;
+                segSuccess = true;
+                break;
+              }
+            } catch (_) {
+              if (attempt < 2) {
+                await Future.delayed(const Duration(milliseconds: 250));
+              }
+            }
+          }
+
+          if (!segSuccess) {
+            // Failed segment after 3 attempts
+            hasAborted = true;
+            return;
+          }
+
+          final p = (completedSegments / segmentUris.length).clamp(0.05, 0.99);
+          onProgress(p, totalDownloadedBytes);
+
+          if (++notifTick % 12 == 0) {
+            _updateSystemNotification(
+              id: downloadId.hashCode.abs(),
+              title: title,
+              progress: (p * 100).toInt(),
+            );
+          }
+        }
+      }
+
+      final workerCount = missingIndices.length < concurrency ? missingIndices.length : concurrency;
+      if (workerCount > 0) {
+        await Future.wait(List.generate(workerCount, (_) => runWorker()));
+      }
+
+      if (!_activeClients.containsKey(downloadId) || hasAborted) {
+        return false;
+      }
+
+      // Verify all segments exist
+      for (int i = 0; i < segmentUris.length; i++) {
+        final segFileName = 'seg_${i.toString().padLeft(6, '0')}.ts';
+        final segFile = File('${segDir.path}/$segFileName');
+        if (!segFile.existsSync() || segFile.lengthSync() == 0) {
+          return false;
+        }
+      }
+
+      // High-efficiency stream piping into .part file without heap memory spikes
       final partFile = File(partPath);
       final sink = partFile.openWrite(mode: FileMode.write);
 
@@ -565,7 +690,7 @@ class DownloadProvider extends ChangeNotifier {
         final segFileName = 'seg_${i.toString().padLeft(6, '0')}.ts';
         final segFile = File('${segDir.path}/$segFileName');
         if (segFile.existsSync()) {
-          sink.add(await segFile.readAsBytes());
+          await sink.addStream(segFile.openRead());
         }
       }
 
@@ -590,12 +715,12 @@ class DownloadProvider extends ChangeNotifier {
       }
       return false;
     } catch (e) {
-      debugPrint('HLS download error: $e');
+      debugPrint('HLS parallel download error: $e');
       return false;
     }
   }
 
-  /// Downloads progressive MP4 file with Range resumption and redirect support
+  /// High-speed progressive MP4 file downloader with HTTP Range resumption and stream buffers
   Future<bool> _downloadProgressiveStream({
     required String downloadUrl,
     required Map<String, String> headers,
@@ -673,7 +798,6 @@ class DownloadProvider extends ChangeNotifier {
 
       final downloadedLength = await partFile.length();
       if (downloadedLength > 100000) {
-        // Atomic promotion: replace any incomplete file with completed file
         final targetFile = File(targetPath);
         if (targetFile.existsSync()) {
           try {
@@ -701,6 +825,7 @@ class DownloadProvider extends ChangeNotifier {
       final file = File(item.localFilePath);
       final partFile = File('${item.localFilePath}.part');
       final segDir = Directory('${item.localFilePath}.segments');
+      final thumbFile = item.localThumbnailPath != null ? File(item.localThumbnailPath!) : null;
 
       if (file.existsSync()) {
         try {
@@ -715,6 +840,11 @@ class DownloadProvider extends ChangeNotifier {
       if (segDir.existsSync()) {
         try {
           segDir.deleteSync(recursive: true);
+        } catch (_) {}
+      }
+      if (thumbFile != null && thumbFile.existsSync()) {
+        try {
+          thumbFile.deleteSync();
         } catch (_) {}
       }
 
@@ -732,6 +862,12 @@ class DownloadProvider extends ChangeNotifier {
       if (file.existsSync()) {
         try {
           await file.delete();
+        } catch (_) {}
+      }
+      final thumbFile = item.localThumbnailPath != null ? File(item.localThumbnailPath!) : null;
+      if (thumbFile != null && thumbFile.existsSync()) {
+        try {
+          await thumbFile.delete();
         } catch (_) {}
       }
       _items.removeWhere((i) => i.id == id);

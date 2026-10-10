@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -7,21 +8,19 @@ import '../models/downloaded_item.dart';
 import '../providers/download_provider.dart';
 import 'player_screen.dart';
 
-/// Downloads Screen matching official Netflix design from Screenshots 2 & 3.
+/// Downloads Screen matching Netflix mobile application design.
 ///
 /// Features:
-/// 1. Top bar: Back arrow with Series Title or 'Downloads', and Edit pencil button.
-/// 2. Subheader: Clean "Smart Downloads" with settings gear icon.
-/// 3. Empty State (Screenshot 2):
-///    - Large circular download graphic with downward arrow and curved tray baseline.
-///    - "Movies and shows that you download appear here."
-///    - Crisp white "View More Episodes" button.
-/// 4. Active Downloads (Screenshot 3):
-///    - Grouped by Season (e.g. "Season 1").
-///    - 16:9 landscape thumbnail with translucent Play circle overlay.
-///    - Title (e.g. "1. Pilot"), "Downloading - XX%" / "Ready to Play".
-///    - Circular pie progress indicator on the right.
-///    - Dark charcoal "View More Episodes" button at bottom.
+/// 1. Top-level View: Groups downloads by Movie & Series.
+///    - Movie card shows Title, "Movie • Size • HD", and direct offline playback.
+///    - Series card shows Series Name, "X Episodes • Total Size", and navigates to the series episodes view.
+/// 2. Series Detail View:
+///    - Displays all downloaded episodes for that series grouped by Season.
+///    - 16:9 offline local thumbnail with translucent play button overlay.
+///    - Episode number & Title (e.g. "1. Pilot").
+///    - Full episode synopsis / description for offline reading.
+///    - Runtime, file size, status badge.
+///    - Direct offline playback and resumption support.
 class DownloadsScreen extends StatefulWidget {
   final String? seriesTitle;
 
@@ -62,17 +61,66 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
     );
   }
 
+  Widget _buildThumbnailWidget({
+    required DownloadedItem item,
+    required double width,
+    required double height,
+    bool is16x9 = true,
+  }) {
+    ImageProvider? imageProvider;
+
+    // 1. Prefer locally downloaded thumbnail for 100% offline access
+    if (item.localThumbnailPath != null && item.localThumbnailPath!.isNotEmpty) {
+      final localFile = File(item.localThumbnailPath!);
+      if (localFile.existsSync() && localFile.lengthSync() > 100) {
+        imageProvider = FileImage(localFile);
+      }
+    }
+
+    // 2. Fallback to cached network image
+    if (imageProvider == null) {
+      final relPath = is16x9
+          ? (item.stillPath ?? item.backdropPath ?? item.posterPath)
+          : (item.posterPath ?? item.backdropPath);
+      if (relPath != null && relPath.isNotEmpty) {
+        final url = relPath.startsWith('http')
+            ? relPath
+            : 'https://image.tmdb.org/t/p/w500$relPath';
+        imageProvider = CachedNetworkImageProvider(url);
+      }
+    }
+
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(6),
+      child: Container(
+        width: width,
+        height: height,
+        color: const Color(0xFF222228),
+        child: imageProvider != null
+            ? Image(
+                image: imageProvider,
+                fit: BoxFit.cover,
+                errorBuilder: (context, error, stackTrace) =>
+                    const Center(child: Icon(Icons.movie_outlined, color: Colors.white24)),
+              )
+            : const Center(child: Icon(Icons.movie_outlined, color: Colors.white24)),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final downloadProvider = context.watch<DownloadProvider>();
     final allItems = downloadProvider.items;
 
-    // Filter by series if seriesTitle is provided
-    final items = widget.seriesTitle != null && widget.seriesTitle!.isNotEmpty
+    final isSeriesSubView = widget.seriesTitle != null && widget.seriesTitle!.isNotEmpty;
+
+    // Filter if viewing a specific series
+    final items = isSeriesSubView
         ? allItems.where((i) => i.title.toLowerCase() == widget.seriesTitle!.toLowerCase()).toList()
         : allItems;
 
-    final displayTitle = widget.seriesTitle ?? (items.isNotEmpty ? items.first.title : 'Downloads');
+    final displayTitle = isSeriesSubView ? widget.seriesTitle! : 'Downloads';
 
     return Scaffold(
       backgroundColor: Colors.black,
@@ -107,15 +155,16 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
       ),
       body: items.isEmpty
           ? _buildEmptyState(context)
-          : _buildActiveState(context, items, downloadProvider),
+          : isSeriesSubView
+              ? _buildSeriesDetailView(context, items, downloadProvider)
+              : _buildTopLevelGroupedView(context, allItems, downloadProvider),
     );
   }
 
-  /// Empty State matching Screenshot 2
+  /// Empty State matching Netflix design
   Widget _buildEmptyState(BuildContext context) {
     return Column(
       children: [
-        // Smart Downloads Subheader (Screenshot 2)
         const Padding(
           padding: EdgeInsets.symmetric(horizontal: 18, vertical: 12),
           child: Row(
@@ -133,18 +182,12 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
             ],
           ),
         ),
-
         const Spacer(flex: 3),
-
-        // Large Circular Download Badge (Screenshot 2)
         CustomPaint(
           size: const Size(180, 180),
           painter: _NetflixDownloadBadgePainter(),
         ),
-
         const SizedBox(height: 28),
-
-        // Subtitle text (Screenshot 2)
         const Padding(
           padding: EdgeInsets.symmetric(horizontal: 40),
           child: Text(
@@ -158,10 +201,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
             ),
           ),
         ),
-
         const SizedBox(height: 38),
-
-        // Crisp White Button: "View More Episodes" (Screenshot 2)
         SizedBox(
           width: 210,
           height: 44,
@@ -176,7 +216,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
               Navigator.of(context).pop();
             },
             child: const Text(
-              'View More Episodes',
+              'Find More to Download',
               style: TextStyle(
                 fontWeight: FontWeight.bold,
                 fontSize: 14,
@@ -185,30 +225,31 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
             ),
           ),
         ),
-
         const Spacer(flex: 4),
       ],
     );
   }
 
-  /// Active Downloads List matching Screenshot 3
-  Widget _buildActiveState(
+  /// Top-Level View: Groups downloads by Movie & Series
+  Widget _buildTopLevelGroupedView(
     BuildContext context,
-    List<DownloadedItem> items,
+    List<DownloadedItem> allItems,
     DownloadProvider downloadProvider,
   ) {
-    // Group items by season
-    final Map<int, List<DownloadedItem>> seasonGroups = {};
-    for (final item in items) {
-      final s = item.season;
-      seasonGroups.putIfAbsent(s, () => []).add(item);
+    // 1. Separate Movies and TV Shows
+    final movies = allItems.where((i) => i.mediaType == 'movie').toList();
+    final tvItems = allItems.where((i) => i.mediaType == 'tv').toList();
+
+    // 2. Group TV items by Series Title
+    final Map<String, List<DownloadedItem>> seriesGroups = {};
+    for (final item in tvItems) {
+      seriesGroups.putIfAbsent(item.title, () => []).add(item);
     }
-    final sortedSeasons = seasonGroups.keys.toList()..sort();
 
     return ListView(
       padding: const EdgeInsets.only(bottom: 30),
       children: [
-        // Smart Downloads Subheader (Screenshot 3)
+        // Smart Downloads Subheader
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
           child: Row(
@@ -244,15 +285,329 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
 
         const SizedBox(height: 8),
 
-        // Season groups
+        // --- Series Cards ---
+        if (seriesGroups.isNotEmpty) ...[
+          const Padding(
+            padding: EdgeInsets.fromLTRB(18, 12, 18, 6),
+            child: Text(
+              'TV SHOWS',
+              style: TextStyle(
+                color: Colors.white54,
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+                letterSpacing: 1.2,
+              ),
+            ),
+          ),
+          ...seriesGroups.entries.map((entry) {
+            final seriesTitle = entry.key;
+            final eps = entry.value;
+            final first = eps.first;
+
+            int totalBytes = 0;
+            int completedCount = 0;
+            bool hasDownloading = false;
+            double avgProgress = 0.0;
+
+            for (final e in eps) {
+              totalBytes += (e.fileSizeBytes > 0 ? e.fileSizeBytes : e.downloadedBytes);
+              if (e.status == 'completed') completedCount++;
+              if (e.status == 'downloading') {
+                hasDownloading = true;
+                avgProgress += e.progress;
+              }
+            }
+            if (hasDownloading) {
+              avgProgress = avgProgress / eps.length;
+            }
+
+            final totalSizeMb = totalBytes / (1024 * 1024);
+            final formattedSize = totalSizeMb >= 1024
+                ? '${(totalSizeMb / 1024).toStringAsFixed(1)} GB'
+                : '${totalSizeMb.toStringAsFixed(0)} MB';
+
+            return Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(8),
+                onTap: () {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(
+                      builder: (_) => DownloadsScreen(seriesTitle: seriesTitle),
+                    ),
+                  );
+                },
+                child: Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF16161A),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.white12, width: 0.8),
+                  ),
+                  child: Row(
+                    children: [
+                      // Thumbnail
+                      _buildThumbnailWidget(
+                        item: first,
+                        width: 72,
+                        height: 96,
+                        is16x9: false,
+                      ),
+                      const SizedBox(width: 14),
+
+                      // Metadata
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              seriesTitle,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            const SizedBox(height: 6),
+                            Text(
+                              '${eps.length} ${eps.length == 1 ? "Episode" : "Episodes"} • $formattedSize',
+                              style: const TextStyle(
+                                color: Colors.white70,
+                                fontSize: 13,
+                              ),
+                            ),
+                            const SizedBox(height: 4),
+                            if (hasDownloading)
+                              Row(
+                                children: [
+                                  SizedBox(
+                                    width: 12,
+                                    height: 12,
+                                    child: CircularProgressIndicator(
+                                      value: avgProgress > 0 ? avgProgress : null,
+                                      strokeWidth: 2,
+                                      color: AppTheme.primaryRed,
+                                    ),
+                                  ),
+                                  const SizedBox(width: 6),
+                                  Text(
+                                    'Downloading ${(avgProgress * 100).toInt()}%',
+                                    style: const TextStyle(
+                                      color: AppTheme.primaryRed,
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ],
+                              )
+                            else
+                              Text(
+                                completedCount == eps.length
+                                    ? 'All episodes downloaded'
+                                    : '$completedCount of ${eps.length} ready',
+                                style: TextStyle(
+                                  color: completedCount == eps.length
+                                      ? const Color(0xFF2ECC71)
+                                      : Colors.white38,
+                                  fontSize: 12,
+                                ),
+                              ),
+                          ],
+                        ),
+                      ),
+
+                      // Action / Trailing
+                      if (_isEditing)
+                        IconButton(
+                          icon: const Icon(Icons.delete_outline, color: AppTheme.primaryRed, size: 24),
+                          onPressed: () {
+                            for (final e in eps) {
+                              downloadProvider.deleteDownload(e.id);
+                            }
+                          },
+                        )
+                      else
+                        const Icon(Icons.chevron_right_rounded, color: Colors.white38, size: 26),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          }),
+        ],
+
+        // --- Movie Cards ---
+        if (movies.isNotEmpty) ...[
+          const Padding(
+            padding: EdgeInsets.fromLTRB(18, 20, 18, 6),
+            child: Text(
+              'MOVIES',
+              style: TextStyle(
+                color: Colors.white54,
+                fontSize: 12,
+                fontWeight: FontWeight.bold,
+                letterSpacing: 1.2,
+              ),
+            ),
+          ),
+          ...movies.map((item) {
+            final isDownloading = item.status == 'downloading';
+            final isCompleted = item.status == 'completed';
+            final progress = item.progress.clamp(0.0, 1.0);
+            final percentInt = (progress * 100).toInt();
+
+            return Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(8),
+                onTap: () {
+                  if (isCompleted) {
+                    _playOffline(context, item);
+                  } else {
+                    downloadProvider.resumeDownload(item.id);
+                  }
+                },
+                child: Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF16161A),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.white12, width: 0.8),
+                  ),
+                  child: Row(
+                    children: [
+                      // Thumbnail
+                      Stack(
+                        alignment: Alignment.center,
+                        children: [
+                          _buildThumbnailWidget(
+                            item: item,
+                            width: 100,
+                            height: 60,
+                            is16x9: true,
+                          ),
+                          if (isCompleted)
+                            Container(
+                              width: 32,
+                              height: 32,
+                              decoration: BoxDecoration(
+                                color: Colors.black.withValues(alpha: 0.65),
+                                shape: BoxShape.circle,
+                                border: Border.all(color: Colors.white70, width: 1.2),
+                              ),
+                              child: const Icon(Icons.play_arrow_rounded, color: Colors.white, size: 20),
+                            ),
+                        ],
+                      ),
+                      const SizedBox(width: 14),
+
+                      // Movie Info
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              item.title,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 15,
+                                fontWeight: FontWeight.bold,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            const SizedBox(height: 4),
+                            Text(
+                              'Movie • ${item.formattedSize} • ${item.quality}',
+                              style: const TextStyle(
+                                color: Colors.white70,
+                                fontSize: 12,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              isDownloading
+                                  ? 'Downloading - $percentInt%'
+                                  : item.status == 'paused'
+                                      ? 'Paused - Tap to resume'
+                                      : item.status == 'failed'
+                                          ? 'Interrupted - Tap to restart'
+                                          : 'Ready to Play',
+                              style: TextStyle(
+                                color: isDownloading
+                                    ? AppTheme.primaryRed
+                                    : item.status == 'paused'
+                                        ? Colors.amber
+                                        : item.status == 'failed'
+                                            ? AppTheme.primaryRed
+                                            : const Color(0xFF2ECC71),
+                                fontSize: 11,
+                                fontWeight: FontWeight.w500,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+
+                      // Trailing action
+                      if (_isEditing)
+                        IconButton(
+                          icon: const Icon(Icons.delete_outline, color: AppTheme.primaryRed, size: 24),
+                          onPressed: () => downloadProvider.deleteDownload(item.id),
+                        )
+                      else if (isDownloading)
+                        CustomPaint(
+                          size: const Size(26, 26),
+                          painter: _PieProgressPainter(progress: progress),
+                        )
+                      else if (item.status == 'paused')
+                        IconButton(
+                          icon: const Icon(Icons.play_circle_filled_rounded, color: Colors.amber, size: 26),
+                          onPressed: () => downloadProvider.resumeDownload(item.id),
+                        )
+                      else
+                        const Icon(Icons.check_circle_rounded, color: Colors.white70, size: 24),
+                    ],
+                  ),
+                ),
+              ),
+            );
+          }),
+        ],
+      ],
+    );
+  }
+
+  /// Series Detail View: Displays all downloaded episodes for that series grouped by Season
+  Widget _buildSeriesDetailView(
+    BuildContext context,
+    List<DownloadedItem> items,
+    DownloadProvider downloadProvider,
+  ) {
+    // Group episodes by season
+    final Map<int, List<DownloadedItem>> seasonGroups = {};
+    for (final item in items) {
+      final s = item.season;
+      seasonGroups.putIfAbsent(s, () => []).add(item);
+    }
+    final sortedSeasons = seasonGroups.keys.toList()..sort();
+
+    return ListView(
+      padding: const EdgeInsets.only(bottom: 30),
+      children: [
         ...sortedSeasons.map((seasonNum) {
           final seasonItems = seasonGroups[seasonNum]!;
+          // Sort by episode number
+          seasonItems.sort((a, b) => a.episode.compareTo(b.episode));
+
           return Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // Season Header (Screenshot 3)
+              // Season Header
               Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 12),
+                padding: const EdgeInsets.fromLTRB(18, 14, 18, 8),
                 child: Text(
                   'Season $seasonNum',
                   style: const TextStyle(
@@ -265,46 +620,17 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
 
               // Episode Items
               ...seasonItems.map((item) {
-                return _buildEpisodeItem(context, item, downloadProvider);
+                return _buildSeriesEpisodeCard(context, item, downloadProvider);
               }),
             ],
           );
         }),
-
-        const SizedBox(height: 36),
-
-        // Dark Charcoal Button: "View More Episodes" (Screenshot 3)
-        Center(
-          child: SizedBox(
-            width: 210,
-            height: 44,
-            child: ElevatedButton(
-              style: ElevatedButton.styleFrom(
-                backgroundColor: const Color(0xFF2A2A2E),
-                foregroundColor: Colors.white,
-                elevation: 0,
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(4)),
-              ),
-              onPressed: () {
-                Navigator.of(context).pop();
-              },
-              child: const Text(
-                'View More Episodes',
-                style: TextStyle(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 14,
-                  letterSpacing: 0.2,
-                ),
-              ),
-            ),
-          ),
-        ),
       ],
     );
   }
 
-  /// Episode Item matching Screenshot 3
-  Widget _buildEpisodeItem(
+  /// Detailed Episode Card: 16:9 Thumbnail, Title, Description Synopsis, Metadata & Offline Play
+  Widget _buildSeriesEpisodeCard(
     BuildContext context,
     DownloadedItem item,
     DownloadProvider downloadProvider,
@@ -314,142 +640,152 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
     final progress = item.progress.clamp(0.0, 1.0);
     final percentInt = (progress * 100).toInt();
 
-    final episodeTitle = item.episodeTitle != null && item.episodeTitle!.isNotEmpty
+    final epTitle = item.episodeTitle != null && item.episodeTitle!.isNotEmpty
         ? '${item.episode}. ${item.episodeTitle}'
-        : item.title;
+        : 'Episode ${item.episode}';
 
-    final imagePath = item.backdropPath ?? item.posterPath;
+    final runtimeStr = item.runtime > 0 ? '${item.runtime}m • ' : '';
+    final metaText = isDownloading
+        ? 'Downloading $percentInt%'
+        : item.status == 'paused'
+            ? 'Paused • Tap to resume'
+            : item.status == 'failed'
+                ? 'Interrupted • Tap to retry'
+                : '$runtimeStr${item.formattedSize} • ${item.quality}';
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-      child: InkWell(
-        onTap: () {
-          if (isCompleted) {
-            _playOffline(context, item);
-          }
-        },
-        borderRadius: BorderRadius.circular(8),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
+      child: Container(
+        padding: const EdgeInsets.all(12),
+        decoration: BoxDecoration(
+          color: const Color(0xFF141416),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: Colors.white10, width: 0.8),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // 16:9 Landscape Thumbnail with Play Overlay (Screenshot 3)
-            Stack(
-              alignment: Alignment.center,
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: [
-                ClipRRect(
-                  borderRadius: BorderRadius.circular(6),
-                  child: Container(
-                    width: 120,
-                    height: 68,
-                    color: const Color(0xFF222228),
-                    child: imagePath != null
-                        ? CachedNetworkImage(
-                            imageUrl: imagePath,
-                            fit: BoxFit.cover,
-                            placeholder: (context, url) => Container(color: const Color(0xFF222228)),
-                            errorWidget: (context, url, error) => const Icon(Icons.movie, color: Colors.white24),
-                          )
-                        : const Icon(Icons.movie, color: Colors.white24),
+                // 16:9 Episode Thumbnail with Play Overlay
+                GestureDetector(
+                  onTap: () {
+                    if (isCompleted) {
+                      _playOffline(context, item);
+                    } else {
+                      downloadProvider.resumeDownload(item.id);
+                    }
+                  },
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      _buildThumbnailWidget(
+                        item: item,
+                        width: 124,
+                        height: 70,
+                        is16x9: true,
+                      ),
+                      Container(
+                        width: 36,
+                        height: 36,
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.65),
+                          shape: BoxShape.circle,
+                          border: Border.all(color: Colors.white70, width: 1.5),
+                        ),
+                        child: Center(
+                          child: Icon(
+                            isCompleted
+                                ? Icons.play_arrow_rounded
+                                : item.status == 'paused'
+                                    ? Icons.refresh_rounded
+                                    : Icons.file_download_outlined,
+                            color: Colors.white,
+                            size: 22,
+                          ),
+                        ),
+                      ),
+                    ],
                   ),
                 ),
-                // Semi-transparent circle overlay with play triangle
-                Container(
-                  width: 38,
-                  height: 38,
-                  decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: 0.65),
-                    shape: BoxShape.circle,
-                    border: Border.all(color: Colors.white60, width: 1.5),
-                  ),
-                  child: const Center(
-                    child: Icon(Icons.play_arrow_rounded, color: Colors.white, size: 24),
+
+                const SizedBox(width: 14),
+
+                // Title & Metadata
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        epTitle,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 15,
+                          fontWeight: FontWeight.bold,
+                        ),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 5),
+                      Text(
+                        metaText,
+                        style: TextStyle(
+                          color: isDownloading
+                              ? AppTheme.primaryRed
+                              : item.status == 'paused'
+                                  ? Colors.amber
+                                  : item.status == 'failed'
+                                      ? AppTheme.primaryRed
+                                      : Colors.white60,
+                          fontSize: 12,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
                   ),
                 ),
+
+                const SizedBox(width: 8),
+
+                // Trailing Action Button
+                if (_isEditing)
+                  IconButton(
+                    icon: const Icon(Icons.delete_outline, color: AppTheme.primaryRed, size: 24),
+                    onPressed: () => downloadProvider.deleteDownload(item.id),
+                  )
+                else if (isDownloading)
+                  CustomPaint(
+                    size: const Size(26, 26),
+                    painter: _PieProgressPainter(progress: progress),
+                  )
+                else if (item.status == 'paused')
+                  IconButton(
+                    icon: const Icon(Icons.play_circle_filled_rounded, color: Colors.amber, size: 26),
+                    onPressed: () => downloadProvider.resumeDownload(item.id),
+                  )
+                else
+                  IconButton(
+                    icon: const Icon(Icons.play_circle_outline_rounded, color: Colors.white70, size: 26),
+                    onPressed: () => _playOffline(context, item),
+                  ),
               ],
             ),
 
-            const SizedBox(width: 14),
-
-            // Middle Info Column (Screenshot 3)
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    episodeTitle,
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 14,
-                      fontWeight: FontWeight.bold,
-                    ),
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    isDownloading
-                        ? 'Downloading - $percentInt%'
-                        : item.status == 'paused'
-                            ? 'Paused - $percentInt%'
-                            : item.status == 'failed'
-                                ? 'Interrupted'
-                                : item.formattedSize,
-                    style: TextStyle(
-                      color: isDownloading
-                          ? Colors.white70
-                          : item.status == 'paused'
-                              ? Colors.amber
-                              : item.status == 'failed'
-                                  ? AppTheme.primaryRed
-                                  : Colors.white54,
-                      fontSize: 12,
-                    ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    item.status == 'completed'
-                        ? 'Ready to Play'
-                        : item.status == 'paused'
-                            ? 'Tap to resume'
-                            : item.status == 'failed'
-                                ? 'Tap to restart'
-                                : 'Saving to device',
-                    style: TextStyle(
-                      color: item.status == 'paused'
-                          ? Colors.amber.withValues(alpha: 0.8)
-                          : Colors.white38,
-                      fontSize: 11,
-                    ),
-                  ),
-                ],
+            // Episode Synopsis / Description
+            if (item.episodeDescription != null && item.episodeDescription!.isNotEmpty) ...[
+              const SizedBox(height: 10),
+              Text(
+                item.episodeDescription!,
+                style: const TextStyle(
+                  color: Colors.white70,
+                  fontSize: 13,
+                  height: 1.35,
+                ),
+                maxLines: 3,
+                overflow: TextOverflow.ellipsis,
               ),
-            ),
-
-            const SizedBox(width: 12),
-
-            // Right Progress Pie Indicator (Screenshot 3)
-            if (_isEditing)
-              IconButton(
-                icon: const Icon(Icons.delete_outline, color: AppTheme.primaryRed, size: 24),
-                onPressed: () => downloadProvider.deleteDownload(item.id),
-              )
-            else if (isDownloading)
-              CustomPaint(
-                size: const Size(26, 26),
-                painter: _PieProgressPainter(progress: progress),
-              )
-            else if (item.status == 'paused')
-              IconButton(
-                icon: const Icon(Icons.play_circle_filled_rounded, color: Colors.amber, size: 26),
-                onPressed: () => downloadProvider.resumeDownload(item.id),
-              )
-            else if (item.status == 'failed')
-              IconButton(
-                icon: const Icon(Icons.refresh_rounded, color: AppTheme.primaryRed, size: 24),
-                onPressed: () => downloadProvider.resumeDownload(item.id),
-              )
-            else
-              const Icon(Icons.check_circle_rounded, color: Colors.white70, size: 24),
+            ],
           ],
         ),
       ),
@@ -457,7 +793,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
   }
 }
 
-/// Large Circular Download Badge with Downward Arrow & Curved Baseline (Screenshot 2)
+/// Large Circular Download Badge with Downward Arrow & Curved Baseline
 class _NetflixDownloadBadgePainter extends CustomPainter {
   @override
   void paint(Canvas canvas, Size size) {
@@ -513,7 +849,7 @@ class _NetflixDownloadBadgePainter extends CustomPainter {
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
-/// Circular Pie Progress Indicator (Screenshot 3)
+/// Circular Pie Progress Indicator
 class _PieProgressPainter extends CustomPainter {
   final double progress;
 
@@ -533,7 +869,7 @@ class _PieProgressPainter extends CustomPainter {
 
     // Filled pie sector
     final fillPaint = Paint()
-      ..color = Colors.white
+      ..color = AppTheme.primaryRed
       ..style = PaintingStyle.fill;
 
     final sweepAngle = (progress.clamp(0.0, 1.0)) * 2 * 3.1415926535;

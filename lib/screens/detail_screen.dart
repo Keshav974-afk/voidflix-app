@@ -628,8 +628,11 @@ class _DetailScreenState extends State<DetailScreen> {
                               season: _selectedSeason,
                               episode: targetEpNum,
                               episodeTitle: firstEp?.name,
+                              episodeDescription: firstEp?.overview ?? detail.overview,
                               posterPath: detail.posterPath,
                               backdropPath: detail.backdropPath,
+                              stillPath: firstEp?.stillPath,
+                              runtime: firstEp != null && firstEp.runtime > 0 ? firstEp.runtime : (detail.runtime ?? 0),
                             );
                           },
                           style: ElevatedButton.styleFrom(
@@ -803,8 +806,11 @@ class _DetailScreenState extends State<DetailScreen> {
                                 season: _selectedSeason,
                                 episode: ep.episodeNumber,
                                 episodeTitle: ep.name,
+                                episodeDescription: ep.overview,
                                 posterPath: detail.posterPath,
                                 backdropPath: detail.backdropPath,
+                                stillPath: ep.stillPath,
+                                runtime: ep.runtime,
                               );
                             }
                           }
@@ -1119,8 +1125,11 @@ class _DetailScreenState extends State<DetailScreen> {
                                           season: _selectedSeason,
                                           episode: ep.episodeNumber,
                                           episodeTitle: ep.name,
+                                          episodeDescription: ep.overview,
                                           posterPath: detail.posterPath,
                                           backdropPath: detail.backdropPath,
+                                          stillPath: ep.stillPath,
+                                          runtime: ep.runtime,
                                         );
                                       },
                                     ),
