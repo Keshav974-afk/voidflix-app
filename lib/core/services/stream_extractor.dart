@@ -175,6 +175,123 @@ class StreamExtractor {
     return [];
   }
 
+  /// Fetches an already extracted and cached stream directly from our central Cloudflare database.
+  static Future<ExtractedStream?> fetchFromRemoteDatabase(
+    String type,
+    int tmdbId,
+    int season,
+    int episode, {
+    String server = '',
+  }) async {
+    try {
+      final uri = Uri.parse(
+        'https://voidflix.org/api/public/extract?type=$type&id=$tmdbId&s=$season&e=$episode&server=$server',
+      );
+      final res = await http.get(uri).timeout(const Duration(seconds: 4));
+      if (res.statusCode == 200) {
+        final data = jsonDecode(res.body) as Map<String, dynamic>;
+        final hlsUrl = (data['hls'] ?? data['url']) as String?;
+        if (hlsUrl != null && hlsUrl.isNotEmpty) {
+          String resolveUrl(String u) {
+            if (u.startsWith('http')) return u;
+            if (u.startsWith('/')) return 'https://voidflix.org$u';
+            return 'https://voidflix.org/$u';
+          }
+
+          final finalUrl = resolveUrl(hlsUrl);
+          final qualities = <StreamQuality>[];
+          final rawQualities = data['qualities'] as List<dynamic>?;
+          if (rawQualities != null) {
+            for (final q in rawQualities) {
+              if (q is Map<String, dynamic> && q['url'] != null) {
+                final qUrl = resolveUrl(q['url'] as String);
+                final label = (q['label'] as String?) ?? 'HD';
+                final height = (q['height'] as num?)?.toInt() ?? 0;
+                qualities.add(StreamQuality(label: label, height: height, url: qUrl));
+              }
+            }
+          }
+
+          final subs = <SubtitleTrack>[];
+          final rawSubs = (data['subs'] ?? data['subtitles']) as List<dynamic>?;
+          if (rawSubs != null) {
+            for (final s in rawSubs) {
+              if (s is Map<String, dynamic> && s['url'] != null) {
+                subs.add(SubtitleTrack(
+                  label: s['label']?.toString() ?? 'English',
+                  language: s['lang']?.toString() ?? s['language']?.toString() ?? 'en',
+                  url: resolveUrl(s['url'].toString()),
+                ));
+              }
+            }
+          }
+
+          final prov = data['provider'] ?? data['sourceName'] ?? (server.isNotEmpty ? server : 'Cine4K (Database)');
+
+          return ExtractedStream(
+            url: finalUrl,
+            type: (data['kind'] ?? data['type'] ?? 'hls').toString(),
+            sourceName: prov.toString(),
+            headers: (data['headers'] as Map<dynamic, dynamic>?)?.map(
+                  (k, v) => MapEntry(k.toString(), v.toString()),
+                ) ??
+                (data['referer'] != null ? {'Referer': data['referer'].toString()} : {}),
+            qualities: qualities,
+            subtitles: subs,
+          );
+        }
+      }
+    } catch (e) {
+      debugPrint('StreamExtractor: Remote database fetch skipped: $e');
+    }
+    return null;
+  }
+
+  /// Saves a successfully extracted stream link to our central Cloudflare KV database for all app and web users.
+  static void saveToRemoteDatabase(
+    String type,
+    int tmdbId,
+    int season,
+    int episode,
+    ExtractedStream stream, {
+    String server = '',
+  }) {
+    if (stream.url.isEmpty) return;
+    // Asynchronous background fire-and-forget save
+    Future(() async {
+      try {
+        final uri = Uri.parse('https://voidflix.org/api/public/extract');
+        final payload = {
+          'type': type,
+          'id': tmdbId,
+          's': season,
+          'e': episode,
+          'server': server.isNotEmpty ? server : stream.sourceName,
+          'stream': {
+            'url': stream.url,
+            'hls': stream.url,
+            'type': stream.type,
+            'kind': stream.type,
+            'sourceName': stream.sourceName,
+            'headers': stream.headers,
+            'qualities': stream.qualities.map((q) => q.toJson()).toList(),
+            'subtitles': stream.subtitles.map((s) => s.toJson()).toList(),
+          },
+        };
+        await http
+            .post(
+              uri,
+              headers: {'Content-Type': 'application/json'},
+              body: jsonEncode(payload),
+            )
+            .timeout(const Duration(seconds: 5));
+        debugPrint('StreamExtractor: Stream saved to central Cloudflare KV database for $type $tmdbId');
+      } catch (e) {
+        debugPrint('StreamExtractor: Error saving stream to database: $e');
+      }
+    });
+  }
+
   /// Sets cached streams in both in-memory map and asynchronous SharedPreferences.
   static void setCachedEntry(String key, List<ExtractedStream> streams) {
     if (streams.isEmpty) return;
@@ -182,6 +299,31 @@ class StreamExtractor {
     _cache[key] = entry;
 
     SharedPreferences.getInstance().then((prefs) => prefs.setString('cached_stream_$key', jsonEncode(entry.toJson()))).catchError((_) => false);
+
+    // Save extracted streams to central Cloudflare database so all users get it directly
+    try {
+      final parts = key.split(':');
+      if (parts.length >= 4) {
+        final episode = int.tryParse(parts.last) ?? 1;
+        final season = int.tryParse(parts[parts.length - 2]) ?? 1;
+        final tmdbId = int.tryParse(parts[parts.length - 3]) ?? 0;
+        final type = parts[parts.length - 4];
+        final prefix = parts.length > 4 ? parts.first : '';
+
+        if (tmdbId > 0) {
+          for (final s in streams) {
+            saveToRemoteDatabase(
+              type,
+              tmdbId,
+              season,
+              episode,
+              s,
+              server: prefix.isNotEmpty ? prefix : s.sourceName,
+            );
+          }
+        }
+      }
+    } catch (_) {}
   }
 
   static void invalidateCache(String type, int tmdbId, int season, int episode) {
@@ -751,10 +893,20 @@ class StreamExtractor {
     final key = getCacheKey(type, tmdbId, season, episode);
 
     if (!forceRefresh) {
+      // 1. In-memory & local SharedPreferences cache check
       final cached = await getCachedEntry(key);
       if (cached != null && cached.streams.isNotEmpty) {
         debugPrint('StreamExtractor: Reusing cached aggregated streams for $key (instant!)');
         return cached.streams;
+      }
+
+      // 2. Cloudflare KV Database check (instant direct playback without re-scraping!)
+      final remoteStream = await fetchFromRemoteDatabase(type, tmdbId, season, episode);
+      if (remoteStream != null) {
+        debugPrint('StreamExtractor: Retrieved direct stream from Cloudflare KV database for $key (instant 0ms!)');
+        final remoteEntry = [remoteStream];
+        setCachedEntry(key, remoteEntry);
+        return remoteEntry;
       }
     }
 

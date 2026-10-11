@@ -1,7 +1,10 @@
 import 'package:flutter/material.dart';
 import '../core/constants/theme_constants.dart';
+import '../core/services/remote_config_service.dart';
+import '../widgets/admin_modals.dart';
 import '../widgets/brand_header.dart';
 import '../widgets/floating_bottom_bar.dart';
+import 'update_required_screen.dart';
 import 'home_screen.dart';
 import 'movies_screen.dart';
 import 'series_screen.dart';
@@ -24,6 +27,20 @@ class MainNavigationScreen extends StatefulWidget {
 class _MainNavigationScreenState extends State<MainNavigationScreen> {
   int _activeCategoryIndex = 0; // 0: Home, 1: Series, 2: Films, 3: New & Hot, etc.
   int _bottomTabIndex = 0; // 0: Home, 1: Clips, 2: Search, 3: My Voidflix
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (RemoteConfigService.isUpdateAvailable) {
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (_) => const UpdateRequiredScreen()),
+        );
+      } else {
+        AdminModals.checkAndShowModals(context);
+      }
+    });
+  }
 
   final List<Widget> _categoryScreens = const [
     HomeScreen(),

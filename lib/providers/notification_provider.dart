@@ -3,6 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../core/network/api_service.dart';
+import '../core/services/remote_config_service.dart';
 import '../models/media_item.dart';
 
 class AppNotification {
@@ -12,6 +13,9 @@ class AppNotification {
   final DateTime timestamp;
   final MediaItem? mediaItem;
   final bool isRead;
+  final String? deepLink;
+  final String? imageUrl;
+  final bool isAdminBroadcast;
 
   AppNotification({
     required this.id,
@@ -20,6 +24,9 @@ class AppNotification {
     required this.timestamp,
     this.mediaItem,
     this.isRead = false,
+    this.deepLink,
+    this.imageUrl,
+    this.isAdminBroadcast = false,
   });
 }
 
@@ -83,34 +90,49 @@ class NotificationProvider extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
 
     try {
-      final upcoming = await _apiService.getUpcomingMovies();
-      final trending = await _apiService.getTrendingAll();
-
       final List<AppNotification> list = [];
 
-      // Add upcoming movie updates
-      for (final item in upcoming.take(6)) {
-        final releaseDate = item.releaseDate ?? '';
+      // 1. Fetch live admin broadcasts & automated push from Mission Control
+      await RemoteConfigService.fetchConfig();
+      final adminBroadcasts = RemoteConfigService.cachedNotifications;
+
+      for (final n in adminBroadcasts) {
+        final sentEpoch = n.sentAt.millisecondsSinceEpoch;
+        final isSeen = _lastSeenEpoch >= sentEpoch;
         list.add(
           AppNotification(
-            id: 'upcoming_${item.id}',
-            title: '🎬 Coming Soon: ${item.title}',
-            message: releaseDate.isNotEmpty
-                ? 'Arriving in theaters & streaming on $releaseDate. Tap for details!'
-                : 'Added to upcoming premieres list.',
-            timestamp: DateTime.tryParse(releaseDate) ?? DateTime.now(),
-            mediaItem: item,
-            isRead: _lastSeenEpoch >= (DateTime.tryParse(releaseDate)?.millisecondsSinceEpoch ?? 0),
+            id: 'admin_${n.id}',
+            title: n.title,
+            message: n.body,
+            timestamp: n.sentAt,
+            isRead: isSeen,
+            deepLink: n.deepLink,
+            imageUrl: n.imageUrl,
+            isAdminBroadcast: true,
           ),
         );
+
+        // Fire native device status bar notification for new admin broadcasts
+        final notifiedKey = 'admin_notified_${n.id}';
+        if (!prefs.containsKey(notifiedKey) && !isSeen) {
+          await prefs.setBool(notifiedKey, true);
+          await showDeviceNotification(
+            id: n.id.hashCode.abs() % 100000,
+            title: n.title,
+            body: n.body,
+          );
+        }
       }
+
+      // 2. Fetch TMDB Upcoming & Trending items
+      final upcoming = await _apiService.getUpcomingMovies().catchError((_) => <MediaItem>[]);
+      final trending = await _apiService.getTrendingAll().catchError((_) => <MediaItem>[]);
 
       // Add trending top pick notification
       if (trending.isNotEmpty) {
         final top = trending.first;
         final topId = 'top_${top.id}';
-        list.insert(
-          0,
+        list.add(
           AppNotification(
             id: topId,
             title: '🔥 #1 Trending Today: ${top.title}',
@@ -133,6 +155,23 @@ class NotificationProvider extends ChangeNotifier {
         }
       }
 
+      // Add upcoming movie updates
+      for (final item in upcoming.take(6)) {
+        final releaseDate = item.releaseDate ?? '';
+        list.add(
+          AppNotification(
+            id: 'upcoming_${item.id}',
+            title: '🎬 Coming Soon: ${item.title}',
+            message: releaseDate.isNotEmpty
+                ? 'Arriving in theaters & streaming on $releaseDate. Tap for details!'
+                : 'Added to upcoming premieres list.',
+            timestamp: DateTime.tryParse(releaseDate) ?? DateTime.now(),
+            mediaItem: item,
+            isRead: _lastSeenEpoch >= (DateTime.tryParse(releaseDate)?.millisecondsSinceEpoch ?? 0),
+          ),
+        );
+      }
+
       // Fire Welcome to Voidflix device status bar notification on first launch
       final welcomeSent = prefs.getBool(_keyWelcomeSent) ?? false;
       if (!welcomeSent) {
@@ -145,8 +184,8 @@ class NotificationProvider extends ChangeNotifier {
       }
 
       _notifications = list;
-    } catch (_) {
-      // Fallback notifications if network is offline
+    } catch (err) {
+      debugPrint('NotificationProvider error: $err');
       _notifications = [
         AppNotification(
           id: 'welcome',
@@ -156,16 +195,6 @@ class NotificationProvider extends ChangeNotifier {
           isRead: false,
         ),
       ];
-
-      final welcomeSent = prefs.getBool(_keyWelcomeSent) ?? false;
-      if (!welcomeSent) {
-        await prefs.setBool(_keyWelcomeSent, true);
-        await showDeviceNotification(
-          id: 1001,
-          title: '🎉 Welcome to Voidflix!',
-          body: 'Enjoy unlimited HD movies, TV shows, and Live IPTV channels on Voidflix.',
-        );
-      }
     } finally {
       _isLoading = false;
       notifyListeners();
@@ -186,6 +215,9 @@ class NotificationProvider extends ChangeNotifier {
               timestamp: n.timestamp,
               mediaItem: n.mediaItem,
               isRead: true,
+              deepLink: n.deepLink,
+              imageUrl: n.imageUrl,
+              isAdminBroadcast: n.isAdminBroadcast,
             ))
         .toList();
     notifyListeners();
@@ -201,7 +233,7 @@ class NotificationProvider extends ChangeNotifier {
       await showDeviceNotification(
         id: 9999,
         title: '🔔 Voidflix Notifications Active',
-        body: 'You will receive alerts for new 4K releases and trending shows.',
+        body: 'You will receive alerts for new 4K releases, admin updates, and trending shows.',
       );
     }
   }

@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 import '../core/constants/api_constants.dart';
 import '../core/constants/theme_constants.dart';
 import '../providers/notification_provider.dart';
@@ -80,7 +81,7 @@ class NotificationsSheet extends StatelessWidget {
                       final media = item.mediaItem;
                       final posterUrl = media != null
                           ? ApiConstants.getImageUrl(media.posterPath, size: 'w200')
-                          : '';
+                          : (item.imageUrl ?? '');
 
                       return InkWell(
                         onTap: () {
@@ -94,6 +95,27 @@ class NotificationsSheet extends StatelessWidget {
                                 ),
                               ),
                             );
+                          } else if (item.deepLink != null && item.deepLink!.isNotEmpty) {
+                            Navigator.pop(context);
+                            final link = item.deepLink!;
+                            if (link.startsWith('http')) {
+                              launchUrl(Uri.parse(link), mode: LaunchMode.externalApplication);
+                            } else if (link.contains('/watch/')) {
+                              // Deep link to watch route: /watch/:type/:id
+                              final parts = link.split('/');
+                              final typeIndex = parts.indexOf('watch') + 1;
+                              if (typeIndex < parts.length - 1) {
+                                final type = parts[typeIndex];
+                                final id = int.tryParse(parts[typeIndex + 1]) ?? 0;
+                                if (id > 0) {
+                                  Navigator.of(context).push(
+                                    MaterialPageRoute(
+                                      builder: (_) => DetailScreen(mediaId: id, mediaType: type),
+                                    ),
+                                  );
+                                }
+                              }
+                            }
                           }
                         },
                         borderRadius: BorderRadius.circular(8),
@@ -112,6 +134,12 @@ class NotificationsSheet extends StatelessWidget {
                                     height: 75,
                                     fit: BoxFit.cover,
                                     placeholder: (c, u) => Container(color: AppTheme.cardColor),
+                                    errorWidget: (c, u, e) => Container(
+                                      width: 50,
+                                      height: 50,
+                                      color: AppTheme.cardColor,
+                                      child: const Icon(Icons.campaign, color: AppTheme.primaryRed),
+                                    ),
                                   ),
                                 )
                               else
@@ -119,10 +147,15 @@ class NotificationsSheet extends StatelessWidget {
                                   width: 50,
                                   height: 50,
                                   decoration: BoxDecoration(
-                                    color: AppTheme.cardColor,
+                                    color: item.isAdminBroadcast
+                                        ? AppTheme.primaryRed.withValues(alpha: 0.15)
+                                        : AppTheme.cardColor,
                                     borderRadius: BorderRadius.circular(8),
                                   ),
-                                  child: const Icon(Icons.movie, color: AppTheme.primaryRed),
+                                  child: Icon(
+                                    item.isAdminBroadcast ? Icons.campaign : Icons.movie,
+                                    color: AppTheme.primaryRed,
+                                  ),
                                 ),
                               const SizedBox(width: 14),
 
@@ -131,6 +164,24 @@ class NotificationsSheet extends StatelessWidget {
                                 child: Column(
                                   crossAxisAlignment: CrossAxisAlignment.start,
                                   children: [
+                                    if (item.isAdminBroadcast)
+                                      Container(
+                                        margin: const EdgeInsets.only(bottom: 4),
+                                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                        decoration: BoxDecoration(
+                                          color: AppTheme.primaryRed,
+                                          borderRadius: BorderRadius.circular(4),
+                                        ),
+                                        child: const Text(
+                                          'ADMIN ANNOUNCEMENT',
+                                          style: TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 9,
+                                            fontWeight: FontWeight.bold,
+                                            letterSpacing: 0.5,
+                                          ),
+                                        ),
+                                      ),
                                     Row(
                                       children: [
                                         Expanded(
@@ -163,6 +214,18 @@ class NotificationsSheet extends StatelessWidget {
                                         height: 1.3,
                                       ),
                                     ),
+                                    if (item.deepLink != null && item.deepLink!.isNotEmpty)
+                                      Padding(
+                                        padding: const EdgeInsets.only(top: 4),
+                                        child: Text(
+                                          'Tap to open: ${item.deepLink}',
+                                          style: const TextStyle(
+                                            color: AppTheme.primaryRed,
+                                            fontSize: 11,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                      ),
                                   ],
                                 ),
                               ),

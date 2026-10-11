@@ -5,8 +5,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
 import '../core/constants/voidflix_svg_asset.dart';
+import '../core/services/remote_config_service.dart';
+import '../core/services/app_analytics_service.dart';
 import 'onboarding_screen.dart';
 import 'profile_gate_screen.dart';
+import 'update_required_screen.dart';
 
 /// Authentic Netflix-Grade Splash Screen for VOIDFLIX.
 ///
@@ -117,6 +120,28 @@ $voidflixSwoopSvg
     if (_navigated || !mounted) return;
     _navigated = true;
     _cancelTimers();
+
+    // 1. Report device heartbeat & register user in Voidflix Mission Control
+    unawaited(AppAnalyticsService.sendPing());
+
+    // 2. Fetch live remote configuration from Voidflix edge database
+    await RemoteConfigService.fetchConfig();
+
+    // 3. Strict Version Gating: If current app version is older, DO NOT RUN THE APP.
+    // Only show "Please update your app" screen!
+    if (RemoteConfigService.isUpdateAvailable) {
+      if (!mounted) return;
+      Navigator.of(context).pushReplacement(
+        PageRouteBuilder(
+          pageBuilder: (context, animation, secondaryAnimation) => const UpdateRequiredScreen(),
+          transitionsBuilder: (context, animation, secondaryAnimation, child) {
+            return FadeTransition(opacity: animation, child: child);
+          },
+          transitionDuration: const Duration(milliseconds: 300),
+        ),
+      );
+      return;
+    }
 
     final prefs = await SharedPreferences.getInstance();
     final bool alreadyDone = prefs.getBool('voidflix_global_onboarding_completed') ?? false;
