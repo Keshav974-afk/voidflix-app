@@ -36,9 +36,11 @@ class AppAnalyticsService {
       final body = jsonEncode({
         'deviceId': deviceId,
         'appVersion': RemoteConfigService.currentAppVersion,
-        'deviceModel': 'Android Mobile Device',
+        'deviceModel': 'Voidflix Android App',
         'osVersion': osVersion,
         'platform': platform,
+        'isNativeApp': true,
+        'source': 'voidflix_flutter_app',
       });
 
       final res = await http
