@@ -560,36 +560,57 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
     final masterKey = '${widget.mediaType}:${widget.mediaId}:$_currentSeason:$_currentEpisode';
     final serverKey = '${server.name.toLowerCase()}:$masterKey';
+    final isSpecificServer = !server.name.toLowerCase().contains('voiddirect') &&
+                             !server.name.toLowerCase().contains('auto') &&
+                             !server.name.toLowerCase().contains('default');
 
-    // 1. Instant local cache lookup (0ms playback)
-    final localCached = await StreamExtractor.getCachedEntry(serverKey) ??
-                         await StreamExtractor.getCachedEntry(masterKey);
-    if (localCached != null && localCached.streams.isNotEmpty) {
-      debugPrint('⚡ [StreamExtractor] Instant local cache hit for $serverKey');
-      await _setupExtractedStreamsPlayback(localCached.streams, startPosition: startPosition);
-      return;
-    }
+    if (isSpecificServer) {
+      // 1. Instant local cache lookup for THIS specific server (0ms)
+      final localCached = await StreamExtractor.getCachedEntry(serverKey);
+      if (localCached != null && localCached.streams.isNotEmpty) {
+        debugPrint('⚡ [StreamExtractor] Instant local cache hit for $serverKey');
+        await _setupExtractedStreamsPlayback(localCached.streams, startPosition: startPosition);
+        return;
+      }
 
-    // 2. Central Cloudflare KV / R2 database lookup (instantly plays previously extracted media without running scrapers)
-    final remoteStream = await StreamExtractor.fetchFromRemoteDatabase(
-      widget.mediaType,
-      widget.mediaId,
-      _currentSeason,
-      _currentEpisode,
-      server: server.name,
-    ) ?? await StreamExtractor.fetchFromRemoteDatabase(
-      widget.mediaType,
-      widget.mediaId,
-      _currentSeason,
-      _currentEpisode,
-    );
+      // 2. Central Cloudflare KV / R2 database lookup for THIS specific server
+      final remoteStream = await StreamExtractor.fetchFromRemoteDatabase(
+        widget.mediaType,
+        widget.mediaId,
+        _currentSeason,
+        _currentEpisode,
+        server: server.name,
+      );
 
-    if (remoteStream != null && remoteStream.url.isNotEmpty) {
-      debugPrint('☁️ [StreamExtractor] Remote Cloudflare DB hit for $masterKey');
-      StreamExtractor.setCachedEntry(serverKey, [remoteStream]);
-      StreamExtractor.setCachedEntry(masterKey, [remoteStream]);
-      await _setupExtractedStreamsPlayback([remoteStream], startPosition: startPosition);
-      return;
+      if (remoteStream != null && remoteStream.url.isNotEmpty) {
+        debugPrint('☁️ [StreamExtractor] Remote Cloudflare DB hit for $serverKey');
+        StreamExtractor.setCachedEntry(serverKey, [remoteStream], hydrateMaster: false);
+        await _setupExtractedStreamsPlayback([remoteStream], startPosition: startPosition);
+        return;
+      }
+    } else {
+      // 1. Instant local cache lookup for general/aggregated streams (0ms)
+      final localCached = await StreamExtractor.getCachedEntry(masterKey);
+      if (localCached != null && localCached.streams.isNotEmpty) {
+        debugPrint('⚡ [StreamExtractor] Instant local cache hit for master $masterKey');
+        await _setupExtractedStreamsPlayback(localCached.streams, startPosition: startPosition);
+        return;
+      }
+
+      // 2. Central Cloudflare KV / R2 database lookup for default stream
+      final remoteStream = await StreamExtractor.fetchFromRemoteDatabase(
+        widget.mediaType,
+        widget.mediaId,
+        _currentSeason,
+        _currentEpisode,
+      );
+
+      if (remoteStream != null && remoteStream.url.isNotEmpty) {
+        debugPrint('☁️ [StreamExtractor] Remote Cloudflare DB hit for default $masterKey');
+        StreamExtractor.setCachedEntry(masterKey, [remoteStream], hydrateMaster: true);
+        await _setupExtractedStreamsPlayback([remoteStream], startPosition: startPosition);
+        return;
+      }
     }
 
     try {
@@ -653,12 +674,20 @@ class _PlayerScreenState extends State<PlayerScreen> {
         );
         if (v != null) streams = [v];
       } else {
-        // VoidDirect / default: multi-source extraction (Cinejoy + Vidrock in parallel)
+        // VoidDirect / default: parallel concurrent race across ALL sources!
+        // Plays the fastest arriving stream immediately without waiting for slower ones.
         streams = await StreamExtractor.extractAll(
           type: widget.mediaType,
           tmdbId: widget.mediaId,
           season: _currentSeason,
           episode: _currentEpisode,
+          onAdditionalStreams: (moreStreams) {
+            if (mounted && moreStreams.length > _directStreams.length) {
+              setState(() {
+                _directStreams = moreStreams;
+              });
+            }
+          },
         );
       }
 
@@ -666,8 +695,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
       if (streams.isNotEmpty) {
         // Cache locally and persist to central Cloudflare KV/R2 database
-        StreamExtractor.setCachedEntry(serverKey, streams);
-        StreamExtractor.setCachedEntry(masterKey, streams);
+        StreamExtractor.setCachedEntry(serverKey, streams, hydrateMaster: !isSpecificServer);
         for (final s in streams) {
           StreamExtractor.saveToRemoteDatabase(
             widget.mediaType,
@@ -675,9 +703,21 @@ class _PlayerScreenState extends State<PlayerScreen> {
             _currentSeason,
             _currentEpisode,
             s,
-            server: server.name,
+            server: isSpecificServer ? server.name : s.sourceName,
           );
         }
+
+        // If a specific server was extracted, asynchronously trigger extractAll in background
+        // so all other servers are also warmed up into the database for future use!
+        if (isSpecificServer) {
+          StreamExtractor.extractAll(
+            type: widget.mediaType,
+            tmdbId: widget.mediaId,
+            season: _currentSeason,
+            episode: _currentEpisode,
+          ).catchError((_) => <ExtractedStream>[]);
+        }
+
         await _setupExtractedStreamsPlayback(streams, startPosition: startPosition);
       } else {
         debugPrint('Direct extraction for ${server.name} returned 0 streams. Trying next native server.');
