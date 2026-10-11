@@ -184,9 +184,14 @@ class StreamExtractor {
     String server = '',
   }) async {
     try {
-      final uri = Uri.parse(
-        'https://voidflix.org/api/public/extract?type=$type&id=$tmdbId&s=$season&e=$episode&server=$server',
-      );
+      final queryParams = {
+        'type': type,
+        'id': tmdbId.toString(),
+        's': season.toString(),
+        'e': episode.toString(),
+        if (server.isNotEmpty) 'server': server,
+      };
+      final uri = Uri.https('voidflix.org', '/api/public/extract', queryParams);
       final res = await http.get(uri).timeout(const Duration(seconds: 4));
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body) as Map<String, dynamic>;
@@ -309,6 +314,13 @@ class StreamExtractor {
         final tmdbId = int.tryParse(parts[parts.length - 3]) ?? 0;
         final type = parts[parts.length - 4];
         final prefix = parts.length > 4 ? parts.first : '';
+
+        // Also hydrate master general key if prefixed key was saved
+        if (prefix.isNotEmpty) {
+          final masterKey = '$type:$tmdbId:$season:$episode';
+          _cache[masterKey] = entry;
+          SharedPreferences.getInstance().then((prefs) => prefs.setString('cached_stream_$masterKey', jsonEncode(entry.toJson()))).catchError((_) => false);
+        }
 
         if (tmdbId > 0) {
           for (final s in streams) {

@@ -58,9 +58,23 @@ class NotificationProvider extends ChangeNotifier {
 
   Future<void> _init() async {
     final prefs = await SharedPreferences.getInstance();
-    _lastSeenEpoch = prefs.getInt(_keySeenTimestamp) ?? 0;
-    _notificationsEnabled = prefs.getBool(_keyPushEnabled) ?? true;
+    final bool isFirstRun = !prefs.containsKey(_keySeenTimestamp);
 
+    if (isFirstRun) {
+      // For new users, set last seen to NOW so past notifications are never fired or marked unread!
+      _lastSeenEpoch = DateTime.now().millisecondsSinceEpoch;
+      await prefs.setInt(_keySeenTimestamp, _lastSeenEpoch);
+
+      // Pre-seed all existing notification IDs so no historic alerts trigger
+      await RemoteConfigService.fetchConfig();
+      for (final n in RemoteConfigService.cachedNotifications) {
+        await prefs.setBool('admin_notified_${n.id}', true);
+      }
+    } else {
+      _lastSeenEpoch = prefs.getInt(_keySeenTimestamp) ?? DateTime.now().millisecondsSinceEpoch;
+    }
+
+    _notificationsEnabled = prefs.getBool(_keyPushEnabled) ?? true;
     await fetchUpdates();
   }
 
@@ -97,6 +111,9 @@ class NotificationProvider extends ChangeNotifier {
       final adminBroadcasts = RemoteConfigService.cachedNotifications;
 
       for (final n in adminBroadcasts) {
+        // Respect targeting: skip notifications targeted strictly to web browsers
+        if (n.target.toLowerCase() == 'web') continue;
+
         final sentEpoch = n.sentAt.millisecondsSinceEpoch;
         final isSeen = _lastSeenEpoch >= sentEpoch;
         list.add(
@@ -112,7 +129,7 @@ class NotificationProvider extends ChangeNotifier {
           ),
         );
 
-        // Fire native device status bar notification for new admin broadcasts
+        // Only fire native status bar alert if it was dispatched AFTER user's last seen epoch
         final notifiedKey = 'admin_notified_${n.id}';
         if (!prefs.containsKey(notifiedKey) && !isSeen) {
           await prefs.setBool(notifiedKey, true);

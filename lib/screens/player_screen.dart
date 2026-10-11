@@ -75,6 +75,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   // Playback speed system (Netflix feature)
   double _playbackSpeed = 1.0;
+  bool _isHolding2xSpeed = false;
+  double _savedSpeedBeforeHold = 1.0;
+
+  // Picture-in-Picture (PiP) system
+  bool _isInPipMode = false;
 
   // Native Video Player state
   VideoPlayerController? _videoPlayerController;
@@ -165,6 +170,19 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
 
     _startHideControlsTimer();
+    const MethodChannel('org.voidflix/notifications').setMethodCallHandler((call) async {
+      if (call.method == 'onPipModeChanged') {
+        final inPip = call.arguments as bool? ?? false;
+        if (mounted) {
+          setState(() {
+            _isInPipMode = inPip;
+            if (inPip) {
+              _showControls = false;
+            }
+          });
+        }
+      }
+    });
   }
 
   @override
@@ -457,6 +475,75 @@ class _PlayerScreenState extends State<PlayerScreen> {
     });
   }
 
+  Future<void> _setupExtractedStreamsPlayback(List<ExtractedStream> streams, {Duration? startPosition}) async {
+    if (!mounted || streams.isEmpty) return;
+
+    _directStreams = streams;
+
+    // Retrieve active profile language preferences
+    final profile = context.read<ProfileProvider>().activeProfile;
+    final preferredAudio = profile.preferredAudioLang;
+    final preferredSub = profile.preferredSubtitleLang;
+    final preferredList = profile.preferredLanguages;
+
+    final audioPrefs = [
+      if (preferredAudio != null && preferredAudio.isNotEmpty) preferredAudio,
+      ...preferredList,
+    ];
+    final subPrefs = [
+      if (preferredSub != null && preferredSub.isNotEmpty) preferredSub,
+      if (preferredAudio != null && preferredAudio.isNotEmpty) preferredAudio,
+      ...preferredList,
+    ];
+
+    // 1. Pick audio stream index with user priority (profile -> English -> any)
+    final chosenAudioIdx = LanguageUtils.pickBestAudioIndex(
+      streams,
+      preferredLangs: audioPrefs,
+    );
+    _selectedStreamIndex = chosenAudioIdx;
+
+    // Aggregate subtitles from all sources
+    final allSubs = <SubtitleTrack>[];
+    final seenSubUrls = <String>{};
+    for (final s in streams) {
+      for (final sub in s.subtitles) {
+        if (!seenSubUrls.contains(sub.url)) {
+          seenSubUrls.add(sub.url);
+          allSubs.add(sub);
+        }
+      }
+    }
+
+    // If the extracted stream cluster has no embedded subtitles, borrow cached subtitles
+    if (allSubs.isEmpty) {
+      final shared = await StreamExtractor.getSharedSubtitles(
+        widget.mediaType,
+        widget.mediaId,
+        _currentSeason,
+        _currentEpisode,
+      );
+      for (final sub in shared) {
+        if (!seenSubUrls.contains(sub.url)) {
+          seenSubUrls.add(sub.url);
+          allSubs.add(sub);
+        }
+      }
+    }
+    _subtitles = allSubs;
+
+    // 2. Pick subtitle with user priority (profile -> English -> any)
+    final bestSub = LanguageUtils.pickBestSubtitle(
+      allSubs,
+      preferredLangs: subPrefs,
+    );
+    if (bestSub != null) {
+      _selectSubtitle(bestSub);
+    }
+
+    await _initNativePlayer(streams[chosenAudioIdx], startPosition: startPosition);
+  }
+
   Future<void> _loadServerDirect(int serverIdx, {Duration? startPosition}) async {
     _triedNativeServerIndices.add(serverIdx);
     final server = ServerConfig.servers[serverIdx];
@@ -470,6 +557,40 @@ class _PlayerScreenState extends State<PlayerScreen> {
     });
 
     _disposeVideoController();
+
+    final masterKey = '${widget.mediaType}:${widget.mediaId}:$_currentSeason:$_currentEpisode';
+    final serverKey = '${server.name.toLowerCase()}:$masterKey';
+
+    // 1. Instant local cache lookup (0ms playback)
+    final localCached = await StreamExtractor.getCachedEntry(serverKey) ??
+                         await StreamExtractor.getCachedEntry(masterKey);
+    if (localCached != null && localCached.streams.isNotEmpty) {
+      debugPrint('⚡ [StreamExtractor] Instant local cache hit for $serverKey');
+      await _setupExtractedStreamsPlayback(localCached.streams, startPosition: startPosition);
+      return;
+    }
+
+    // 2. Central Cloudflare KV / R2 database lookup (instantly plays previously extracted media without running scrapers)
+    final remoteStream = await StreamExtractor.fetchFromRemoteDatabase(
+      widget.mediaType,
+      widget.mediaId,
+      _currentSeason,
+      _currentEpisode,
+      server: server.name,
+    ) ?? await StreamExtractor.fetchFromRemoteDatabase(
+      widget.mediaType,
+      widget.mediaId,
+      _currentSeason,
+      _currentEpisode,
+    );
+
+    if (remoteStream != null && remoteStream.url.isNotEmpty) {
+      debugPrint('☁️ [StreamExtractor] Remote Cloudflare DB hit for $masterKey');
+      StreamExtractor.setCachedEntry(serverKey, [remoteStream]);
+      StreamExtractor.setCachedEntry(masterKey, [remoteStream]);
+      await _setupExtractedStreamsPlayback([remoteStream], startPosition: startPosition);
+      return;
+    }
 
     try {
       List<ExtractedStream> streams = [];
@@ -544,71 +665,20 @@ class _PlayerScreenState extends State<PlayerScreen> {
       if (!mounted) return;
 
       if (streams.isNotEmpty) {
-        _directStreams = streams;
-
-        // Retrieve active profile language preferences
-        final profile = context.read<ProfileProvider>().activeProfile;
-        final preferredAudio = profile.preferredAudioLang;
-        final preferredSub = profile.preferredSubtitleLang;
-        final preferredList = profile.preferredLanguages;
-
-        final audioPrefs = [
-          if (preferredAudio != null && preferredAudio.isNotEmpty) preferredAudio,
-          ...preferredList,
-        ];
-        final subPrefs = [
-          if (preferredSub != null && preferredSub.isNotEmpty) preferredSub,
-          if (preferredAudio != null && preferredAudio.isNotEmpty) preferredAudio,
-          ...preferredList,
-        ];
-
-        // 1. Pick audio stream index with user priority (profile -> English -> any)
-        final chosenAudioIdx = LanguageUtils.pickBestAudioIndex(
-          streams,
-          preferredLangs: audioPrefs,
-        );
-        _selectedStreamIndex = chosenAudioIdx;
-
-        // Aggregate subtitles from all sources
-        final allSubs = <SubtitleTrack>[];
-        final seenSubUrls = <String>{};
+        // Cache locally and persist to central Cloudflare KV/R2 database
+        StreamExtractor.setCachedEntry(serverKey, streams);
+        StreamExtractor.setCachedEntry(masterKey, streams);
         for (final s in streams) {
-          for (final sub in s.subtitles) {
-            if (!seenSubUrls.contains(sub.url)) {
-              seenSubUrls.add(sub.url);
-              allSubs.add(sub);
-            }
-          }
-        }
-
-        // If the extracted stream cluster (e.g. NovaStream, AtlasStream, PulsarHD) has no embedded subtitles,
-        // borrow cached subtitles from other providers (Vidlink, Voidflix)
-        if (allSubs.isEmpty) {
-          final shared = await StreamExtractor.getSharedSubtitles(
+          StreamExtractor.saveToRemoteDatabase(
             widget.mediaType,
             widget.mediaId,
             _currentSeason,
             _currentEpisode,
+            s,
+            server: server.name,
           );
-          for (final sub in shared) {
-            if (!seenSubUrls.contains(sub.url)) {
-              seenSubUrls.add(sub.url);
-              allSubs.add(sub);
-            }
-          }
         }
-        _subtitles = allSubs;
-
-        // 2. Pick subtitle with user priority (profile -> English -> any)
-        final bestSub = LanguageUtils.pickBestSubtitle(
-          allSubs,
-          preferredLangs: subPrefs,
-        );
-        if (bestSub != null) {
-          _selectSubtitle(bestSub);
-        }
-
-        await _initNativePlayer(streams[chosenAudioIdx], startPosition: startPosition);
+        await _setupExtractedStreamsPlayback(streams, startPosition: startPosition);
       } else {
         debugPrint('Direct extraction for ${server.name} returned 0 streams. Trying next native server.');
         _fallbackToNextNativeOrEmbed(resumePosition: startPosition);
@@ -2259,6 +2329,84 @@ class _PlayerScreenState extends State<PlayerScreen> {
     );
   }
 
+  void _startHold2xSpeed() {
+    if (_isLocked || _videoPlayerController == null || !_videoPlayerController!.value.isInitialized) return;
+    if (!_videoPlayerController!.value.isPlaying) return;
+    HapticFeedback.selectionClick();
+    _savedSpeedBeforeHold = _playbackSpeed;
+    _videoPlayerController?.setPlaybackSpeed(2.0);
+    setState(() {
+      _isHolding2xSpeed = true;
+      _showControls = false;
+    });
+  }
+
+  void _stopHold2xSpeed() {
+    if (!_isHolding2xSpeed) return;
+    _videoPlayerController?.setPlaybackSpeed(_savedSpeedBeforeHold);
+    setState(() {
+      _isHolding2xSpeed = false;
+    });
+  }
+
+  Future<void> _enterPipMode() async {
+    if (_isLocked || _videoPlayerController == null || !_videoPlayerController!.value.isInitialized) return;
+    try {
+      setState(() {
+        _showControls = false;
+        _isInPipMode = true;
+      });
+      const channel = MethodChannel('org.voidflix/notifications');
+      final bool? success = await channel.invokeMethod<bool>('enterPip');
+      if (success != true && mounted) {
+        setState(() => _isInPipMode = false);
+      }
+    } catch (e) {
+      debugPrint('Error entering PiP mode: $e');
+      if (mounted) setState(() => _isInPipMode = false);
+    }
+  }
+
+  Widget _build2xSpeedHud() {
+    return AnimatedOpacity(
+      opacity: _isHolding2xSpeed ? 1.0 : 0.0,
+      duration: const Duration(milliseconds: 150),
+      child: Center(
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.85),
+            borderRadius: BorderRadius.circular(30),
+            border: Border.all(color: AppTheme.primaryRed.withValues(alpha: 0.7), width: 1.5),
+            boxShadow: [
+              BoxShadow(
+                color: AppTheme.primaryRed.withValues(alpha: 0.35),
+                blurRadius: 20,
+                spreadRadius: 2,
+              ),
+            ],
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: const [
+              Text(
+                '2X Speed',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w900,
+                  fontSize: 15,
+                  letterSpacing: 0.6,
+                ),
+              ),
+              SizedBox(width: 8),
+              Icon(Icons.fast_forward_rounded, color: AppTheme.primaryRed, size: 20),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Widget _buildClipMomentView() {
     final totalSec = _totalDuration.inSeconds > 0 ? _totalDuration.inSeconds.toDouble() : 100.0;
     final curSec = _currentPosition.inSeconds.toDouble();
@@ -3068,6 +3216,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
                   child: GestureDetector(
                     behavior: HitTestBehavior.translucent,
                     onTap: _toggleControls,
+                    onLongPressStart: (_) => _startHold2xSpeed(),
+                    onLongPressEnd: (_) => _stopHold2xSpeed(),
+                    onLongPressCancel: () => _stopHold2xSpeed(),
                     onScaleStart: (details) {},
                     onScaleUpdate: (details) {
                       if (_isLocked) return;
@@ -3288,12 +3439,15 @@ class _PlayerScreenState extends State<PlayerScreen> {
               // ---------------------------------------------------------------
               // Layer 9: Player Chrome Controls (Matching Screenshot 1)
               // ---------------------------------------------------------------
-              if (_isNativeMode && !_isClippingMoment) ...[
+              if (_isNativeMode && !_isClippingMoment && !_isInPipMode) ...[
                 if (_showControls && !_isLocked)
                   Positioned.fill(
                     child: GestureDetector(
                       behavior: HitTestBehavior.opaque,
                       onTap: _toggleControls,
+                      onLongPressStart: (_) => _startHold2xSpeed(),
+                      onLongPressEnd: (_) => _stopHold2xSpeed(),
+                      onLongPressCancel: () => _stopHold2xSpeed(),
                       onScaleStart: (details) {},
                       onScaleUpdate: (details) {
                         if (details.pointerCount == 2) {
@@ -3336,7 +3490,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                         child: Column(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            // --- Top Bar (Matching Screenshot 1: Back, Centered Title, Lock) ---
+                            // --- Top Bar (Matching Screenshot 1: Back, Centered Title, PiP, Lock) ---
                             GestureDetector(
                               behavior: HitTestBehavior.opaque,
                               onTap: () {},
@@ -3362,6 +3516,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                         ),
                                       ),
                                     ),
+                                    IconButton(
+                                      icon: const Icon(Icons.picture_in_picture_alt_rounded, color: Colors.white, size: 24),
+                                      tooltip: 'Picture-in-Picture',
+                                      onPressed: _enterPipMode,
+                                    ),
+                                    const SizedBox(width: 4),
                                     IconButton(
                                       icon: const Icon(Icons.lock_outline_rounded, color: Colors.white, size: 24),
                                       tooltip: 'Lock',
@@ -3703,6 +3863,16 @@ class _PlayerScreenState extends State<PlayerScreen> {
               // ---------------------------------------------------------------
               if (_isStreamUnavailable)
                 _buildUnavailableOverlay(),
+
+              // ---------------------------------------------------------------
+              // Layer 13: 2X Hold Speed Floating HUD
+              // ---------------------------------------------------------------
+              if (_isHolding2xSpeed)
+                Positioned.fill(
+                  child: IgnorePointer(
+                    child: _build2xSpeedHud(),
+                  ),
+                ),
             ],
           ),
         ),

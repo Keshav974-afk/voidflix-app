@@ -1,7 +1,9 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
+import 'package:cached_network_image/cached_network_image.dart';
 import 'package:provider/provider.dart';
 import '../core/constants/theme_constants.dart';
+import '../core/services/remote_config_service.dart';
 import '../models/downloaded_item.dart';
 import '../providers/download_provider.dart';
 import '../providers/history_provider.dart';
@@ -379,7 +381,9 @@ class _HomeScreenState extends State<HomeScreen> {
                   // ==========================================
                   // STANDARD PROFILE: FULL RAILS & RECOMMENDATIONS
                   // ==========================================
-                  if (mediaProvider.trending.isNotEmpty && _selectedCategoryFilter == 'All')
+                  if (RemoteConfigService.activeBillboardBanner != null && _selectedCategoryFilter == 'All')
+                    _buildAdminBillboardBanner(RemoteConfigService.activeBillboardBanner!)
+                  else if (mediaProvider.trending.isNotEmpty && _selectedCategoryFilter == 'All')
                     HeroBanner(items: mediaProvider.trending)
                   else if (mediaProvider.trendingTV.isNotEmpty && _selectedCategoryFilter == 'TV Shows')
                     HeroBanner(items: mediaProvider.trendingTV)
@@ -973,6 +977,207 @@ class _HomeScreenState extends State<HomeScreen> {
         ),
       ),
     );
+  }
+
+  Widget _buildAdminBillboardBanner(RemotePromoBanner banner) {
+    final backdrop = banner.backdropUrl ?? banner.imageUrl ?? '';
+    return Container(
+      height: 440,
+      margin: const EdgeInsets.only(bottom: 12),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          if (backdrop.isNotEmpty)
+            CachedNetworkImage(
+              imageUrl: backdrop,
+              fit: BoxFit.cover,
+              placeholder: (_, __) => Container(color: Colors.black),
+              errorWidget: (_, __, ___) => Container(color: const Color(0xFF14141E)),
+            )
+          else
+            Container(color: const Color(0xFF14141E)),
+          Container(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  Colors.black.withValues(alpha: 0.6),
+                  Colors.transparent,
+                  Colors.black.withValues(alpha: 0.85),
+                  const Color(0xFF07070A),
+                ],
+                stops: const [0.0, 0.3, 0.75, 1.0],
+              ),
+            ),
+          ),
+          Positioned(
+            left: 20,
+            right: 20,
+            bottom: 24,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: AppTheme.primaryRed,
+                        borderRadius: BorderRadius.circular(4),
+                        boxShadow: [
+                          BoxShadow(
+                            color: AppTheme.primaryRed.withValues(alpha: 0.4),
+                            blurRadius: 8,
+                          ),
+                        ],
+                      ),
+                      child: Text(
+                        banner.badge.toUpperCase(),
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 10,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: 1,
+                        ),
+                      ),
+                    ),
+                    if (banner.rating != null && banner.rating!.isNotEmpty) ...[
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: Colors.black54,
+                          borderRadius: BorderRadius.circular(4),
+                          border: Border.all(color: Colors.white24),
+                        ),
+                        child: Text(
+                          banner.rating!,
+                          style: const TextStyle(
+                            color: Colors.white70,
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ],
+                    if (banner.qualityBadge != null && banner.qualityBadge!.isNotEmpty) ...[
+                      const SizedBox(width: 8),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: Colors.black54,
+                          borderRadius: BorderRadius.circular(4),
+                          border: Border.all(color: Colors.amber.withValues(alpha: 0.6)),
+                        ),
+                        child: Text(
+                          banner.qualityBadge!,
+                          style: const TextStyle(
+                            color: Colors.amberAccent,
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+                const SizedBox(height: 10),
+                Text(
+                  banner.title,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 26,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: -0.5,
+                  ),
+                ),
+                if (banner.subtitle.isNotEmpty) ...[
+                  const SizedBox(height: 6),
+                  Text(
+                    banner.subtitle,
+                    textAlign: TextAlign.center,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: Colors.white.withValues(alpha: 0.8),
+                      fontSize: 13,
+                      height: 1.3,
+                    ),
+                  ),
+                ],
+                const SizedBox(height: 16),
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: [
+                    ElevatedButton.icon(
+                      onPressed: () => _handleBannerAction(banner.actionUrl),
+                      icon: const Icon(Icons.play_arrow_rounded, color: Colors.black, size: 22),
+                      label: Text(
+                        banner.actionText,
+                        style: const TextStyle(color: Colors.black, fontWeight: FontWeight.bold, fontSize: 14),
+                      ),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.white,
+                        foregroundColor: Colors.black,
+                        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 10),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                      ),
+                    ),
+                    if (banner.secondaryActionText != null && banner.secondaryActionText!.isNotEmpty) ...[
+                      const SizedBox(width: 12),
+                      OutlinedButton(
+                        onPressed: () => _handleBannerAction(banner.secondaryActionUrl ?? ''),
+                        style: OutlinedButton.styleFrom(
+                          side: const BorderSide(color: Colors.white70),
+                          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                        ),
+                        child: Text(
+                          banner.secondaryActionText!,
+                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _handleBannerAction(String url) {
+    if (url.isEmpty) return;
+    if (url.contains('/watch/')) {
+      final parts = url.split('/watch/')[1].split('/');
+      if (parts.length >= 2) {
+        final mediaType = parts[0];
+        final mediaId = int.tryParse(parts[1]) ?? 0;
+        if (mediaId > 0) {
+          Navigator.push(
+            context,
+            MaterialPageRoute(
+              builder: (_) => PlayerScreen(
+                mediaId: mediaId,
+                mediaTitle: 'Featured Stream',
+                mediaType: mediaType,
+              ),
+            ),
+          );
+          return;
+        }
+      }
+    }
+    if (url.contains('movies')) {
+      setState(() => _selectedCategoryFilter = 'Movies');
+    } else if (url.contains('tv') || url.contains('series')) {
+      setState(() => _selectedCategoryFilter = 'TV Shows');
+    }
   }
 }
 

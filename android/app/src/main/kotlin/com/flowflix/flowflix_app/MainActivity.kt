@@ -17,6 +17,9 @@ import android.media.MediaExtractor
 import android.media.MediaFormat
 import android.media.MediaMuxer
 import android.media.MediaScannerConnection
+import android.app.PictureInPictureParams
+import android.content.res.Configuration
+import android.util.Rational
 import java.io.File
 import java.nio.ByteBuffer
 
@@ -31,6 +34,27 @@ class MainActivity : FlutterActivity() {
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
             when (call.method) {
+                "isPipSupported" -> {
+                    val supported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+                            packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_PICTURE_IN_PICTURE)
+                    result.success(supported)
+                }
+                "enterPip" -> {
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        try {
+                            val rational = Rational(16, 9)
+                            val builder = PictureInPictureParams.Builder()
+                                .setAspectRatio(rational)
+                            val success = enterPictureInPictureMode(builder.build())
+                            result.success(success)
+                        } catch (e: Exception) {
+                            android.util.Log.e("Voidflix", "Error entering PiP", e)
+                            result.success(false)
+                        }
+                    } else {
+                        result.success(false)
+                    }
+                }
                 "showNotification" -> {
                     val id = call.argument<Int>("id") ?: 1
                     val title = call.argument<String>("title") ?: "Voidflix"
@@ -557,5 +581,12 @@ class MainActivity : FlutterActivity() {
                 wakeLock?.release()
             }
         } catch (_: Exception) {}
+    }
+
+    override fun onPictureInPictureModeChanged(isInPictureInPictureMode: Boolean, newConfig: Configuration?) {
+        super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+        flutterEngine?.dartExecutor?.binaryMessenger?.let { messenger ->
+            MethodChannel(messenger, CHANNEL).invokeMethod("onPipModeChanged", isInPictureInPictureMode)
+        }
     }
 }

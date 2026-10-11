@@ -64,6 +64,7 @@ class RemotePromoBanner {
   final String? secondaryActionText;
   final String? secondaryActionUrl;
   final String position; // 'popup_modal' | 'featured_section' | 'hero_billboard'
+  final String targetPlatform; // 'all' | 'app' | 'web'
   final bool enabled;
   final bool dismissible;
 
@@ -81,6 +82,7 @@ class RemotePromoBanner {
     this.secondaryActionText,
     this.secondaryActionUrl,
     required this.position,
+    this.targetPlatform = 'all',
     required this.enabled,
     required this.dismissible,
   });
@@ -100,6 +102,7 @@ class RemotePromoBanner {
       secondaryActionText: json['secondaryActionText'] as String?,
       secondaryActionUrl: json['secondaryActionUrl'] as String?,
       position: json['position'] as String? ?? 'popup_modal',
+      targetPlatform: json['targetPlatform'] as String? ?? 'all',
       enabled: json['enabled'] as bool? ?? true,
       dismissible: json['dismissible'] as bool? ?? true,
     );
@@ -143,8 +146,8 @@ class RemoteNotificationItem {
 
 class RemoteConfigService {
   static const String configEndpoint = 'https://voidflix.org/api/public/config';
-  static const String currentAppVersion = '1.0.0';
-  static const int currentBuildNumber = 1;
+  static const String currentAppVersion = '1.0.1';
+  static const int currentBuildNumber = 2;
 
   static RemoteAppUpdate? cachedUpdate;
   static List<RemotePromoBanner> cachedBanners = [];
@@ -235,10 +238,24 @@ class RemoteConfigService {
     return 'https://voidflix.org/$raw';
   }
 
-  /// Checks if an active popup banner is pending
+  /// Checks if an active popup banner is pending for mobile app
   static RemotePromoBanner? get activePopupBanner {
     for (final b in cachedBanners) {
-      if (b.enabled && b.position == 'popup_modal') {
+      if (b.enabled &&
+          b.position == 'popup_modal' &&
+          (b.targetPlatform == 'app' || b.targetPlatform == 'all')) {
+        return b;
+      }
+    }
+    return null;
+  }
+
+  /// Checks if an active hero promotional billboard is configured for mobile app
+  static RemotePromoBanner? get activeBillboardBanner {
+    for (final b in cachedBanners) {
+      if (b.enabled &&
+          (b.position == 'hero_billboard' || b.position == 'featured_section') &&
+          (b.targetPlatform == 'app' || b.targetPlatform == 'all')) {
         return b;
       }
     }
