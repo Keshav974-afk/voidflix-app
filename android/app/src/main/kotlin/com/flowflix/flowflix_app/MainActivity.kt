@@ -55,6 +55,34 @@ class MainActivity : FlutterActivity() {
                         result.success(false)
                     }
                 }
+                "getDeviceFingerprint" -> {
+                    try {
+                        val androidId = android.provider.Settings.Secure.getString(
+                            contentResolver,
+                            android.provider.Settings.Secure.ANDROID_ID
+                        ) ?: ""
+                        val displayMetrics = resources.displayMetrics
+                        val map = mapOf(
+                            "androidId" to androidId,
+                            "model" to Build.MODEL,
+                            "manufacturer" to Build.MANUFACTURER,
+                            "brand" to Build.BRAND,
+                            "hardware" to Build.HARDWARE,
+                            "board" to Build.BOARD,
+                            "device" to Build.DEVICE,
+                            "product" to Build.PRODUCT,
+                            "abis" to Build.SUPPORTED_ABIS.joinToString(", "),
+                            "sdkInt" to Build.VERSION.SDK_INT,
+                            "release" to Build.VERSION.RELEASE,
+                            "screenWidth" to displayMetrics.widthPixels,
+                            "screenHeight" to displayMetrics.heightPixels,
+                            "densityDpi" to displayMetrics.densityDpi
+                        )
+                        result.success(map)
+                    } catch (e: Exception) {
+                        result.success(emptyMap<String, Any>())
+                    }
+                }
                 "showNotification" -> {
                     val id = call.argument<Int>("id") ?: 1
                     val title = call.argument<String>("title") ?: "Voidflix"
