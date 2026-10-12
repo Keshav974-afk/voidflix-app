@@ -184,14 +184,9 @@ class StreamExtractor {
     String server = '',
   }) async {
     try {
-      final queryParams = {
-        'type': type,
-        'id': tmdbId.toString(),
-        's': season.toString(),
-        'e': episode.toString(),
-        if (server.isNotEmpty) 'server': server,
-      };
-      final uri = Uri.https('voidflix.org', '/api/public/extract', queryParams);
+      final uri = Uri.parse(
+        'https://voidflix.org/api/public/extract?type=$type&id=$tmdbId&s=$season&e=$episode&server=$server',
+      );
       final res = await http.get(uri).timeout(const Duration(seconds: 4));
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body) as Map<String, dynamic>;
@@ -298,7 +293,7 @@ class StreamExtractor {
   }
 
   /// Sets cached streams in both in-memory map and asynchronous SharedPreferences.
-  static void setCachedEntry(String key, List<ExtractedStream> streams, {bool hydrateMaster = false}) {
+  static void setCachedEntry(String key, List<ExtractedStream> streams) {
     if (streams.isEmpty) return;
     final entry = CachedStreamEntry(streams);
     _cache[key] = entry;
@@ -314,13 +309,6 @@ class StreamExtractor {
         final tmdbId = int.tryParse(parts[parts.length - 3]) ?? 0;
         final type = parts[parts.length - 4];
         final prefix = parts.length > 4 ? parts.first : '';
-
-        // Hydrate master general key only when explicitly permitted or when key has no prefix
-        if (prefix.isEmpty || hydrateMaster) {
-          final masterKey = '$type:$tmdbId:$season:$episode';
-          _cache[masterKey] = entry;
-          SharedPreferences.getInstance().then((prefs) => prefs.setString('cached_stream_$masterKey', jsonEncode(entry.toJson()))).catchError((_) => false);
-        }
 
         if (tmdbId > 0) {
           for (final s in streams) {
@@ -893,21 +881,19 @@ class StreamExtractor {
   }
 
   /// Master extraction method that queries all direct stream extractors
-  /// concurrently in a fast race: immediately returns the first arriving stream
-  /// for sub-second playback, while continuing all other extractors in the background
-  /// to persist every stream to the database and cache for future use.
+  /// and aggregates audio sources, qualities, and all subtitle tracks.
+  /// Automatically uses cached results within 3 hours for instant resumption.
   static Future<List<ExtractedStream>> extractAll({
     required String type, // 'movie' or 'tv'
     required int tmdbId,
     int season = 1,
     int episode = 1,
     bool forceRefresh = false,
-    void Function(List<ExtractedStream> allStreamsSoFar)? onAdditionalStreams,
   }) async {
     final key = getCacheKey(type, tmdbId, season, episode);
 
     if (!forceRefresh) {
-      // 1. In-memory & local SharedPreferences cache check (0ms)
+      // 1. In-memory & local SharedPreferences cache check
       final cached = await getCachedEntry(key);
       if (cached != null && cached.streams.isNotEmpty) {
         debugPrint('StreamExtractor: Reusing cached aggregated streams for $key (instant!)');
@@ -919,90 +905,112 @@ class StreamExtractor {
       if (remoteStream != null) {
         debugPrint('StreamExtractor: Retrieved direct stream from Cloudflare KV database for $key (instant 0ms!)');
         final remoteEntry = [remoteStream];
-        setCachedEntry(key, remoteEntry, hydrateMaster: true);
+        setCachedEntry(key, remoteEntry);
         return remoteEntry;
       }
     }
 
-    final completer = Completer<List<ExtractedStream>>();
-    final accumulatedResults = <ExtractedStream>[];
-    final Set<String> seenUrls = {};
-    int pendingTasks = 4;
+    final results = <ExtractedStream>[];
+    List<SubtitleTrack> sharedSubs = [];
 
-    void addAndCheck(List<ExtractedStream> streams, String sourcePrefix) {
-      pendingTasks--;
-      if (streams.isNotEmpty) {
-        // Cache this specific provider's streams
-        setCachedEntry('${sourcePrefix.toLowerCase()}:$key', streams, hydrateMaster: false);
+    // Parallel concurrent extraction across all direct sources
+    try {
+      final futures = await Future.wait([
+        extractCinejoy(
+          type: type,
+          tmdbId: tmdbId,
+          season: season,
+          episode: episode,
+        ).catchError((e) {
+          debugPrint('Cinejoy extractor error: $e');
+          return <ExtractedStream>[];
+        }),
+        extractVidrock(
+          type: type,
+          tmdbId: tmdbId,
+          season: season,
+          episode: episode,
+        ).catchError((e) {
+          debugPrint('Vidrock extractor error: $e');
+          return <ExtractedStream>[];
+        }),
+        extractVidlink(
+          type: type,
+          tmdbId: tmdbId,
+          season: season,
+          episode: episode,
+        ).catchError((e) {
+          debugPrint('Vidlink extractor error: $e');
+          return null;
+        }),
+        extractVoidflixBackend(
+          type: type,
+          tmdbId: tmdbId,
+          season: season,
+          episode: episode,
+        ).catchError((e) {
+          debugPrint('Voidflix extractor error: $e');
+          return null;
+        }),
+      ]);
 
-        for (final s in streams) {
-          if (!seenUrls.contains(s.url)) {
-            seenUrls.add(s.url);
-            accumulatedResults.add(s);
-          }
-          // Save to central Cloudflare KV/R2 database for all users
-          saveToRemoteDatabase(type, tmdbId, season, episode, s, server: s.sourceName);
-        }
+      final cinejoyStreams = futures[0] as List<ExtractedStream>;
+      final vidrockStreams = futures[1] as List<ExtractedStream>;
+      final vidlinkStream = futures[2] as ExtractedStream?;
+      final voidflixStream = futures[3] as ExtractedStream?;
 
-        // Return the FASTEST arriving stream immediately for sub-second playback!
-        if (!completer.isCompleted && accumulatedResults.isNotEmpty) {
-          completer.complete(List.from(accumulatedResults));
-        } else if (onAdditionalStreams != null) {
-          onAdditionalStreams(List.from(accumulatedResults));
-        }
+      if (voidflixStream != null && voidflixStream.subtitles.isNotEmpty) {
+        sharedSubs = voidflixStream.subtitles;
+      }
+      if (vidlinkStream != null && vidlinkStream.subtitles.isNotEmpty && sharedSubs.isEmpty) {
+        sharedSubs = vidlinkStream.subtitles;
       }
 
-      if (pendingTasks <= 0) {
-        if (!completer.isCompleted) {
-          completer.complete(List.from(accumulatedResults));
-        }
-        if (accumulatedResults.isNotEmpty) {
-          setCachedEntry(key, accumulatedResults, hydrateMaster: true);
-        }
+      // 1. Add Cinejoy 4K & 1080p streams first (fastest, cleanest, high-res)
+      for (final c in cinejoyStreams) {
+        results.add(ExtractedStream(
+          url: c.url,
+          type: c.type,
+          sourceName: c.sourceName,
+          language: c.language,
+          headers: c.headers,
+          qualityLabel: c.qualityLabel,
+          qualities: c.qualities,
+          subtitles: sharedSubs.isNotEmpty ? sharedSubs : c.subtitles,
+        ));
       }
+
+      // 2. Add Vidrock streams (Orion, Nova, Atlas)
+      for (final v in vidrockStreams) {
+        results.add(ExtractedStream(
+          url: v.url,
+          type: v.type,
+          sourceName: v.sourceName,
+          language: v.language,
+          headers: v.headers,
+          qualityLabel: v.qualityLabel,
+          qualities: v.qualities,
+          subtitles: sharedSubs.isNotEmpty ? sharedSubs : v.subtitles,
+        ));
+      }
+
+      // 3. Add Vidlink stream if present
+      if (vidlinkStream != null) {
+        results.add(vidlinkStream);
+      }
+
+      // 4. Add Voidflix backend stream if present
+      if (voidflixStream != null) {
+        results.add(voidflixStream);
+      }
+    } catch (e) {
+      debugPrint('Parallel extraction error: $e');
     }
 
-    // Launch ALL extractors concurrently in parallel!
-    extractCinejoy(
-      type: type,
-      tmdbId: tmdbId,
-      season: season,
-      episode: episode,
-    ).then((s) => addAndCheck(s, 'cinejoy')).catchError((e) {
-      debugPrint('Cinejoy extractor error: $e');
-      addAndCheck([], 'cinejoy');
-    });
+    if (results.isNotEmpty) {
+      setCachedEntry(key, results);
+    }
 
-    extractVidrock(
-      type: type,
-      tmdbId: tmdbId,
-      season: season,
-      episode: episode,
-    ).then((s) => addAndCheck(s, 'vidrock')).catchError((e) {
-      debugPrint('Vidrock extractor error: $e');
-      addAndCheck([], 'vidrock');
-    });
-
-    extractVidlink(
-      type: type,
-      tmdbId: tmdbId,
-      season: season,
-      episode: episode,
-    ).then((s) => addAndCheck(s != null ? [s] : [], 'vidlink')).catchError((e) {
-      debugPrint('Vidlink extractor error: $e');
-      addAndCheck([], 'vidlink');
-    });
-
-    extractVoidflixBackend(
-      type: type,
-      tmdbId: tmdbId,
-      season: season,
-      episode: episode,
-    ).then((s) => addAndCheck(s != null ? [s] : [], 'voidflix')).catchError((e) {
-      debugPrint('Voidflix extractor error: $e');
-      addAndCheck([], 'voidflix');
-    });
-
-    return completer.future;
+    return results;
   }
 }

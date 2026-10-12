@@ -75,11 +75,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   // Playback speed system (Netflix feature)
   double _playbackSpeed = 1.0;
-  bool _isHolding2xSpeed = false;
-  double _savedSpeedBeforeHold = 1.0;
-
-  // Picture-in-Picture (PiP) system
-  bool _isInPipMode = false;
 
   // Native Video Player state
   VideoPlayerController? _videoPlayerController;
@@ -143,6 +138,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
   List<TvEpisode> _episodes = [];
   bool _isLoadingEpisodes = false;
 
+  // Picture-in-Picture mode
+  bool _isInPipMode = false;
+
+  // Hold to 2x speed system
+  bool _isHolding2xSpeed = false;
+  double _savedSpeedBeforeHold = 1.0;
+
   @override
   void initState() {
     super.initState();
@@ -163,16 +165,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
     // Keep screen awake while watching video
     WakelockPlus.enable();
 
-    _loadMedia();
-
-    if (widget.mediaType == 'tv') {
-      _fetchTvDetailsAndEpisodes();
-    }
-
-    _startHideControlsTimer();
+    // Listen for Picture-in-Picture mode transitions from Android OS
     const MethodChannel('org.voidflix/notifications').setMethodCallHandler((call) async {
       if (call.method == 'onPipModeChanged') {
-        final inPip = call.arguments as bool? ?? false;
+        final bool inPip = call.arguments == true;
         if (mounted) {
           setState(() {
             _isInPipMode = inPip;
@@ -183,10 +179,19 @@ class _PlayerScreenState extends State<PlayerScreen> {
         }
       }
     });
+
+    _loadMedia();
+
+    if (widget.mediaType == 'tv') {
+      _fetchTvDetailsAndEpisodes();
+    }
+
+    _startHideControlsTimer();
   }
 
   @override
   void dispose() {
+    const MethodChannel('org.voidflix/notifications').setMethodCallHandler(null);
     _recordWatchProgress(force: true);
     _hideControlsTimer?.cancel();
     _lockPillTimer?.cancel();
@@ -475,75 +480,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
     });
   }
 
-  Future<void> _setupExtractedStreamsPlayback(List<ExtractedStream> streams, {Duration? startPosition}) async {
-    if (!mounted || streams.isEmpty) return;
-
-    _directStreams = streams;
-
-    // Retrieve active profile language preferences
-    final profile = context.read<ProfileProvider>().activeProfile;
-    final preferredAudio = profile.preferredAudioLang;
-    final preferredSub = profile.preferredSubtitleLang;
-    final preferredList = profile.preferredLanguages;
-
-    final audioPrefs = [
-      if (preferredAudio != null && preferredAudio.isNotEmpty) preferredAudio,
-      ...preferredList,
-    ];
-    final subPrefs = [
-      if (preferredSub != null && preferredSub.isNotEmpty) preferredSub,
-      if (preferredAudio != null && preferredAudio.isNotEmpty) preferredAudio,
-      ...preferredList,
-    ];
-
-    // 1. Pick audio stream index with user priority (profile -> English -> any)
-    final chosenAudioIdx = LanguageUtils.pickBestAudioIndex(
-      streams,
-      preferredLangs: audioPrefs,
-    );
-    _selectedStreamIndex = chosenAudioIdx;
-
-    // Aggregate subtitles from all sources
-    final allSubs = <SubtitleTrack>[];
-    final seenSubUrls = <String>{};
-    for (final s in streams) {
-      for (final sub in s.subtitles) {
-        if (!seenSubUrls.contains(sub.url)) {
-          seenSubUrls.add(sub.url);
-          allSubs.add(sub);
-        }
-      }
-    }
-
-    // If the extracted stream cluster has no embedded subtitles, borrow cached subtitles
-    if (allSubs.isEmpty) {
-      final shared = await StreamExtractor.getSharedSubtitles(
-        widget.mediaType,
-        widget.mediaId,
-        _currentSeason,
-        _currentEpisode,
-      );
-      for (final sub in shared) {
-        if (!seenSubUrls.contains(sub.url)) {
-          seenSubUrls.add(sub.url);
-          allSubs.add(sub);
-        }
-      }
-    }
-    _subtitles = allSubs;
-
-    // 2. Pick subtitle with user priority (profile -> English -> any)
-    final bestSub = LanguageUtils.pickBestSubtitle(
-      allSubs,
-      preferredLangs: subPrefs,
-    );
-    if (bestSub != null) {
-      _selectSubtitle(bestSub);
-    }
-
-    await _initNativePlayer(streams[chosenAudioIdx], startPosition: startPosition);
-  }
-
   Future<void> _loadServerDirect(int serverIdx, {Duration? startPosition}) async {
     _triedNativeServerIndices.add(serverIdx);
     final server = ServerConfig.servers[serverIdx];
@@ -557,61 +493,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
     });
 
     _disposeVideoController();
-
-    final masterKey = '${widget.mediaType}:${widget.mediaId}:$_currentSeason:$_currentEpisode';
-    final serverKey = '${server.name.toLowerCase()}:$masterKey';
-    final isSpecificServer = !server.name.toLowerCase().contains('voiddirect') &&
-                             !server.name.toLowerCase().contains('auto') &&
-                             !server.name.toLowerCase().contains('default');
-
-    if (isSpecificServer) {
-      // 1. Instant local cache lookup for THIS specific server (0ms)
-      final localCached = await StreamExtractor.getCachedEntry(serverKey);
-      if (localCached != null && localCached.streams.isNotEmpty) {
-        debugPrint('⚡ [StreamExtractor] Instant local cache hit for $serverKey');
-        await _setupExtractedStreamsPlayback(localCached.streams, startPosition: startPosition);
-        return;
-      }
-
-      // 2. Central Cloudflare KV / R2 database lookup for THIS specific server
-      final remoteStream = await StreamExtractor.fetchFromRemoteDatabase(
-        widget.mediaType,
-        widget.mediaId,
-        _currentSeason,
-        _currentEpisode,
-        server: server.name,
-      );
-
-      if (remoteStream != null && remoteStream.url.isNotEmpty) {
-        debugPrint('☁️ [StreamExtractor] Remote Cloudflare DB hit for $serverKey');
-        StreamExtractor.setCachedEntry(serverKey, [remoteStream], hydrateMaster: false);
-        await _setupExtractedStreamsPlayback([remoteStream], startPosition: startPosition);
-        return;
-      }
-    } else {
-      // 1. Instant local cache lookup for general/aggregated streams (0ms)
-      final localCached = await StreamExtractor.getCachedEntry(masterKey);
-      if (localCached != null && localCached.streams.isNotEmpty) {
-        debugPrint('⚡ [StreamExtractor] Instant local cache hit for master $masterKey');
-        await _setupExtractedStreamsPlayback(localCached.streams, startPosition: startPosition);
-        return;
-      }
-
-      // 2. Central Cloudflare KV / R2 database lookup for default stream
-      final remoteStream = await StreamExtractor.fetchFromRemoteDatabase(
-        widget.mediaType,
-        widget.mediaId,
-        _currentSeason,
-        _currentEpisode,
-      );
-
-      if (remoteStream != null && remoteStream.url.isNotEmpty) {
-        debugPrint('☁️ [StreamExtractor] Remote Cloudflare DB hit for default $masterKey');
-        StreamExtractor.setCachedEntry(masterKey, [remoteStream], hydrateMaster: true);
-        await _setupExtractedStreamsPlayback([remoteStream], startPosition: startPosition);
-        return;
-      }
-    }
 
     try {
       List<ExtractedStream> streams = [];
@@ -674,51 +555,83 @@ class _PlayerScreenState extends State<PlayerScreen> {
         );
         if (v != null) streams = [v];
       } else {
-        // VoidDirect / default: parallel concurrent race across ALL sources!
-        // Plays the fastest arriving stream immediately without waiting for slower ones.
+        // VoidDirect / default: multi-source extraction (Cinejoy + Vidrock in parallel)
         streams = await StreamExtractor.extractAll(
           type: widget.mediaType,
           tmdbId: widget.mediaId,
           season: _currentSeason,
           episode: _currentEpisode,
-          onAdditionalStreams: (moreStreams) {
-            if (mounted && moreStreams.length > _directStreams.length) {
-              setState(() {
-                _directStreams = moreStreams;
-              });
-            }
-          },
         );
       }
 
       if (!mounted) return;
 
       if (streams.isNotEmpty) {
-        // Cache locally and persist to central Cloudflare KV/R2 database
-        StreamExtractor.setCachedEntry(serverKey, streams, hydrateMaster: !isSpecificServer);
+        _directStreams = streams;
+
+        // Retrieve active profile language preferences
+        final profile = context.read<ProfileProvider>().activeProfile;
+        final preferredAudio = profile.preferredAudioLang;
+        final preferredSub = profile.preferredSubtitleLang;
+        final preferredList = profile.preferredLanguages;
+
+        final audioPrefs = [
+          if (preferredAudio != null && preferredAudio.isNotEmpty) preferredAudio,
+          ...preferredList,
+        ];
+        final subPrefs = [
+          if (preferredSub != null && preferredSub.isNotEmpty) preferredSub,
+          if (preferredAudio != null && preferredAudio.isNotEmpty) preferredAudio,
+          ...preferredList,
+        ];
+
+        // 1. Pick audio stream index with user priority (profile -> English -> any)
+        final chosenAudioIdx = LanguageUtils.pickBestAudioIndex(
+          streams,
+          preferredLangs: audioPrefs,
+        );
+        _selectedStreamIndex = chosenAudioIdx;
+
+        // Aggregate subtitles from all sources
+        final allSubs = <SubtitleTrack>[];
+        final seenSubUrls = <String>{};
         for (final s in streams) {
-          StreamExtractor.saveToRemoteDatabase(
+          for (final sub in s.subtitles) {
+            if (!seenSubUrls.contains(sub.url)) {
+              seenSubUrls.add(sub.url);
+              allSubs.add(sub);
+            }
+          }
+        }
+
+        // If the extracted stream cluster (e.g. NovaStream, AtlasStream, PulsarHD) has no embedded subtitles,
+        // borrow cached subtitles from other providers (Vidlink, Voidflix)
+        if (allSubs.isEmpty) {
+          final shared = await StreamExtractor.getSharedSubtitles(
             widget.mediaType,
             widget.mediaId,
             _currentSeason,
             _currentEpisode,
-            s,
-            server: isSpecificServer ? server.name : s.sourceName,
           );
+          for (final sub in shared) {
+            if (!seenSubUrls.contains(sub.url)) {
+              seenSubUrls.add(sub.url);
+              allSubs.add(sub);
+            }
+          }
+        }
+        _subtitles = allSubs;
+
+        // 2. Pick subtitle with user priority (profile -> English -> any)
+        final bestSub = LanguageUtils.pickBestSubtitle(
+          allSubs,
+          preferredLangs: subPrefs,
+        );
+        if (bestSub != null) {
+          _selectSubtitle(bestSub);
         }
 
-        // If a specific server was extracted, asynchronously trigger extractAll in background
-        // so all other servers are also warmed up into the database for future use!
-        if (isSpecificServer) {
-          StreamExtractor.extractAll(
-            type: widget.mediaType,
-            tmdbId: widget.mediaId,
-            season: _currentSeason,
-            episode: _currentEpisode,
-          ).catchError((_) => <ExtractedStream>[]);
-        }
-
-        await _setupExtractedStreamsPlayback(streams, startPosition: startPosition);
+        await _initNativePlayer(streams[chosenAudioIdx], startPosition: startPosition);
       } else {
         debugPrint('Direct extraction for ${server.name} returned 0 streams. Trying next native server.');
         _fallbackToNextNativeOrEmbed(resumePosition: startPosition);
@@ -3251,7 +3164,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
               // Layer 3: Gesture Detectors (Tap, Double Tap Seek/Zoom, Pinch Zoom, Left Drag Brightness)
               // Only active in Native Mode
               // ---------------------------------------------------------------
-              if (_isNativeMode && !_isClippingMoment)
+              if (_isNativeMode && !_isClippingMoment && !_isInPipMode)
                 Positioned.fill(
                   child: GestureDetector(
                     behavior: HitTestBehavior.translucent,
