@@ -496,129 +496,72 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
     try {
       List<ExtractedStream> streams = [];
-
-      // Determine server identifier slug for cache lookup
-      String serverSlug = '';
       if (server.name.contains('Cine4K') || server.name.contains('Lisbon')) {
-        serverSlug = 'cinejoy';
-      } else if (server.name.contains('Nebula')) {
-        serverSlug = 'cinejoy';
-      } else if (server.name.contains('Orion') ||
-          server.name.contains('Pulsar') ||
-          server.name.contains('Nova') ||
-          server.name.contains('Atlas')) {
-        serverSlug = 'vidrock';
-      } else if (server.name.contains('VoidHD')) {
-        serverSlug = 'vidlink';
-      } else {
-        serverSlug = 'default';
-      }
-
-      final cacheKey = StreamExtractor.getCacheKey(
-        widget.mediaType,
-        widget.mediaId,
-        _currentSeason,
-        _currentEpisode,
-        prefix: serverSlug,
-      );
-
-      // Step 1: Check fast in-memory & SharedPreferences cache (0ms instant)
-      final localCached = await StreamExtractor.getCachedEntry(cacheKey);
-      if (localCached != null && localCached.streams.isNotEmpty) {
-        debugPrint('Player: Fast local cache hit for ${server.name} ($cacheKey)');
-        streams = localCached.streams;
-      }
-
-      // Step 2: Check central Cloudflare KV/R2 database cache (<100ms instant)
-      if (streams.isEmpty) {
-        final remote = await StreamExtractor.fetchFromRemoteDatabase(
-          widget.mediaType,
-          widget.mediaId,
-          _currentSeason,
-          _currentEpisode,
-          server: serverSlug,
+        streams = await StreamExtractor.extractCinejoy(
+          type: widget.mediaType,
+          tmdbId: widget.mediaId,
+          season: _currentSeason,
+          episode: _currentEpisode,
+          preferredServer: 'Lisbon',
         );
-        if (remote != null) {
-          debugPrint('Player: Fast Cloudflare database cache hit for ${server.name}');
-          streams = [remote];
-          StreamExtractor.setCachedEntry(cacheKey, streams);
-        }
-      }
-
-      // Step 3: Not in cache — perform direct live extraction
-      if (streams.isEmpty) {
-        if (server.name.contains('Cine4K') || server.name.contains('Lisbon')) {
-          streams = await StreamExtractor.extractCinejoy(
-            type: widget.mediaType,
-            tmdbId: widget.mediaId,
-            season: _currentSeason,
-            episode: _currentEpisode,
-            preferredServer: 'Lisbon',
-          );
-        } else if (server.name.contains('Nebula')) {
-          streams = await StreamExtractor.extractCinejoy(
-            type: widget.mediaType,
-            tmdbId: widget.mediaId,
-            season: _currentSeason,
-            episode: _currentEpisode,
-            preferredServer: 'Nebula',
-          );
-        } else if (server.name.contains('OrionStream')) {
-          final all = await StreamExtractor.extractVidrock(
-            type: widget.mediaType,
-            tmdbId: widget.mediaId,
-            season: _currentSeason,
-            episode: _currentEpisode,
-          );
-          streams = all.where((s) => s.sourceName.toLowerCase().contains('orion')).toList();
-          if (streams.isEmpty) streams = all;
-        } else if (server.name.contains('PulsarHD')) {
-          streams = await StreamExtractor.extractVidrock(
-            type: widget.mediaType,
-            tmdbId: widget.mediaId,
-            season: _currentSeason,
-            episode: _currentEpisode,
-          );
-        } else if (server.name.contains('NovaStream')) {
-          final all = await StreamExtractor.extractVidrock(
-            type: widget.mediaType,
-            tmdbId: widget.mediaId,
-            season: _currentSeason,
-            episode: _currentEpisode,
-          );
-          streams = all.where((s) => s.sourceName.toLowerCase() == 'nova').toList();
-          if (streams.isEmpty) streams = all;
-        } else if (server.name.contains('AtlasStream')) {
-          final all = await StreamExtractor.extractVidrock(
-            type: widget.mediaType,
-            tmdbId: widget.mediaId,
-            season: _currentSeason,
-            episode: _currentEpisode,
-          );
-          streams = all.where((s) => s.sourceName.toLowerCase() == 'atlas').toList();
-          if (streams.isEmpty) streams = all;
-        } else if (server.name.contains('VoidHD')) {
-          final v = await StreamExtractor.extractVidlink(
-            type: widget.mediaType,
-            tmdbId: widget.mediaId,
-            season: _currentSeason,
-            episode: _currentEpisode,
-          );
-          if (v != null) streams = [v];
-        } else {
-          // VoidDirect / default: multi-source extraction (Cinejoy + Vidrock in parallel)
-          streams = await StreamExtractor.extractAll(
-            type: widget.mediaType,
-            tmdbId: widget.mediaId,
-            season: _currentSeason,
-            episode: _currentEpisode,
-          );
-        }
-
-        // Cache successful live extraction locally and on Cloudflare central database
-        if (streams.isNotEmpty) {
-          StreamExtractor.setCachedEntry(cacheKey, streams);
-        }
+      } else if (server.name.contains('Nebula')) {
+        streams = await StreamExtractor.extractCinejoy(
+          type: widget.mediaType,
+          tmdbId: widget.mediaId,
+          season: _currentSeason,
+          episode: _currentEpisode,
+          preferredServer: 'Nebula',
+        );
+      } else if (server.name.contains('OrionStream')) {
+        final all = await StreamExtractor.extractVidrock(
+          type: widget.mediaType,
+          tmdbId: widget.mediaId,
+          season: _currentSeason,
+          episode: _currentEpisode,
+        );
+        streams = all.where((s) => s.sourceName.toLowerCase().contains('orion')).toList();
+        if (streams.isEmpty) streams = all;
+      } else if (server.name.contains('PulsarHD')) {
+        streams = await StreamExtractor.extractVidrock(
+          type: widget.mediaType,
+          tmdbId: widget.mediaId,
+          season: _currentSeason,
+          episode: _currentEpisode,
+        );
+      } else if (server.name.contains('NovaStream')) {
+        final all = await StreamExtractor.extractVidrock(
+          type: widget.mediaType,
+          tmdbId: widget.mediaId,
+          season: _currentSeason,
+          episode: _currentEpisode,
+        );
+        streams = all.where((s) => s.sourceName.toLowerCase() == 'nova').toList();
+        if (streams.isEmpty) streams = all;
+      } else if (server.name.contains('AtlasStream')) {
+        final all = await StreamExtractor.extractVidrock(
+          type: widget.mediaType,
+          tmdbId: widget.mediaId,
+          season: _currentSeason,
+          episode: _currentEpisode,
+        );
+        streams = all.where((s) => s.sourceName.toLowerCase() == 'atlas').toList();
+        if (streams.isEmpty) streams = all;
+      } else if (server.name.contains('VoidHD')) {
+        final v = await StreamExtractor.extractVidlink(
+          type: widget.mediaType,
+          tmdbId: widget.mediaId,
+          season: _currentSeason,
+          episode: _currentEpisode,
+        );
+        if (v != null) streams = [v];
+      } else {
+        // VoidDirect / default: multi-source extraction (Cinejoy + Vidrock in parallel)
+        streams = await StreamExtractor.extractAll(
+          type: widget.mediaType,
+          tmdbId: widget.mediaId,
+          season: _currentSeason,
+          episode: _currentEpisode,
+        );
       }
 
       if (!mounted) return;
@@ -769,7 +712,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
         _selectedStreamIndex++;
         await _initNativePlayer(_directStreams[_selectedStreamIndex], startPosition: startPosition, autoPlay: autoPlay);
       } else {
-        StreamExtractor.invalidateCache(widget.mediaType, widget.mediaId, _currentSeason, _currentEpisode);
         _fallbackToNextNativeOrEmbed(resumePosition: startPosition);
       }
     }
