@@ -1,3 +1,4 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -10,8 +11,19 @@ import 'providers/profile_provider.dart';
 import 'providers/watchlist_provider.dart';
 import 'screens/splash_screen.dart';
 
+class VoidflixHttpOverrides extends HttpOverrides {
+  @override
+  HttpClient createHttpClient(SecurityContext? context) {
+    final client = super.createHttpClient(context);
+    // Prevents 60+ second socket hangs on Wi-Fi with broken IPv6 routing
+    client.connectionTimeout = const Duration(seconds: 7);
+    return client;
+  }
+}
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  HttpOverrides.global = VoidflixHttpOverrides();
 
   // Dark system navigation bar & status bar
   SystemChrome.setSystemUIOverlayStyle(

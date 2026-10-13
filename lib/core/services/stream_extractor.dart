@@ -737,13 +737,31 @@ class StreamExtractor {
     }
 
     try {
-      // 1. Fetch metadata (Title, Year, IMDb ID) from TMDB
-      final tmdbUri = Uri.parse(
-        'https://api.themoviedb.org/3/$type/$tmdbId?api_key=${ApiConstants.tmdbApiKey}&append_to_response=external_ids',
-      );
-      final tmdbRes = await http.get(tmdbUri).timeout(const Duration(seconds: 4));
-      if (tmdbRes.statusCode != 200) return [];
-      final tmdbJson = jsonDecode(tmdbRes.body) as Map<String, dynamic>;
+      // 1. Fetch metadata (Title, Year, IMDb ID) from TMDB (with edge proxy fallback)
+      Map<String, dynamic>? tmdbJson;
+      try {
+        final tmdbUri = Uri.parse(
+          'https://api.themoviedb.org/3/$type/$tmdbId?api_key=${ApiConstants.tmdbApiKey}&append_to_response=external_ids',
+        );
+        final tmdbRes = await http.get(tmdbUri).timeout(const Duration(seconds: 4));
+        if (tmdbRes.statusCode == 200) {
+          tmdbJson = jsonDecode(tmdbRes.body) as Map<String, dynamic>;
+        }
+      } catch (_) {}
+
+      if (tmdbJson == null) {
+        try {
+          final proxyUri = Uri.parse(
+            'https://voidflix.org/api/public/tmdb?path=/$type/$tmdbId&append_to_response=external_ids',
+          );
+          final proxyRes = await http.get(proxyUri).timeout(const Duration(seconds: 6));
+          if (proxyRes.statusCode == 200) {
+            tmdbJson = jsonDecode(proxyRes.body) as Map<String, dynamic>;
+          }
+        } catch (_) {}
+      }
+
+      if (tmdbJson == null) return [];
       final title = (tmdbJson['title'] ?? tmdbJson['name'] ?? '') as String;
       final rawDate = (tmdbJson['release_date'] ?? tmdbJson['first_air_date'] ?? '') as String;
       final year = rawDate.length >= 4 ? rawDate.substring(0, 4) : '';

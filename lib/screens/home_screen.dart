@@ -36,16 +36,21 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Future<void> _checkConnectivity() async {
     try {
-      final result = await InternetAddress.lookup('google.com').timeout(const Duration(seconds: 3));
-      final hasNet = result.isNotEmpty && result[0].rawAddress.isNotEmpty;
+      final hosts = ['voidflix.org', '1.1.1.1', 'google.com'];
+      bool hasNet = false;
+      for (final host in hosts) {
+        try {
+          final result = await InternetAddress.lookup(host).timeout(const Duration(seconds: 4));
+          if (result.isNotEmpty && result[0].rawAddress.isNotEmpty) {
+            hasNet = true;
+            break;
+          }
+        } catch (_) {}
+      }
       if (mounted && _isOffline != !hasNet) {
         setState(() => _isOffline = !hasNet);
       }
-    } catch (_) {
-      if (mounted && !_isOffline) {
-        setState(() => _isOffline = true);
-      }
-    }
+    } catch (_) {}
   }
 
   void _playOffline(DownloadedItem item) {
@@ -196,15 +201,19 @@ class _HomeScreenState extends State<HomeScreen> {
 
     return Consumer<MediaProvider>(
       builder: (context, mediaProvider, child) {
-        final isOffline = _isOffline || (mediaProvider.error != null && mediaProvider.trending.isEmpty);
+        final hasAnyMedia = mediaProvider.trending.isNotEmpty ||
+            mediaProvider.popularMovies.isNotEmpty ||
+            mediaProvider.topRatedMovies.isNotEmpty;
 
-        if (mediaProvider.isLoadingHome && mediaProvider.trending.isEmpty && !isOffline) {
+        if (mediaProvider.isLoadingHome && !hasAnyMedia) {
           return const Center(
             child: CircularProgressIndicator(color: AppTheme.primaryRed),
           );
         }
 
-        if (isOffline && mediaProvider.trending.isEmpty) {
+        final isOffline = _isOffline || (mediaProvider.error != null && !hasAnyMedia);
+
+        if (isOffline && !hasAnyMedia && !mediaProvider.isLoadingHome) {
           return _buildOfflineView(context, completedDownloads, mediaProvider);
         }
 

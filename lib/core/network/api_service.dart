@@ -6,6 +6,8 @@ import '../../models/media_detail.dart';
 
 class ApiService {
   final http.Client _client = http.Client();
+  static bool _preferProxy = false;
+  static const String _edgeProxyBase = 'https://voidflix.org/api/public/tmdb';
 
   static String getImageUrl(String? path, {String size = 'w500'}) {
     return ApiConstants.getImageUrl(path, size: size);
@@ -14,18 +16,47 @@ class ApiService {
   Future<List<MediaItem>> getTrending() => getTrendingAll();
 
   Future<dynamic> _get(String endpoint, [Map<String, String>? queryParams]) async {
-    final params = {
-      'api_key': ApiConstants.tmdbApiKey,
-      ...?queryParams,
-    };
+    if (_preferProxy) {
+      return _fetchFromProxy(endpoint, queryParams);
+    }
 
-    final uri = Uri.parse('${ApiConstants.tmdbBaseUrl}$endpoint').replace(queryParameters: params);
-    final response = await _client.get(uri);
+    try {
+      final params = {
+        'api_key': ApiConstants.tmdbApiKey,
+        ...?queryParams,
+      };
 
-    if (response.statusCode == 200) {
-      return jsonDecode(response.body);
-    } else {
-      throw Exception('TMDB API Error: ${response.statusCode}');
+      final uri = Uri.parse('${ApiConstants.tmdbBaseUrl}$endpoint').replace(queryParameters: params);
+      final response = await _client.get(uri).timeout(const Duration(seconds: 5));
+
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body);
+      } else {
+        throw Exception('TMDB API Error: ${response.statusCode}');
+      }
+    } catch (_) {
+      _preferProxy = true;
+      return _fetchFromProxy(endpoint, queryParams);
+    }
+  }
+
+  Future<dynamic> _fetchFromProxy(String endpoint, [Map<String, String>? queryParams]) async {
+    try {
+      final proxyParams = {
+        'path': endpoint,
+        ...?queryParams,
+      };
+
+      final uri = Uri.parse(_edgeProxyBase).replace(queryParameters: proxyParams);
+      final response = await _client.get(uri).timeout(const Duration(seconds: 8));
+
+      if (response.statusCode == 200) {
+        return jsonDecode(response.body);
+      } else {
+        throw Exception('Proxy TMDB Error: ${response.statusCode}');
+      }
+    } catch (e) {
+      throw Exception('Failed to load media: $e');
     }
   }
 

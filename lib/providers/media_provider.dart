@@ -72,7 +72,11 @@ class MediaProvider extends ChangeNotifier {
   bool get isLoadingHome => _isLoadingHome;
   String? get error => _error;
 
-  MediaItem? get heroItem => _trending.isNotEmpty ? _trending.first : null;
+  MediaItem? get heroItem => _trending.isNotEmpty
+      ? _trending.first
+      : (_popularMovies.isNotEmpty
+          ? _popularMovies.first
+          : (_topRatedMovies.isNotEmpty ? _topRatedMovies.first : null));
 
   Future<void> fetchHomeData({UserProfile? profile}) async {
     _isLoadingHome = true;
@@ -85,11 +89,11 @@ class MediaProvider extends ChangeNotifier {
       if (isKids) {
         // Strict Kids Mode: exclusively G/PG family, animation, and cartoons
         final results = await Future.wait([
-          _apiService.getKidsAnimatedMovies(),
-          _apiService.getKidsCartoons(),
-          _apiService.getKidsFamilyMovies(),
-          _apiService.getAnime(),
-          _apiService.getComedyMovies(),
+          _apiService.getKidsAnimatedMovies().catchError((_) => <MediaItem>[]),
+          _apiService.getKidsCartoons().catchError((_) => <MediaItem>[]),
+          _apiService.getKidsFamilyMovies().catchError((_) => <MediaItem>[]),
+          _apiService.getAnime().catchError((_) => <MediaItem>[]),
+          _apiService.getComedyMovies().catchError((_) => <MediaItem>[]),
         ]);
 
         _kidsAnimated = results[0];
@@ -111,26 +115,30 @@ class MediaProvider extends ChangeNotifier {
         _thrillerMovies = [];
         _actionMovies = [];
         _crimeTV = [];
+
+        if (results.every((list) => list.isEmpty)) {
+          _error = 'Unable to connect to media services. Please check your network connection.';
+        }
       } else {
         final results = await Future.wait([
-          _apiService.getTrendingAll(),
-          _apiService.getTrendingTV(),
-          _apiService.getPopularMovies(),
-          _apiService.getTopRatedMovies(),
-          _apiService.getPopularTV(),
-          _apiService.getTopRatedTV(),
-          _apiService.getAnime(),
-          _apiService.getAsianDrama(),
-          _apiService.getActionMovies(),
-          _apiService.getComedyMovies(),
-          _apiService.getSciFiMovies(),
-          _apiService.getHorrorMovies(),
-          _apiService.getThrillerMovies(),
-          _apiService.getDocumentaries(),
-          _apiService.getUpcomingMovies(),
-          _apiService.getNowPlayingMovies(),
-          _apiService.getRomanceMovies(),
-          _apiService.getCrimeTV(),
+          _apiService.getTrendingAll().catchError((_) => <MediaItem>[]),
+          _apiService.getTrendingTV().catchError((_) => <MediaItem>[]),
+          _apiService.getPopularMovies().catchError((_) => <MediaItem>[]),
+          _apiService.getTopRatedMovies().catchError((_) => <MediaItem>[]),
+          _apiService.getPopularTV().catchError((_) => <MediaItem>[]),
+          _apiService.getTopRatedTV().catchError((_) => <MediaItem>[]),
+          _apiService.getAnime().catchError((_) => <MediaItem>[]),
+          _apiService.getAsianDrama().catchError((_) => <MediaItem>[]),
+          _apiService.getActionMovies().catchError((_) => <MediaItem>[]),
+          _apiService.getComedyMovies().catchError((_) => <MediaItem>[]),
+          _apiService.getSciFiMovies().catchError((_) => <MediaItem>[]),
+          _apiService.getHorrorMovies().catchError((_) => <MediaItem>[]),
+          _apiService.getThrillerMovies().catchError((_) => <MediaItem>[]),
+          _apiService.getDocumentaries().catchError((_) => <MediaItem>[]),
+          _apiService.getUpcomingMovies().catchError((_) => <MediaItem>[]),
+          _apiService.getNowPlayingMovies().catchError((_) => <MediaItem>[]),
+          _apiService.getRomanceMovies().catchError((_) => <MediaItem>[]),
+          _apiService.getCrimeTV().catchError((_) => <MediaItem>[]),
         ]);
 
         _trending = results[0];
@@ -151,6 +159,10 @@ class MediaProvider extends ChangeNotifier {
         _nowPlayingMovies = results[15];
         _romanceMovies = results[16];
         _crimeTV = results[17];
+
+        if (results.every((list) => list.isEmpty)) {
+          _error = 'Unable to connect to media services. Please check your network connection.';
+        }
       }
     } catch (e) {
       _error = e.toString();
