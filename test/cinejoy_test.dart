@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flowflix_app/core/constants/api_constants.dart';
 import 'package:http/http.dart' as http;
@@ -10,8 +11,8 @@ void main() {
   HttpOverrides.global = _RealNetworkHttpOverrides();
 
   test('Test Cinejoy Extraction in Dart', () async {
-    final type = 'movie';
-    final tmdbId = 157336;
+    const type = 'movie';
+    const tmdbId = 157336;
 
     // 1. Get TMDB info
     final tmdbUri = Uri.parse(
@@ -25,14 +26,14 @@ void main() {
     final extIds = tmdbJson['external_ids'] as Map<String, dynamic>?;
     final imdbId = (tmdbJson['imdb_id'] ?? extIds?['imdb_id'] ?? '') as String;
 
-    print('Title: $title, Year: $year, IMDb: $imdbId');
+    debugPrint('Title: $title, Year: $year, IMDb: $imdbId');
 
-    final server = 'Lisbon';
-    final tParam = type == 'movie' ? 'movie' : 'series';
+    const server = 'Lisbon';
+    const tParam = type == 'movie' ? 'movie' : 'series';
     final wingUrl =
         'https://api.wing.st/?title=${Uri.encodeComponent(title)}&type=$tParam&year=$year&imdb=$imdbId&tmdb=$tmdbId&server=$server';
 
-    print('Calling enc-cinejoy...');
+    debugPrint('Calling enc-cinejoy...');
     final encUri = Uri.parse('https://enc-dec.app/api/enc-cinejoy?url=${Uri.encodeComponent(wingUrl)}');
     final encRes = await http.get(encUri, headers: {
       'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
@@ -51,7 +52,7 @@ void main() {
     }
     final postBytes = base64Decode(b64);
 
-    print('Posting to api.wing.st/g...');
+    debugPrint('Posting to api.wing.st/g...');
     final wingRes = await http.post(
       Uri.parse('https://api.wing.st/g'),
       body: postBytes,
@@ -64,10 +65,10 @@ void main() {
     );
     expect(wingRes.statusCode, equals(200));
     final encBytes = wingRes.bodyBytes;
-    print('Got encrypted response bytes: ${encBytes.length}');
+    debugPrint('Got encrypted response bytes: ${encBytes.length}');
 
     // Decrypt
-    print('Calling dec-cinejoy...');
+    debugPrint('Calling dec-cinejoy...');
     final decUri = Uri.parse('https://enc-dec.app/api/dec-cinejoy');
     final decRes = await http.post(
       decUri,
@@ -82,19 +83,19 @@ void main() {
     );
     expect(decRes.statusCode, equals(200));
     final decJson = jsonDecode(decRes.body) as Map<String, dynamic>;
-    print('decJson: $decJson');
+    debugPrint('decJson: $decJson');
     expect(decJson['status'], equals(200));
     final dataMap = decJson['result']['data'] as Map<String, dynamic>;
     final streamList = dataMap['stream'] as List<dynamic>;
     expect(streamList.isNotEmpty, isTrue);
     final playlist = streamList.first['playlist'] as String;
-    print('Extracted Playlist: $playlist');
+    debugPrint('Extracted Playlist: $playlist');
 
     // Test stream playback
     final playRes = await http.get(Uri.parse(playlist));
-    print('Stream playback status: ${playRes.statusCode}');
+    debugPrint('Stream playback status: ${playRes.statusCode}');
     expect(playRes.statusCode, equals(200));
     expect(playRes.body.contains('#EXTM3U'), isTrue);
-    print('SUCCESS! Playlist is valid HLS.');
+    debugPrint('SUCCESS! Playlist is valid HLS.');
   });
 }

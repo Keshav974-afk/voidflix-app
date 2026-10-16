@@ -102,12 +102,12 @@ class WatchPartyRoom {
     );
   }
 
-  /// Calculates expected current time with drift compensation
-  double getDriftCompensatedTime() {
+  /// Calculates expected current time with drift compensation and client-server clock offset
+  double getDriftCompensatedTime({int serverOffsetMs = 0}) {
     if (!isPlaying || updatedAt <= 0) return currentTime;
-    final now = DateTime.now().millisecondsSinceEpoch;
-    final elapsedSec = (now - updatedAt) / 1000.0;
-    if (elapsedSec > 0 && elapsedSec < 15.0) {
+    final nowServer = DateTime.now().millisecondsSinceEpoch + serverOffsetMs;
+    final elapsedSec = (nowServer - updatedAt) / 1000.0;
+    if (elapsedSec > 0 && elapsedSec < 20.0) {
       return currentTime + elapsedSec;
     }
     return currentTime;
@@ -117,6 +117,16 @@ class WatchPartyRoom {
 class WatchPartyService {
   static const String _apiBase = 'https://voidflix.org/api/public/party';
   final http.Client _client = http.Client();
+
+  int _serverTimeOffsetMs = 0;
+  int get serverTimeOffsetMs => _serverTimeOffsetMs;
+
+  void _updateServerTime(dynamic serverTime) {
+    if (serverTime is int && serverTime > 0) {
+      final localNow = DateTime.now().millisecondsSinceEpoch;
+      _serverTimeOffsetMs = serverTime - localNow;
+    }
+  }
 
   Future<WatchPartyRoom?> createRoom({
     required int mediaId,
@@ -151,6 +161,7 @@ class WatchPartyService {
 
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
+        _updateServerTime(data['serverTime']);
         if (data['success'] == true && data['room'] != null) {
           return WatchPartyRoom.fromJson(data['room'] as Map<String, dynamic>);
         }
@@ -169,6 +180,7 @@ class WatchPartyService {
 
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
+        _updateServerTime(data['serverTime']);
         if (data['success'] == true && data['room'] != null) {
           return WatchPartyRoom.fromJson(data['room'] as Map<String, dynamic>);
         }
@@ -199,6 +211,7 @@ class WatchPartyService {
 
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
+        _updateServerTime(data['serverTime']);
         if (data['success'] == true && data['room'] != null) {
           return WatchPartyRoom.fromJson(data['room'] as Map<String, dynamic>);
         }
@@ -214,6 +227,8 @@ class WatchPartyService {
     required String memberId,
     required bool isPlaying,
     required double currentTime,
+    int? season,
+    int? episode,
     String? chatText,
     String? chatSender,
   }) async {
@@ -226,6 +241,8 @@ class WatchPartyService {
         'isPlaying': isPlaying,
         'currentTime': currentTime,
       };
+      if (season != null) payload['season'] = season;
+      if (episode != null) payload['episode'] = episode;
       if (chatText != null && chatSender != null) {
         payload['chatText'] = chatText;
         payload['chatSender'] = chatSender;
@@ -239,6 +256,7 @@ class WatchPartyService {
 
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body);
+        _updateServerTime(data['serverTime']);
         if (data['success'] == true && data['room'] != null) {
           return WatchPartyRoom.fromJson(data['room'] as Map<String, dynamic>);
         }

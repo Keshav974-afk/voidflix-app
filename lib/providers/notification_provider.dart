@@ -35,11 +35,13 @@ class NotificationProvider extends ChangeNotifier {
   static const String _keyPushEnabled = 'voidflix_notifications_enabled';
   static const String _keyWelcomeSent = 'voidflix_welcome_notif_sent';
   static const String _keyLastTrendingSent = 'voidflix_last_trending_notified';
+  static const String _keyDeletedNotifs = 'voidflix_deleted_notifications';
   static const MethodChannel _nativeChannel = MethodChannel('org.voidflix/notifications');
 
   final ApiService _apiService = ApiService();
 
   List<AppNotification> _notifications = [];
+  final Set<String> _deletedIds = {};
   bool _isLoading = false;
   bool _notificationsEnabled = true;
   int _lastSeenEpoch = 0;
@@ -59,6 +61,9 @@ class NotificationProvider extends ChangeNotifier {
   Future<void> _init() async {
     final prefs = await SharedPreferences.getInstance();
     final bool isFirstRun = !prefs.containsKey(_keySeenTimestamp);
+
+    final savedDeleted = prefs.getStringList(_keyDeletedNotifs) ?? [];
+    _deletedIds.addAll(savedDeleted);
 
     if (isFirstRun) {
       // For new users, set last seen to NOW so past notifications are never fired or marked unread!
@@ -102,23 +107,33 @@ class NotificationProvider extends ChangeNotifier {
     notifyListeners();
 
     final prefs = await SharedPreferences.getInstance();
+    final now = DateTime.now();
+    final sevenDaysAgo = now.subtract(const Duration(days: 7));
 
     try {
       final List<AppNotification> list = [];
+      final Set<String> seenItemIds = {};
 
       // 1. Fetch live admin broadcasts & automated push from Mission Control
       await RemoteConfigService.fetchConfig();
       final adminBroadcasts = RemoteConfigService.cachedNotifications;
 
       for (final n in adminBroadcasts) {
+        final notifId = 'admin_${n.id}';
+        // Skip deleted notifications
+        if (_deletedIds.contains(notifId)) continue;
+        // Skip notifications older than 14 days
+        if (n.sentAt.isBefore(now.subtract(const Duration(days: 14)))) continue;
         // Respect targeting: skip notifications targeted strictly to web browsers
         if (n.target.toLowerCase() == 'web') continue;
 
         final sentEpoch = n.sentAt.millisecondsSinceEpoch;
         final isSeen = _lastSeenEpoch >= sentEpoch;
+        seenItemIds.add(notifId);
+
         list.add(
           AppNotification(
-            id: 'admin_${n.id}',
+            id: notifId,
             title: n.title,
             message: n.body,
             timestamp: n.sentAt,
@@ -149,49 +164,60 @@ class NotificationProvider extends ChangeNotifier {
       if (trending.isNotEmpty) {
         final top = trending.first;
         final topId = 'top_${top.id}';
-        list.add(
-          AppNotification(
-            id: topId,
-            title: '🔥 #1 Trending Today: ${top.title}',
-            message: 'Stream the most watched title right now on Voidflix with zero wait time.',
-            timestamp: DateTime.now(),
-            mediaItem: top,
-            isRead: false,
-          ),
-        );
-
-        // Fire device status bar notification for new trending title
-        final lastTrendingNotif = prefs.getString(_keyLastTrendingSent);
-        if (lastTrendingNotif != topId) {
-          await prefs.setString(_keyLastTrendingSent, topId);
-          await showDeviceNotification(
-            id: top.id,
-            title: '🔥 #1 Trending on Voidflix: ${top.title}',
-            body: 'Stream now in 4K HDR on Voidflix with zero wait time.',
+        if (!_deletedIds.contains(topId)) {
+          seenItemIds.add(topId);
+          list.add(
+            AppNotification(
+              id: topId,
+              title: '🔥 #1 Trending Today: ${top.title}',
+              message: 'Stream the most watched title right now on Voidflix with zero wait time.',
+              timestamp: now,
+              mediaItem: top,
+              isRead: false,
+            ),
           );
+
+          // Fire device status bar notification for new trending title
+          final lastTrendingNotif = prefs.getString(_keyLastTrendingSent);
+          if (lastTrendingNotif != topId) {
+            await prefs.setString(_keyLastTrendingSent, topId);
+            await showDeviceNotification(
+              id: top.id,
+              title: '🔥 #1 Trending on Voidflix: ${top.title}',
+              body: 'Stream now in 4K HDR on Voidflix with zero wait time.',
+            );
+          }
         }
       }
 
-      // Add upcoming movie updates
+      // Add upcoming movie updates (pruning old or deleted ones)
       for (final item in upcoming.take(6)) {
+        final upId = 'upcoming_${item.id}';
+        if (_deletedIds.contains(upId)) continue;
+
         final releaseDate = item.releaseDate ?? '';
+        final itemTimestamp = DateTime.tryParse(releaseDate) ?? now;
+        // Don't show releases older than 7 days
+        if (itemTimestamp.isBefore(sevenDaysAgo)) continue;
+
+        seenItemIds.add(upId);
         list.add(
           AppNotification(
-            id: 'upcoming_${item.id}',
+            id: upId,
             title: '🎬 Coming Soon: ${item.title}',
             message: releaseDate.isNotEmpty
                 ? 'Arriving in theaters & streaming on $releaseDate. Tap for details!'
                 : 'Added to upcoming premieres list.',
-            timestamp: DateTime.tryParse(releaseDate) ?? DateTime.now(),
+            timestamp: itemTimestamp,
             mediaItem: item,
-            isRead: _lastSeenEpoch >= (DateTime.tryParse(releaseDate)?.millisecondsSinceEpoch ?? 0),
+            isRead: _lastSeenEpoch >= itemTimestamp.millisecondsSinceEpoch,
           ),
         );
       }
 
       // Fire Welcome to Voidflix device status bar notification on first launch
       final welcomeSent = prefs.getBool(_keyWelcomeSent) ?? false;
-      if (!welcomeSent) {
+      if (!welcomeSent && !_deletedIds.contains('welcome')) {
         await prefs.setBool(_keyWelcomeSent, true);
         await showDeviceNotification(
           id: 1001,
@@ -200,21 +226,59 @@ class NotificationProvider extends ChangeNotifier {
         );
       }
 
-      _notifications = list;
+      // Sort notifications by timestamp descending (newest first)
+      list.sort((a, b) => b.timestamp.compareTo(a.timestamp));
+      _notifications = list.take(20).toList();
     } catch (err) {
       debugPrint('NotificationProvider error: $err');
-      _notifications = [
-        AppNotification(
-          id: 'welcome',
-          title: '🎉 Welcome to Voidflix!',
-          message: 'Enjoy unlimited HD movies, TV shows, and Live IPTV channels on Voidflix.',
-          timestamp: DateTime.now(),
-          isRead: false,
-        ),
-      ];
+      if (!_deletedIds.contains('welcome')) {
+        _notifications = [
+          AppNotification(
+            id: 'welcome',
+            title: '🎉 Welcome to Voidflix!',
+            message: 'Enjoy unlimited HD movies, TV shows, and Live IPTV channels on Voidflix.',
+            timestamp: DateTime.now(),
+            isRead: false,
+          ),
+        ];
+      } else {
+        _notifications = [];
+      }
     } finally {
       _isLoading = false;
       notifyListeners();
+    }
+  }
+
+  /// Delete an individual notification and persist its ID so it never resurfaces
+  Future<void> deleteNotification(String id) async {
+    _notifications.removeWhere((n) => n.id == id);
+    _deletedIds.add(id);
+    notifyListeners();
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setStringList(_keyDeletedNotifs, _deletedIds.toList());
+    } catch (e) {
+      debugPrint('Error saving deleted notification: $e');
+    }
+  }
+
+  /// Clear all notifications and mark as caught up
+  Future<void> clearAllNotifications() async {
+    for (final n in _notifications) {
+      _deletedIds.add(n.id);
+    }
+    _notifications.clear();
+    _lastSeenEpoch = DateTime.now().millisecondsSinceEpoch;
+    notifyListeners();
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setInt(_keySeenTimestamp, _lastSeenEpoch);
+      await prefs.setStringList(_keyDeletedNotifs, _deletedIds.toList());
+    } catch (e) {
+      debugPrint('Error clearing notifications: $e');
     }
   }
 
