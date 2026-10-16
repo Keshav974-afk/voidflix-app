@@ -17,6 +17,7 @@ import '../core/network/api_service.dart';
 import '../core/services/clip_export_service.dart';
 import '../core/services/stream_extractor.dart';
 import '../core/services/subtitle_service.dart';
+import '../core/services/watch_party_service.dart';
 import '../core/utils/language_utils.dart';
 import '../models/media_detail.dart';
 import '../models/server_config.dart';
@@ -145,6 +146,25 @@ class _PlayerScreenState extends State<PlayerScreen> {
   bool _isHolding2xSpeed = false;
   double _savedSpeedBeforeHold = 1.0;
 
+  // Skip Intro system (Netflix feature)
+  bool _showSkipIntro = false;
+  bool _hasSkippedIntroForThisEp = false;
+  bool _hasCancelledAutoplayForThisEp = false;
+
+  // Watch Party / Sync Play system (Native Player Exclusive)
+  final WatchPartyService _partyService = WatchPartyService();
+  WatchPartyRoom? _partyRoom;
+  bool _isInParty = false;
+  Timer? _partySyncTimer;
+  late final String _partyMemberId;
+  String _partyMemberName = 'You';
+  final List<WatchPartyMessage> _floatingPartyMessages = [];
+  Timer? _floatingMsgTimer;
+  int _lastProcessedMsgTimestamp = 0;
+
+  // Android TV / Remote Control support
+  final FocusNode _playerFocusNode = FocusNode();
+
   @override
   void initState() {
     super.initState();
@@ -154,6 +174,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _selectedServerIndex = (savedServer >= 0 && savedServer < ServerConfig.servers.length)
         ? savedServer
         : 0;
+
+    _partyMemberId = 'usr_${DateTime.now().millisecondsSinceEpoch % 100000}';
+    final activeProfile = context.read<ProfileProvider>().activeProfileOrNull;
+    if (activeProfile != null && activeProfile.name.isNotEmpty) {
+      _partyMemberName = activeProfile.name;
+    }
 
     // Lock firmly to immersive fullscreen landscape mode
     SystemChrome.setPreferredOrientations([
@@ -192,6 +218,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
   @override
   void dispose() {
     const MethodChannel('org.voidflix/notifications').setMethodCallHandler(null);
+    _partySyncTimer?.cancel();
+    _floatingMsgTimer?.cancel();
+    _playerFocusNode.dispose();
+    if (_isInParty && _partyRoom != null) {
+      _partyService.leaveRoom(_partyRoom!.roomCode, _partyMemberId);
+    }
     _recordWatchProgress(force: true);
     _hideControlsTimer?.cancel();
     _lockPillTimer?.cancel();
@@ -813,10 +845,25 @@ class _PlayerScreenState extends State<PlayerScreen> {
       }
     }
 
-    // Auto-detect stream completion for TV episode autoplay
-    if (val.isInitialized && val.duration > const Duration(seconds: 15)) {
+    // Skip Intro button detection (seconds 12 to 95 for media longer than 5 mins)
+    if (val.isInitialized && val.duration.inSeconds > 300) {
+      final posSec = val.position.inSeconds;
+      final shouldShowIntro = posSec >= 12 && posSec <= 95 && !_hasSkippedIntroForThisEp;
+      if (shouldShowIntro != _showSkipIntro) {
+        setState(() => _showSkipIntro = shouldShowIntro);
+      }
+    } else if (_showSkipIntro) {
+      setState(() => _showSkipIntro = false);
+    }
+
+    // Auto-detect stream completion for TV episode autoplay (triggers during end credits, last 70s)
+    if (val.isInitialized && val.duration > const Duration(seconds: 120)) {
       final remaining = val.duration - val.position;
-      if (remaining <= const Duration(seconds: 2) && !_showAutoplayCard && widget.mediaType == 'tv') {
+      if (remaining <= const Duration(seconds: 70) &&
+          remaining >= const Duration(seconds: 1) &&
+          !_showAutoplayCard &&
+          !_hasCancelledAutoplayForThisEp &&
+          widget.mediaType == 'tv') {
         _triggerAutoplayNext();
       }
     }
@@ -1369,8 +1416,23 @@ class _PlayerScreenState extends State<PlayerScreen> {
   void _goToEpisode(int episodeNum) {
     _recordWatchProgress(force: true);
     _cancelAutoplayTimer();
-    setState(() => _currentEpisode = episodeNum);
+    setState(() {
+      _currentEpisode = episodeNum;
+      _showSkipIntro = false;
+      _hasSkippedIntroForThisEp = false;
+      _hasCancelledAutoplayForThisEp = false;
+    });
     _loadMedia();
+  }
+
+  void _skipIntro() {
+    HapticFeedback.mediumImpact();
+    final targetSec = _currentPosition.inSeconds < 95 ? 95 : _currentPosition.inSeconds + 80;
+    _videoPlayerController?.seekTo(Duration(seconds: targetSec));
+    setState(() {
+      _showSkipIntro = false;
+      _hasSkippedIntroForThisEp = true;
+    });
   }
 
   void _nextEpisode() {
@@ -1386,6 +1448,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
         setState(() {
           _currentSeason = nextSeason.seasonNumber;
           _currentEpisode = 1;
+          _showSkipIntro = false;
+          _hasSkippedIntroForThisEp = false;
+          _hasCancelledAutoplayForThisEp = false;
         });
         _loadEpisodesForSeason(_currentSeason);
         _loadMedia();
@@ -1394,11 +1459,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   void _triggerAutoplayNext() {
-    if (widget.mediaType != 'tv' || _showAutoplayCard) return;
+    if (widget.mediaType != 'tv' || _showAutoplayCard || _hasCancelledAutoplayForThisEp) return;
     _cancelAutoplayTimer();
     setState(() {
       _showAutoplayCard = true;
-      _autoplayCountdown = 5;
+      _autoplayCountdown = 10;
     });
 
     _autoplayTimer = Timer.periodic(const Duration(seconds: 1), (t) {
@@ -1418,8 +1483,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
   void _cancelAutoplayTimer() {
     _autoplayTimer?.cancel();
     _autoplayTimer = null;
-    if (_showAutoplayCard && mounted) {
-      setState(() => _showAutoplayCard = false);
+    if (mounted) {
+      setState(() {
+        _showAutoplayCard = false;
+        _hasCancelledAutoplayForThisEp = true;
+      });
     }
   }
 
@@ -3107,9 +3175,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
         opacity: _isExiting ? 0.0 : 1.0,
         duration: const Duration(milliseconds: 120),
         curve: Curves.easeOut,
-        child: Scaffold(
-          backgroundColor: Colors.black,
-          body: Stack(
+        child: KeyboardListener(
+          focusNode: _playerFocusNode,
+          autofocus: true,
+          onKeyEvent: _handleKeyEvent,
+          child: Scaffold(
+            backgroundColor: Colors.black,
+            body: Stack(
             fit: StackFit.expand,
             children: [
               // ---------------------------------------------------------------
@@ -3625,6 +3697,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                             label: 'Server',
                                             onTap: _openServerPicker,
                                           ),
+                                        if (_isNativeMode)
+                                          _NetflixBarButton(
+                                            icon: _isInParty ? Icons.group_rounded : Icons.group_add_rounded,
+                                            label: _isInParty ? 'Sync (${_partyRoom?.members.length ?? 1})' : 'Watch Party',
+                                            color: _isInParty ? const Color(0xFF4CAF50) : null,
+                                            onTap: _openWatchPartySheet,
+                                          ),
                                       ],
                                     ),
                                   ),
@@ -3803,6 +3882,38 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 ),
 
               // ---------------------------------------------------------------
+              // Layer 10b: Skip Intro Floating Button (Seconds 12 to 95)
+              // ---------------------------------------------------------------
+              if (_isNativeMode && _showSkipIntro && !_showAutoplayCard && !_isClippingMoment)
+                Positioned(
+                  bottom: _showControls ? 95 : 30,
+                  right: 20,
+                  child: _buildSkipIntroButton(),
+                ),
+
+              // ---------------------------------------------------------------
+              // Layer 14: Watch Party Floating Sync Status Pill (Top Left)
+              // ---------------------------------------------------------------
+              if (_isNativeMode && _isInParty && !_isClippingMoment)
+                Positioned(
+                  top: 16,
+                  left: _showControls ? 60 : 20,
+                  child: _buildPartyStatusPill(),
+                ),
+
+              // ---------------------------------------------------------------
+              // Layer 15: Watch Party Floating Chat Toast Messages (Bottom Left)
+              // ---------------------------------------------------------------
+              if (_isNativeMode && _floatingPartyMessages.isNotEmpty)
+                Positioned(
+                  bottom: _showControls ? 95 : 30,
+                  left: 20,
+                  child: IgnorePointer(
+                    child: _buildPartyFloatingMessages(),
+                  ),
+                ),
+
+              // ---------------------------------------------------------------
               // Layer 11: Clip a Moment Trimmer View (Matching Screenshot 2)
               // ---------------------------------------------------------------
               if (_isClippingMoment)
@@ -3830,7 +3941,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
                     ),
                   ),
                 ),
-            ],
+              ],
+            ),
           ),
         ),
       ),
@@ -4012,21 +4124,662 @@ class _PlayerScreenState extends State<PlayerScreen> {
       ),
     );
   }
+  Widget _buildSkipIntroButton() {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.75),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: Colors.white30, width: 1.2),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.6),
+            blurRadius: 10,
+          ),
+        ],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(8),
+          onTap: _skipIntro,
+          child: const Padding(
+            padding: EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(Icons.fast_forward_rounded, color: Colors.white, size: 18),
+                SizedBox(width: 6),
+                Text(
+                  'Skip Intro',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 13,
+                    letterSpacing: 0.3,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Watch Party / Synchronized Play (Native Player Exclusive)
+  // ---------------------------------------------------------------------------
+  void _startPartySyncLoop() {
+    _partySyncTimer?.cancel();
+    _partySyncTimer = Timer.periodic(const Duration(milliseconds: 1600), (_) async {
+      if (!mounted || !_isInParty || _partyRoom == null) return;
+      if (_videoPlayerController == null || !_videoPlayerController!.value.isInitialized) return;
+
+      final isHost = _partyRoom!.hostId == _partyMemberId;
+      final curSec = _currentPosition.inMilliseconds / 1000.0;
+
+      if (isHost) {
+        final updated = await _partyService.syncPlayback(
+          roomCode: _partyRoom!.roomCode,
+          memberId: _partyMemberId,
+          isPlaying: _isPlaying,
+          currentTime: curSec,
+        );
+        if (updated != null && mounted) {
+          _updatePartyRoomState(updated);
+        }
+      } else {
+        final room = await _partyService.getRoom(_partyRoom!.roomCode);
+        if (room != null && mounted) {
+          _updatePartyRoomState(room);
+
+          final expectedSec = room.getDriftCompensatedTime();
+          final drift = (curSec - expectedSec).abs();
+          if (drift > 2.8) {
+            _videoPlayerController?.seekTo(Duration(milliseconds: (expectedSec * 1000).toInt()));
+          }
+          if (room.isPlaying != _isPlaying) {
+            if (room.isPlaying) {
+              _videoPlayerController?.play();
+            } else {
+              _videoPlayerController?.pause();
+            }
+          }
+        }
+      }
+    });
+  }
+
+  void _updatePartyRoomState(WatchPartyRoom room) {
+    _partyRoom = room;
+    for (final msg in room.messages) {
+      if (msg.timestamp > _lastProcessedMsgTimestamp && msg.sender != _partyMemberName && msg.sender != 'System') {
+        _lastProcessedMsgTimestamp = msg.timestamp;
+        _showFloatingPartyMessage(msg);
+      }
+    }
+    if (mounted) setState(() {});
+  }
+
+  void _showFloatingPartyMessage(WatchPartyMessage msg) {
+    setState(() {
+      _floatingPartyMessages.add(msg);
+      if (_floatingPartyMessages.length > 3) {
+        _floatingPartyMessages.removeAt(0);
+      }
+    });
+    _floatingMsgTimer?.cancel();
+    _floatingMsgTimer = Timer(const Duration(seconds: 4), () {
+      if (mounted) {
+        setState(() => _floatingPartyMessages.clear());
+      }
+    });
+  }
+
+  void _leaveWatchParty() {
+    if (_partyRoom != null) {
+      _partyService.leaveRoom(_partyRoom!.roomCode, _partyMemberId);
+    }
+    _partySyncTimer?.cancel();
+    _partySyncTimer = null;
+    setState(() {
+      _isInParty = false;
+      _partyRoom = null;
+      _floatingPartyMessages.clear();
+    });
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Left Watch Party', style: TextStyle(color: Colors.white)),
+          backgroundColor: Color(0xFF222228),
+          duration: Duration(seconds: 2),
+        ),
+      );
+    }
+  }
+
+  Widget _buildPartyStatusPill() {
+    final count = _partyRoom?.members.length ?? 1;
+    final code = _partyRoom?.roomCode ?? '';
+    final isHost = _partyRoom?.hostId == _partyMemberId;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.black.withValues(alpha: 0.7),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: const Color(0xFF4CAF50).withValues(alpha: 0.8), width: 1.2),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.5),
+            blurRadius: 8,
+          ),
+        ],
+      ),
+      child: Material(
+        color: Colors.transparent,
+        child: InkWell(
+          borderRadius: BorderRadius.circular(20),
+          onTap: _openWatchPartySheet,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 8,
+                  height: 8,
+                  decoration: const BoxDecoration(
+                    color: Color(0xFF4CAF50),
+                    shape: BoxShape.circle,
+                  ),
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  'SYNC: $code ($count)',
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                    letterSpacing: 0.6,
+                  ),
+                ),
+                if (isHost) ...[
+                  const SizedBox(width: 4),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                    decoration: BoxDecoration(
+                      color: AppTheme.primaryRed.withValues(alpha: 0.85),
+                      borderRadius: BorderRadius.circular(3),
+                    ),
+                    child: const Text('HOST', style: TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.bold)),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildPartyFloatingMessages() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: _floatingPartyMessages.map((msg) {
+        return Container(
+          margin: const EdgeInsets.only(bottom: 6),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          decoration: BoxDecoration(
+            color: Colors.black.withValues(alpha: 0.82),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: Colors.white24, width: 0.8),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                '${msg.sender}: ',
+                style: const TextStyle(color: Color(0xFFE50914), fontWeight: FontWeight.bold, fontSize: 12),
+              ),
+              Flexible(
+                child: Text(
+                  msg.text,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(color: Colors.white, fontSize: 12),
+                ),
+              ),
+            ],
+          ),
+        );
+      }).toList(),
+    );
+  }
+
+  void _openWatchPartySheet() {
+    _startHideControlsTimer();
+    final joinCodeController = TextEditingController();
+    final chatController = TextEditingController();
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF14141E),
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        return StatefulBuilder(
+          builder: (ctx, setSheetState) {
+            if (_isInParty && _partyRoom != null) {
+              final isHost = _partyRoom!.hostId == _partyMemberId;
+              return Padding(
+                padding: EdgeInsets.only(
+                  bottom: MediaQuery.of(ctx).viewInsets.bottom + 16,
+                  left: 20,
+                  right: 20,
+                  top: 16,
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Center(
+                      child: Container(
+                        width: 36,
+                        height: 4,
+                        decoration: BoxDecoration(
+                          color: Colors.white24,
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 14),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(6),
+                              decoration: const BoxDecoration(
+                                color: Color(0xFF1E281E),
+                                shape: BoxShape.circle,
+                              ),
+                              child: const Icon(Icons.group_rounded, color: Color(0xFF4CAF50), size: 20),
+                            ),
+                            const SizedBox(width: 10),
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Row(
+                                  children: [
+                                    Text(
+                                      'Room: ${_partyRoom!.roomCode}',
+                                      style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Container(
+                                      padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                                      decoration: BoxDecoration(
+                                        color: isHost ? AppTheme.primaryRed : Colors.white12,
+                                        borderRadius: BorderRadius.circular(4),
+                                      ),
+                                      child: Text(
+                                        isHost ? 'Host' : 'Guest',
+                                        style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                                Text(
+                                  '${_partyRoom!.members.length} watching together (Sync Play)',
+                                  style: const TextStyle(color: Colors.white60, fontSize: 12),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.copy_rounded, color: Colors.white70, size: 20),
+                          tooltip: 'Copy Room Code',
+                          onPressed: () {
+                            Clipboard.setData(ClipboardData(text: _partyRoom!.roomCode));
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('Copied room code ${_partyRoom!.roomCode} to clipboard!'),
+                                duration: const Duration(seconds: 2),
+                              ),
+                            );
+                          },
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+                    const Divider(color: Colors.white12, height: 1),
+                    const SizedBox(height: 10),
+                    // Members list
+                    const Text('PARTICIPANTS', style: TextStyle(color: Colors.white54, fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1.0)),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 6,
+                      children: _partyRoom!.members.map((m) {
+                        return Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF202028),
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(color: Colors.white12),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Container(
+                                width: 6,
+                                height: 6,
+                                decoration: const BoxDecoration(
+                                  color: Color(0xFF4CAF50),
+                                  shape: BoxShape.circle,
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                              Text(m.name, style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w500)),
+                              if (m.isHost)
+                                const Text(' (Host)', style: TextStyle(color: Colors.white54, fontSize: 10)),
+                            ],
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                    const SizedBox(height: 16),
+                    // Chat message input
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: chatController,
+                            style: const TextStyle(color: Colors.white, fontSize: 13),
+                            decoration: InputDecoration(
+                              hintText: 'Send message to party...',
+                              hintStyle: const TextStyle(color: Colors.white38, fontSize: 13),
+                              filled: true,
+                              fillColor: const Color(0xFF22222E),
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                              border: OutlineInputBorder(borderRadius: BorderRadius.circular(20), borderSide: BorderSide.none),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        IconButton(
+                          icon: const Icon(Icons.send_rounded, color: AppTheme.primaryRed),
+                          onPressed: () {
+                            final text = chatController.text.trim();
+                            if (text.isNotEmpty) {
+                              _partyService.syncPlayback(
+                                roomCode: _partyRoom!.roomCode,
+                                memberId: _partyMemberId,
+                                isPlaying: _isPlaying,
+                                currentTime: _currentPosition.inMilliseconds / 1000.0,
+                                chatText: text,
+                                chatSender: _partyMemberName,
+                              );
+                              chatController.clear();
+                              Navigator.pop(ctx);
+                            }
+                          },
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 14),
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor: Colors.redAccent,
+                          side: const BorderSide(color: Colors.redAccent, width: 1),
+                          padding: const EdgeInsets.symmetric(vertical: 10),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        ),
+                        icon: const Icon(Icons.exit_to_app_rounded, size: 18),
+                        label: const Text('Leave Watch Party', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                        onPressed: () {
+                          Navigator.pop(ctx);
+                          _leaveWatchParty();
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            }
+
+            // Not currently in party
+            return Padding(
+              padding: EdgeInsets.only(
+                bottom: MediaQuery.of(ctx).viewInsets.bottom + 20,
+                left: 20,
+                right: 20,
+                top: 16,
+              ),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 36,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: Colors.white24,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  const Row(
+                    children: [
+                      Icon(Icons.group_rounded, color: AppTheme.primaryRed, size: 24),
+                      SizedBox(width: 10),
+                      Text(
+                        'Watch Together (Sync Play)',
+                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 18),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  const Text(
+                    'Synchronize playback with friends in real-time right inside the Native Player.',
+                    style: TextStyle(color: Colors.white60, fontSize: 12),
+                  ),
+                  const SizedBox(height: 20),
+                  // Create Party Button
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppTheme.primaryRed,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(vertical: 12),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      ),
+                      icon: const Icon(Icons.add_circle_outline_rounded),
+                      label: const Text('Start New Watch Party', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                      onPressed: () async {
+                        Navigator.pop(ctx);
+                        final curSec = _currentPosition.inMilliseconds / 1000.0;
+                        final room = await _partyService.createRoom(
+                          mediaId: widget.mediaId,
+                          mediaTitle: widget.mediaTitle,
+                          mediaType: widget.mediaType,
+                          season: _currentSeason,
+                          episode: _currentEpisode,
+                          memberId: _partyMemberId,
+                          memberName: _partyMemberName,
+                          isPlaying: _isPlaying,
+                          currentTime: curSec,
+                        );
+
+                        if (room != null && mounted) {
+                          setState(() {
+                            _isInParty = true;
+                            _partyRoom = room;
+                          });
+                          _startPartySyncLoop();
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text('Watch Party started! Share code ${room.roomCode}'),
+                              backgroundColor: const Color(0xFF1E281E),
+                              duration: const Duration(seconds: 4),
+                              action: SnackBarAction(
+                                label: 'Copy',
+                                textColor: const Color(0xFF4CAF50),
+                                onPressed: () => Clipboard.setData(ClipboardData(text: room.roomCode)),
+                              ),
+                            ),
+                          );
+                        } else if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text('Failed to create party. Check internet connection.')),
+                          );
+                        }
+                      },
+                    ),
+                  ),
+                  const SizedBox(height: 16),
+                  const Row(
+                    children: [
+                      Expanded(child: Divider(color: Colors.white12)),
+                      Padding(
+                        padding: EdgeInsets.symmetric(horizontal: 10),
+                        child: Text('OR JOIN WITH CODE', style: TextStyle(color: Colors.white38, fontSize: 11, fontWeight: FontWeight.bold)),
+                      ),
+                      Expanded(child: Divider(color: Colors.white12)),
+                    ],
+                  ),
+                  const SizedBox(height: 14),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextField(
+                          controller: joinCodeController,
+                          textCapitalization: TextCapitalization.characters,
+                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, letterSpacing: 1.5),
+                          decoration: InputDecoration(
+                            hintText: 'e.g. V-A8B9',
+                            hintStyle: const TextStyle(color: Colors.white38, letterSpacing: 1.0),
+                            filled: true,
+                            fillColor: const Color(0xFF22222E),
+                            contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                            border: OutlineInputBorder(borderRadius: BorderRadius.circular(8), borderSide: BorderSide.none),
+                          ),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      ElevatedButton(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: const Color(0xFF2A2A38),
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        ),
+                        child: const Text('Join', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                        onPressed: () async {
+                          final code = joinCodeController.text.trim();
+                          if (code.isEmpty) return;
+                          Navigator.pop(ctx);
+                          final room = await _partyService.joinRoom(
+                            roomCode: code,
+                            memberId: _partyMemberId,
+                            memberName: _partyMemberName,
+                          );
+
+                          if (room != null && mounted) {
+                            setState(() {
+                              _isInParty = true;
+                              _partyRoom = room;
+                            });
+                            if (room.mediaId == widget.mediaId && room.season == _currentSeason && room.episode != _currentEpisode) {
+                              _goToEpisode(room.episode);
+                            }
+                            final expected = room.getDriftCompensatedTime();
+                            _videoPlayerController?.seekTo(Duration(milliseconds: (expected * 1000).toInt()));
+                            if (room.isPlaying) {
+                              _videoPlayerController?.play();
+                            } else {
+                              _videoPlayerController?.pause();
+                            }
+                            _startPartySyncLoop();
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              SnackBar(
+                                content: Text('Joined Watch Party ${room.roomCode}!'),
+                                backgroundColor: const Color(0xFF1E281E),
+                                duration: const Duration(seconds: 2),
+                              ),
+                            );
+                          } else if (mounted) {
+                            ScaffoldMessenger.of(context).showSnackBar(
+                              const SnackBar(content: Text('Could not find party room. Verify code and retry.')),
+                            );
+                          }
+                        },
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void _handleKeyEvent(KeyEvent event) {
+    if (event is! KeyDownEvent) return;
+
+    if (event.logicalKey == LogicalKeyboardKey.select ||
+        event.logicalKey == LogicalKeyboardKey.enter ||
+        event.logicalKey == LogicalKeyboardKey.space) {
+      _togglePlayPause();
+    } else if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+      _seekRelative(-10);
+    } else if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
+      _seekRelative(10);
+    } else if (event.logicalKey == LogicalKeyboardKey.arrowUp ||
+        event.logicalKey == LogicalKeyboardKey.arrowDown) {
+      _revealControls();
+    } else if (event.logicalKey == LogicalKeyboardKey.mediaPlayPause) {
+      _togglePlayPause();
+    } else if (event.logicalKey == LogicalKeyboardKey.mediaFastForward) {
+      _seekRelative(10);
+    } else if (event.logicalKey == LogicalKeyboardKey.mediaRewind) {
+      _seekRelative(-10);
+    } else if (event.logicalKey == LogicalKeyboardKey.keyS && _showSkipIntro) {
+      _skipIntro();
+    } else if (event.logicalKey == LogicalKeyboardKey.keyN && widget.mediaType == 'tv') {
+      _nextEpisode();
+    }
+  }
 }
 
 class _NetflixBarButton extends StatelessWidget {
   final IconData icon;
   final String label;
   final VoidCallback onTap;
+  final Color? color;
 
   const _NetflixBarButton({
     required this.icon,
     required this.label,
     required this.onTap,
+    this.color,
   });
 
   @override
   Widget build(BuildContext context) {
+    final effectiveColor = color ?? Colors.white;
     return InkWell(
       onTap: onTap,
       borderRadius: BorderRadius.circular(6),
@@ -4035,12 +4788,12 @@ class _NetflixBarButton extends StatelessWidget {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(icon, color: Colors.white, size: 18),
+            Icon(icon, color: effectiveColor, size: 18),
             const SizedBox(width: 6),
             Text(
               label,
-              style: const TextStyle(
-                color: Colors.white,
+              style: TextStyle(
+                color: effectiveColor,
                 fontSize: 13,
                 fontWeight: FontWeight.w500,
               ),
