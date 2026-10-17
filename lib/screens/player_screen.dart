@@ -31,7 +31,12 @@ import '../providers/profile_provider.dart';
 import '../widgets/netflix_season_picker.dart';
 import '../widgets/cast_dialog.dart';
 import '../core/services/cast_service.dart';
+import '../core/services/tv_mode_service.dart';
+import '../widgets/tv_focusable.dart';
+import 'package:flutter/foundation.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:window_manager/window_manager.dart';
+import 'package:screen_retriever/screen_retriever.dart';
 
 class PlayerScreen extends StatefulWidget {
   final int mediaId;
@@ -152,8 +157,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
   List<TvEpisode> _episodes = [];
   bool _isLoadingEpisodes = false;
 
-  // Picture-in-Picture mode
+  // Picture-in-Picture & Desktop Windowing
   bool _isInPipMode = false;
+  bool _isDesktopPip = false;
+  Size? _prePipSize;
+  Offset? _prePipPosition;
+  bool? _prePipAlwaysOnTop;
+  bool _isDesktopFullscreen = false;
 
   // Hold to 2x speed system
   bool _isHolding2xSpeed = false;
@@ -268,6 +278,16 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _zoomHudTimer?.cancel();
     _autoplayTimer?.cancel();
     _disposeVideoController();
+
+    // Restore desktop window properties if in PiP or Fullscreen
+    if (_isDesktopPip && PlatformUtils.isDesktop) {
+      windowManager.setAlwaysOnTop(false);
+      if (_prePipSize != null) windowManager.setSize(_prePipSize!);
+      if (_prePipPosition != null) windowManager.setPosition(_prePipPosition!);
+    }
+    if (_isDesktopFullscreen && PlatformUtils.isDesktop) {
+      windowManager.setFullScreen(false);
+    }
 
     // Release screen wakelock
     WakelockPlus.disable();
@@ -1240,6 +1260,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   void _openClipMoment() {
+    final isTv = TvModeService().isTvMode;
+    if (isTv) return;
+    if (!_isNativeMode) return;
     final controller = _videoPlayerController;
     if (controller == null || !controller.value.isInitialized) return;
 
@@ -1272,11 +1295,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
   Future<void> _saveClip() async {
     if (_isExportingClip) return;
 
-    setState(() {
-      _isExportingClip = true;
-      _exportProgress = 0.05;
-    });
-
     final activeStream = _directStreams.isNotEmpty && _selectedStreamIndex < _directStreams.length
         ? _directStreams[_selectedStreamIndex]
         : null;
@@ -1284,6 +1302,23 @@ class _PlayerScreenState extends State<PlayerScreen> {
     final playingUrl = (_availableQualities.isNotEmpty && _selectedQualityIndex < _availableQualities.length)
         ? _availableQualities[_selectedQualityIndex].url
         : activeStream?.url;
+
+    final hasLocalSource = widget.localFilePath != null && File(widget.localFilePath!).existsSync();
+    if (playingUrl == null && !hasLocalSource) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Cannot export clip: video stream source is unavailable.'),
+          backgroundColor: Color(0xFFE50914),
+          duration: Duration(seconds: 4),
+        ),
+      );
+      return;
+    }
+
+    setState(() {
+      _isExportingClip = true;
+      _exportProgress = 0.05;
+    });
 
     final hasSubtitles = _selectedSubtitle != null && _currentCues.isNotEmpty;
     final subtitleCues = <Map<String, dynamic>>[];
@@ -1329,11 +1364,29 @@ class _PlayerScreenState extends State<PlayerScreen> {
         _startHideControlsTimer();
 
         if (exportedFile != null) {
-          SharePlus.instance.share(
-            ShareParams(
-              files: [XFile(exportedFile.path)],
-              text: 'Watch this moment from "${widget.mediaTitle}" on Voidflix!\nhttps://voidflix.org/${widget.mediaType}/${widget.mediaId}',
-              subject: 'Voidflix Moment: ${widget.mediaTitle}',
+          final fileName = exportedFile.path.split(Platform.pathSeparator).last;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text('Clip saved: $fileName'),
+              backgroundColor: const Color(0xFF2ECC71),
+              duration: const Duration(seconds: 4),
+            ),
+          );
+          try {
+            SharePlus.instance.share(
+              ShareParams(
+                files: [XFile(exportedFile.path)],
+                text: 'Watch this moment from "${widget.mediaTitle}" on Voidflix!\nhttps://voidflix.org/${widget.mediaType}/${widget.mediaId}',
+                subject: 'Voidflix Moment: ${widget.mediaTitle}',
+              ),
+            );
+          } catch (_) {}
+        } else {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Could not export clip from this stream. Try switching servers or quality.'),
+              backgroundColor: Color(0xFFE50914),
+              duration: Duration(seconds: 4),
             ),
           );
         }
@@ -1344,11 +1397,22 @@ class _PlayerScreenState extends State<PlayerScreen> {
         setState(() {
           _isExportingClip = false;
         });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Clip export failed: $e'),
+            backgroundColor: const Color(0xFFE50914),
+            duration: const Duration(seconds: 4),
+          ),
+        );
       }
     }
   }
 
   void _toggleScreenLock() {
+    final isTv = TvModeService().isTvMode;
+    final isPc = !kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS);
+    if (isTv || isPc) return;
+
     setState(() {
       _isLocked = !_isLocked;
       if (_isLocked) {
@@ -1602,37 +1666,104 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   // ---------------------------------------------------------------------------
-  // Netflix Modals (Audio & Subtitles, Speed, Quality, Episodes, Servers)
+  // Responsive Netflix Modals (Audio & Subtitles, Speed, Quality, Episodes, Servers)
+  // TV Remote (D-Pad) + PC Desktop (Centered Dialog) + Mobile (Bottom Sheet)
   // ---------------------------------------------------------------------------
 
-  void _openAudioAndSubtitlesSheet() {
+  Future<T?> _showResponsiveModal<T>({
+    required BuildContext context,
+    required Widget Function(BuildContext) builder,
+    double maxWidth = 580,
+    double maxHeight = 500,
+  }) {
     _hideControlsTimer?.cancel();
-    showModalBottomSheet(
+    final isTv = TvModeService().isTvMode;
+    final isPc = PlatformUtils.isDesktop;
+
+    if (isTv || isPc) {
+      return showDialog<T>(
+        context: context,
+        barrierDismissible: true,
+        barrierColor: Colors.black.withValues(alpha: 0.78),
+        builder: (ctx) {
+          return Center(
+            child: Material(
+              color: Colors.transparent,
+              child: Container(
+                width: maxWidth,
+                constraints: BoxConstraints(maxHeight: maxHeight),
+                margin: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF181818),
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: isTv ? Colors.white.withValues(alpha: 0.3) : Colors.white12,
+                    width: isTv ? 1.5 : 1.0,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.85),
+                      blurRadius: 32,
+                      offset: const Offset(0, 8),
+                    ),
+                  ],
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(16),
+                  child: builder(ctx),
+                ),
+              ),
+            ),
+          );
+        },
+      ).then((val) {
+        _startHideControlsTimer();
+        return val;
+      });
+    } else {
+      return showModalBottomSheet<T>(
+        context: context,
+        isScrollControlled: true,
+        backgroundColor: const Color(0xFF141414),
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+        ),
+        builder: (ctx) => builder(ctx),
+      ).then((val) {
+        _startHideControlsTimer();
+        return val;
+      });
+    }
+  }
+
+  void _openAudioAndSubtitlesSheet() {
+    final isTv = TvModeService().isTvMode;
+    final isPc = PlatformUtils.isDesktop;
+
+    _showResponsiveModal(
       context: context,
-      isScrollControlled: true,
-      backgroundColor: const Color(0xFF141414),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
+      maxWidth: 620,
+      maxHeight: 500,
       builder: (ctx) {
         return StatefulBuilder(
           builder: (modalCtx, setSheetState) {
             return SafeArea(
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                height: MediaQuery.of(context).size.height * 0.82,
+                height: isTv || isPc ? 460 : MediaQuery.of(context).size.height * 0.82,
                 child: Column(
                   children: [
-                    Center(
-                      child: Container(
-                        width: 40,
-                        height: 4,
-                        decoration: BoxDecoration(
-                          color: Colors.white24,
-                          borderRadius: BorderRadius.circular(2),
+                    if (!isTv && !isPc)
+                      Center(
+                        child: Container(
+                          width: 40,
+                          height: 4,
+                          decoration: BoxDecoration(
+                            color: Colors.white24,
+                            borderRadius: BorderRadius.circular(2),
+                          ),
                         ),
                       ),
-                    ),
                     const SizedBox(height: 10),
                     Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -1684,7 +1815,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                       final langName = LanguageUtils.cleanLanguageName(langRaw);
                                       final sourceName = stream != null ? stream.sourceName : 'Original (Stereo)';
 
-                                      return ListTile(
+                                      final tile = ListTile(
                                         dense: true,
                                         contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
                                         title: Text(
@@ -1702,12 +1833,27 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                         trailing: isSelected
                                             ? const Icon(Icons.check, color: AppTheme.primaryRed, size: 20)
                                             : null,
-                                        onTap: () {
-                                          setSheetState(() {});
-                                          _selectAudioSource(idx);
-                                          Navigator.pop(ctx);
-                                        },
+                                        onTap: isTv
+                                            ? null
+                                            : () {
+                                                setSheetState(() {});
+                                                _selectAudioSource(idx);
+                                                Navigator.pop(ctx);
+                                              },
                                       );
+
+                                      if (isTv) {
+                                        return TvFocusable(
+                                          autofocus: isSelected,
+                                          onPressed: () {
+                                            setSheetState(() {});
+                                            _selectAudioSource(idx);
+                                            Navigator.pop(ctx);
+                                          },
+                                          child: tile,
+                                        );
+                                      }
+                                      return tile;
                                     },
                                   ),
                                 ),
@@ -1737,25 +1883,41 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                   child: ListView(
                                     children: [
                                       // Off Option
-                                      ListTile(
-                                        dense: true,
-                                        contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
-                                        title: Text(
-                                          'Off',
-                                          style: TextStyle(
-                                            color: _selectedSubtitle == null ? Colors.white : Colors.white70,
-                                            fontWeight: _selectedSubtitle == null ? FontWeight.bold : FontWeight.normal,
-                                            fontSize: 14,
+                                      Builder(builder: (context) {
+                                        final isOffSelected = _selectedSubtitle == null;
+                                        final offTile = ListTile(
+                                          dense: true,
+                                          contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
+                                          title: Text(
+                                            'Off',
+                                            style: TextStyle(
+                                              color: isOffSelected ? Colors.white : Colors.white70,
+                                              fontWeight: isOffSelected ? FontWeight.bold : FontWeight.normal,
+                                              fontSize: 14,
+                                            ),
                                           ),
-                                        ),
-                                        trailing: _selectedSubtitle == null
-                                            ? const Icon(Icons.check, color: AppTheme.primaryRed, size: 20)
-                                            : null,
-                                        onTap: () {
-                                          _selectSubtitle(null);
-                                          Navigator.pop(ctx);
-                                        },
-                                      ),
+                                          trailing: isOffSelected
+                                              ? const Icon(Icons.check, color: AppTheme.primaryRed, size: 20)
+                                              : null,
+                                          onTap: isTv
+                                              ? null
+                                              : () {
+                                                  _selectSubtitle(null);
+                                                  Navigator.pop(ctx);
+                                                },
+                                        );
+                                        if (isTv) {
+                                          return TvFocusable(
+                                            autofocus: isOffSelected,
+                                            onPressed: () {
+                                              _selectSubtitle(null);
+                                              Navigator.pop(ctx);
+                                            },
+                                            child: offTile,
+                                          );
+                                        }
+                                        return offTile;
+                                      }),
                                       if (_subtitles.isNotEmpty)
                                         ..._subtitles.map((track) {
                                           final isSelected = _selectedSubtitle?.url == track.url;
@@ -1763,7 +1925,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                             track.label.isNotEmpty ? track.label : track.language,
                                           );
 
-                                          return ListTile(
+                                          final tile = ListTile(
                                             dense: true,
                                             contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
                                             title: Text(
@@ -1777,11 +1939,25 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                             trailing: isSelected
                                                 ? const Icon(Icons.check, color: AppTheme.primaryRed, size: 20)
                                                 : null,
-                                            onTap: () {
-                                              _selectSubtitle(track);
-                                              Navigator.pop(ctx);
-                                            },
+                                            onTap: isTv
+                                                ? null
+                                                : () {
+                                                    _selectSubtitle(track);
+                                                    Navigator.pop(ctx);
+                                                  },
                                           );
+
+                                          if (isTv) {
+                                            return TvFocusable(
+                                              autofocus: isSelected,
+                                              onPressed: () {
+                                                _selectSubtitle(track);
+                                                Navigator.pop(ctx);
+                                              },
+                                              child: tile,
+                                            );
+                                          }
+                                          return tile;
                                         })
                                       else
                                         const Padding(
@@ -1811,14 +1987,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   void _openSpeedSheet() {
-    _hideControlsTimer?.cancel();
     const speeds = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
-    showModalBottomSheet(
+    final isTv = TvModeService().isTvMode;
+    final isPc = PlatformUtils.isDesktop;
+
+    _showResponsiveModal(
       context: context,
-      backgroundColor: const Color(0xFF141414),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
+      maxWidth: 420,
+      maxHeight: 400,
       builder: (ctx) {
         return SafeArea(
           child: Padding(
@@ -1827,33 +2003,44 @@ class _PlayerScreenState extends State<PlayerScreen> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Center(
-                  child: Container(
-                    width: 40,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: Colors.white24,
-                      borderRadius: BorderRadius.circular(2),
+                if (!isTv && !isPc)
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: Colors.white24,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
                     ),
                   ),
-                ),
                 const SizedBox(height: 12),
-                const Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  child: Text(
-                    'PLAYBACK SPEED',
-                    style: TextStyle(
-                      color: Colors.white54,
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 1.2,
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      child: Text(
+                        'PLAYBACK SPEED',
+                        style: TextStyle(
+                          color: Colors.white54,
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 1.2,
+                        ),
+                      ),
                     ),
-                  ),
+                    if (isTv || isPc)
+                      IconButton(
+                        icon: const Icon(Icons.close, color: Colors.white70, size: 20),
+                        onPressed: () => Navigator.pop(ctx),
+                      ),
+                  ],
                 ),
                 ...speeds.map((sp) {
-                  final isSelected = _playbackSpeed == sp;
+                  final isSelected = (_playbackSpeed - sp).abs() < 0.05;
                   final label = sp == 1.0 ? '1x (Normal)' : '${sp}x';
-                  return ListTile(
+                  final tile = ListTile(
                     dense: true,
                     title: Text(
                       label,
@@ -1866,13 +2053,29 @@ class _PlayerScreenState extends State<PlayerScreen> {
                     trailing: isSelected
                         ? const Icon(Icons.check, color: AppTheme.primaryRed, size: 20)
                         : null,
-                    onTap: () {
-                      setState(() => _playbackSpeed = sp);
-                      _videoPlayerController?.setPlaybackSpeed(sp);
-                      Navigator.pop(ctx);
-                      _startHideControlsTimer();
-                    },
+                    onTap: isTv
+                        ? null
+                        : () {
+                            setState(() => _playbackSpeed = sp);
+                            _videoPlayerController?.setPlaybackSpeed(sp);
+                            Navigator.pop(ctx);
+                            _startHideControlsTimer();
+                          },
                   );
+
+                  if (isTv) {
+                    return TvFocusable(
+                      autofocus: isSelected,
+                      onPressed: () {
+                        setState(() => _playbackSpeed = sp);
+                        _videoPlayerController?.setPlaybackSpeed(sp);
+                        Navigator.pop(ctx);
+                        _startHideControlsTimer();
+                      },
+                      child: tile,
+                    );
+                  }
+                  return tile;
                 }),
               ],
             ),
@@ -1883,13 +2086,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   void _openQualitySheet() {
-    _hideControlsTimer?.cancel();
-    showModalBottomSheet(
+    final isTv = TvModeService().isTvMode;
+    final isPc = PlatformUtils.isDesktop;
+
+    _showResponsiveModal(
       context: context,
-      backgroundColor: const Color(0xFF141414),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
+      maxWidth: 440,
+      maxHeight: 420,
       builder: (ctx) {
         return SafeArea(
           child: Padding(
@@ -1898,33 +2101,44 @@ class _PlayerScreenState extends State<PlayerScreen> {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Center(
-                  child: Container(
-                    width: 40,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: Colors.white24,
-                      borderRadius: BorderRadius.circular(2),
+                if (!isTv && !isPc)
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: Colors.white24,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
                     ),
                   ),
-                ),
                 const SizedBox(height: 12),
-                const Padding(
-                  padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                  child: Text(
-                    'STREAM QUALITY',
-                    style: TextStyle(
-                      color: Colors.white54,
-                      fontSize: 12,
-                      fontWeight: FontWeight.bold,
-                      letterSpacing: 1.2,
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Padding(
+                      padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      child: Text(
+                        'STREAM QUALITY',
+                        style: TextStyle(
+                          color: Colors.white54,
+                          fontSize: 12,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 1.2,
+                        ),
+                      ),
                     ),
-                  ),
+                    if (isTv || isPc)
+                      IconButton(
+                        icon: const Icon(Icons.close, color: Colors.white70, size: 20),
+                        onPressed: () => Navigator.pop(ctx),
+                      ),
+                  ],
                 ),
                 ...List.generate(_availableQualities.length, (idx) {
                   final q = _availableQualities[idx];
                   final isSelected = idx == _selectedQualityIndex;
-                  return ListTile(
+                  final tile = ListTile(
                     dense: true,
                     title: Text(
                       q.label,
@@ -1937,12 +2151,27 @@ class _PlayerScreenState extends State<PlayerScreen> {
                     trailing: isSelected
                         ? const Icon(Icons.check, color: AppTheme.primaryRed, size: 20)
                         : null,
-                    onTap: () {
-                      _selectQuality(idx);
-                      Navigator.pop(ctx);
-                      _startHideControlsTimer();
-                    },
+                    onTap: isTv
+                        ? null
+                        : () {
+                            _selectQuality(idx);
+                            Navigator.pop(ctx);
+                            _startHideControlsTimer();
+                          },
                   );
+
+                  if (isTv) {
+                    return TvFocusable(
+                      autofocus: isSelected,
+                      onPressed: () {
+                        _selectQuality(idx);
+                        Navigator.pop(ctx);
+                        _startHideControlsTimer();
+                      },
+                      child: tile,
+                    );
+                  }
+                  return tile;
                 }),
               ],
             ),
@@ -1953,43 +2182,43 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   void _openEpisodesSheet() {
-    _hideControlsTimer?.cancel();
-    showModalBottomSheet(
+    final isTv = TvModeService().isTvMode;
+    final isPc = PlatformUtils.isDesktop;
+
+    _showResponsiveModal(
       context: context,
-      isScrollControlled: true,
-      backgroundColor: const Color(0xFF141414),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
+      maxWidth: 680,
+      maxHeight: 560,
       builder: (ctx) {
         return StatefulBuilder(
           builder: (modalCtx, setSheetState) {
             return SafeArea(
               child: SizedBox(
-                height: MediaQuery.of(context).size.height * 0.85,
+                height: isTv || isPc ? 520 : MediaQuery.of(context).size.height * 0.85,
                 child: Column(
                   children: [
-                    Container(
-                      padding: const EdgeInsets.only(top: 10, bottom: 6),
-                      child: Center(
-                        child: Container(
-                          width: 40,
-                          height: 4,
-                          decoration: BoxDecoration(
-                            color: Colors.white24,
-                            borderRadius: BorderRadius.circular(2),
+                    if (!isTv && !isPc)
+                      Container(
+                        padding: const EdgeInsets.only(top: 10, bottom: 6),
+                        child: Center(
+                          child: Container(
+                            width: 40,
+                            height: 4,
+                            decoration: BoxDecoration(
+                              color: Colors.white24,
+                              borderRadius: BorderRadius.circular(2),
+                            ),
                           ),
                         ),
                       ),
-                    ),
                     Padding(
                       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
                           if (_seasons.isNotEmpty)
-                            GestureDetector(
-                              onTap: () async {
+                            Builder(builder: (context) {
+                              void onSeasonTap() async {
                                 final newSeason = await NetflixSeasonPicker.show(
                                   context: ctx,
                                   seasons: _seasons,
@@ -2005,8 +2234,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                     setSheetState(() {});
                                   });
                                 }
-                              },
-                              child: Container(
+                              }
+
+                              final seasonWidget = Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                                 decoration: BoxDecoration(
                                   color: const Color(0xFF2A2A2A),
@@ -2027,8 +2257,19 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                     const Icon(Icons.keyboard_arrow_down, color: Colors.white, size: 20),
                                   ],
                                 ),
-                              ),
-                            )
+                              );
+
+                              if (isTv) {
+                                return TvFocusable(
+                                  onPressed: onSeasonTap,
+                                  child: seasonWidget,
+                                );
+                              }
+                              return GestureDetector(
+                                onTap: onSeasonTap,
+                                child: seasonWidget,
+                              );
+                            })
                           else
                             Text('Season $_currentSeason', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
                           IconButton(
@@ -2046,84 +2287,96 @@ class _PlayerScreenState extends State<PlayerScreen> {
                               itemBuilder: (c, idx) {
                                 final ep = _episodes[idx];
                                 final isCurrent = ep.episodeNumber == _currentEpisode;
+                                final epTile = Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                                  color: isCurrent ? Colors.white.withValues(alpha: 0.06) : Colors.transparent,
+                                  child: Row(
+                                    children: [
+                                      // 16:9 Thumbnail
+                                      ClipRRect(
+                                        borderRadius: BorderRadius.circular(6),
+                                        child: Stack(
+                                          alignment: Alignment.center,
+                                          children: [
+                                            SizedBox(
+                                              width: 100,
+                                              height: 58,
+                                              child: ep.stillPath != null
+                                                  ? CachedNetworkImage(
+                                                      imageUrl: ApiService.getImageUrl(ep.stillPath, size: 'w300'),
+                                                      fit: BoxFit.cover,
+                                                      errorWidget: (context, url, error) => Container(color: Colors.black26),
+                                                    )
+                                                  : Container(color: Colors.white12),
+                                            ),
+                                            if (isCurrent)
+                                              Container(
+                                                width: 100,
+                                                height: 58,
+                                                color: Colors.black45,
+                                                child: const Center(
+                                                  child: Icon(Icons.play_arrow_rounded, color: AppTheme.primaryRed, size: 28),
+                                                ),
+                                              ),
+                                          ],
+                                        ),
+                                      ),
+                                      const SizedBox(width: 12),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Row(
+                                              children: [
+                                                Expanded(
+                                                  child: Text(
+                                                    '${ep.episodeNumber}. ${ep.name}',
+                                                    maxLines: 1,
+                                                    overflow: TextOverflow.ellipsis,
+                                                    style: TextStyle(
+                                                      color: isCurrent ? AppTheme.primaryRed : Colors.white,
+                                                      fontWeight: isCurrent ? FontWeight.bold : FontWeight.w600,
+                                                      fontSize: 14,
+                                                    ),
+                                                  ),
+                                                ),
+                                                if (ep.runtime > 0)
+                                                  Text(
+                                                    '${ep.runtime}m',
+                                                    style: const TextStyle(color: Colors.white38, fontSize: 12),
+                                                  ),
+                                              ],
+                                            ),
+                                            const SizedBox(height: 4),
+                                            Text(
+                                              ep.overview.isNotEmpty ? ep.overview : 'No description available.',
+                                              maxLines: 2,
+                                              overflow: TextOverflow.ellipsis,
+                                              style: const TextStyle(color: Colors.white54, fontSize: 11),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                );
+
+                                if (isTv) {
+                                  return TvFocusable(
+                                    autofocus: isCurrent,
+                                    onPressed: () {
+                                      Navigator.pop(ctx);
+                                      _goToEpisode(ep.episodeNumber);
+                                    },
+                                    child: epTile,
+                                  );
+                                }
                                 return InkWell(
                                   onTap: () {
                                     Navigator.pop(ctx);
                                     _goToEpisode(ep.episodeNumber);
                                   },
-                                  child: Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                                    color: isCurrent ? Colors.white.withValues(alpha: 0.06) : Colors.transparent,
-                                    child: Row(
-                                      children: [
-                                        // 16:9 Thumbnail
-                                        ClipRRect(
-                                          borderRadius: BorderRadius.circular(6),
-                                          child: Stack(
-                                            alignment: Alignment.center,
-                                            children: [
-                                              SizedBox(
-                                                width: 100,
-                                                height: 58,
-                                                child: ep.stillPath != null
-                                                    ? CachedNetworkImage(
-                                                        imageUrl: ApiService.getImageUrl(ep.stillPath, size: 'w300'),
-                                                        fit: BoxFit.cover,
-                                                        errorWidget: (context, url, error) => Container(color: Colors.black26),
-                                                      )
-                                                    : Container(color: Colors.white12),
-                                              ),
-                                              if (isCurrent)
-                                                Container(
-                                                  width: 100,
-                                                  height: 58,
-                                                  color: Colors.black45,
-                                                  child: const Center(
-                                                    child: Icon(Icons.play_arrow_rounded, color: AppTheme.primaryRed, size: 28),
-                                                  ),
-                                                ),
-                                            ],
-                                          ),
-                                        ),
-                                        const SizedBox(width: 12),
-                                        Expanded(
-                                          child: Column(
-                                            crossAxisAlignment: CrossAxisAlignment.start,
-                                            children: [
-                                              Row(
-                                                children: [
-                                                  Expanded(
-                                                    child: Text(
-                                                      '${ep.episodeNumber}. ${ep.name}',
-                                                      maxLines: 1,
-                                                      overflow: TextOverflow.ellipsis,
-                                                      style: TextStyle(
-                                                        color: isCurrent ? AppTheme.primaryRed : Colors.white,
-                                                        fontWeight: isCurrent ? FontWeight.bold : FontWeight.w600,
-                                                        fontSize: 14,
-                                                      ),
-                                                    ),
-                                                  ),
-                                                  if (ep.runtime > 0)
-                                                    Text(
-                                                      '${ep.runtime}m',
-                                                      style: const TextStyle(color: Colors.white38, fontSize: 12),
-                                                    ),
-                                                ],
-                                              ),
-                                              const SizedBox(height: 4),
-                                              Text(
-                                                ep.overview.isNotEmpty ? ep.overview : 'No description available.',
-                                                maxLines: 2,
-                                                overflow: TextOverflow.ellipsis,
-                                                style: const TextStyle(color: Colors.white54, fontSize: 11),
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
+                                  child: epTile,
                                 );
                               },
                             ),
@@ -2139,31 +2392,31 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   void _openServerPicker() {
-    _hideControlsTimer?.cancel();
-    showModalBottomSheet(
+    final isTv = TvModeService().isTvMode;
+    final isPc = PlatformUtils.isDesktop;
+
+    _showResponsiveModal(
       context: context,
-      isScrollControlled: true,
-      backgroundColor: const Color(0xFF141414),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
+      maxWidth: 580,
+      maxHeight: 540,
       builder: (ctx) {
         return SafeArea(
           child: SizedBox(
-            height: MediaQuery.of(context).size.height * 0.75,
+            height: isTv || isPc ? 500 : MediaQuery.of(context).size.height * 0.75,
             child: Column(
               children: [
-                Center(
-                  child: Container(
-                    margin: const EdgeInsets.only(top: 10),
-                    width: 40,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: Colors.white24,
-                      borderRadius: BorderRadius.circular(2),
+                if (!isTv && !isPc)
+                  Center(
+                    child: Container(
+                      margin: const EdgeInsets.only(top: 10),
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: Colors.white24,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
                     ),
                   ),
-                ),
                 Padding(
                   padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
                   child: Row(
@@ -2200,7 +2453,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                         final s = ServerConfig.servers[idx];
                         if (!s.isDirectPlay) return const SizedBox.shrink();
                         final isSel = _isNativeMode && idx == _selectedServerIndex;
-                        return ListTile(
+                        final tile = ListTile(
                           dense: true,
                           leading: Icon(
                             isSel ? Icons.radio_button_checked : Icons.radio_button_off,
@@ -2225,13 +2478,29 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                   child: const Text('ACTIVE', style: TextStyle(color: AppTheme.primaryRed, fontSize: 10, fontWeight: FontWeight.bold)),
                                 )
                               : null,
-                          onTap: () {
-                            Navigator.pop(ctx);
-                            _triedNativeServerIndices.clear();
-                            context.read<ProfileProvider>().setSelectedServer(idx);
-                            _loadServerDirect(idx);
-                          },
+                          onTap: isTv
+                              ? null
+                              : () {
+                                  Navigator.pop(ctx);
+                                  _triedNativeServerIndices.clear();
+                                  context.read<ProfileProvider>().setSelectedServer(idx);
+                                  _loadServerDirect(idx);
+                                },
                         );
+
+                        if (isTv) {
+                          return TvFocusable(
+                            autofocus: isSel,
+                            onPressed: () {
+                              Navigator.pop(ctx);
+                              _triedNativeServerIndices.clear();
+                              context.read<ProfileProvider>().setSelectedServer(idx);
+                              _loadServerDirect(idx);
+                            },
+                            child: tile,
+                          );
+                        }
+                        return tile;
                       }),
                       if (_directStreams.isNotEmpty && _directStreams.length > 1) ...[
                         const Padding(
@@ -2244,7 +2513,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                         ...List.generate(_directStreams.length, (idx) {
                           final s = _directStreams[idx];
                           final isSel = _isNativeMode && idx == _selectedStreamIndex;
-                          return ListTile(
+                          final tile = ListTile(
                             dense: true,
                             leading: Icon(
                               isSel ? Icons.check_circle : Icons.circle_outlined,
@@ -2260,11 +2529,25 @@ class _PlayerScreenState extends State<PlayerScreen> {
                               ),
                             ),
                             subtitle: Text('Direct ${s.type.toUpperCase()} stream', style: const TextStyle(fontSize: 10, color: Colors.white30)),
-                            onTap: () {
-                              Navigator.pop(ctx);
-                              _selectAudioSource(idx);
-                            },
+                            onTap: isTv
+                                ? null
+                                : () {
+                                    Navigator.pop(ctx);
+                                    _selectAudioSource(idx);
+                                  },
                           );
+
+                          if (isTv) {
+                            return TvFocusable(
+                              autofocus: isSel,
+                              onPressed: () {
+                                Navigator.pop(ctx);
+                                _selectAudioSource(idx);
+                              },
+                              child: tile,
+                            );
+                          }
+                          return tile;
                         }),
                       ],
                       // Embed Fallbacks (Visible ONLY when Developer Mode is active)
@@ -2287,7 +2570,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                           final s = ServerConfig.servers[idx];
                           if (s.isDirectPlay) return const SizedBox.shrink();
                           final isSel = !_isNativeMode && idx == _selectedServerIndex;
-                          return ListTile(
+                          final tile = ListTile(
                             dense: true,
                             leading: Icon(
                               isSel ? Icons.radio_button_checked : Icons.radio_button_off,
@@ -2301,17 +2584,37 @@ class _PlayerScreenState extends State<PlayerScreen> {
                               ),
                             ),
                             subtitle: Text(s.description, style: const TextStyle(fontSize: 11, color: Colors.white38)),
-                            onTap: () {
-                              Navigator.pop(ctx);
-                              setState(() {
-                                _selectedServerIndex = idx;
-                                _isNativeMode = false;
-                                _isStreamUnavailable = false;
-                              });
-                              context.read<ProfileProvider>().setSelectedServer(idx);
-                              _loadWebEmbed();
-                            },
+                            onTap: isTv
+                                ? null
+                                : () {
+                                    Navigator.pop(ctx);
+                                    setState(() {
+                                      _selectedServerIndex = idx;
+                                      _isNativeMode = false;
+                                      _isStreamUnavailable = false;
+                                    });
+                                    context.read<ProfileProvider>().setSelectedServer(idx);
+                                    _loadWebEmbed();
+                                  },
                           );
+
+                          if (isTv) {
+                            return TvFocusable(
+                              autofocus: isSel,
+                              onPressed: () {
+                                Navigator.pop(ctx);
+                                setState(() {
+                                  _selectedServerIndex = idx;
+                                  _isNativeMode = false;
+                                  _isStreamUnavailable = false;
+                                });
+                                context.read<ProfileProvider>().setSelectedServer(idx);
+                                _loadWebEmbed();
+                              },
+                              child: tile,
+                            );
+                          }
+                          return tile;
                         }),
                       ],
                     ],
@@ -2448,6 +2751,39 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   Future<void> _enterPipMode() async {
     if (_isLocked || _videoPlayerController == null || !_videoPlayerController!.value.isInitialized) return;
+
+    if (PlatformUtils.isDesktop) {
+      try {
+        _prePipSize = await windowManager.getSize();
+        _prePipPosition = await windowManager.getPosition();
+        _prePipAlwaysOnTop = await windowManager.isAlwaysOnTop();
+
+        const pipWidth = 480.0;
+        const pipHeight = 270.0;
+        final primaryDisplay = await screenRetriever.getPrimaryDisplay();
+        final displayWidth = primaryDisplay.size.width;
+        final displayHeight = primaryDisplay.size.height;
+        final pipX = displayWidth - pipWidth - 32;
+        final pipY = displayHeight - pipHeight - 64;
+
+        await windowManager.setAlwaysOnTop(true);
+        await windowManager.setSize(const Size(pipWidth, pipHeight));
+        await windowManager.setPosition(Offset(pipX > 0 ? pipX : 40, pipY > 0 ? pipY : 40));
+
+        if (mounted) {
+          setState(() {
+            _isInPipMode = true;
+            _isDesktopPip = true;
+            _showControls = false;
+          });
+        }
+      } catch (e) {
+        debugPrint('Desktop PiP error: $e');
+        if (mounted) setState(() => _isInPipMode = false);
+      }
+      return;
+    }
+
     try {
       setState(() {
         _showControls = false;
@@ -2461,6 +2797,32 @@ class _PlayerScreenState extends State<PlayerScreen> {
     } catch (e) {
       debugPrint('Error entering PiP mode: $e');
       if (mounted) setState(() => _isInPipMode = false);
+    }
+  }
+
+  Future<void> _exitDesktopPipMode() async {
+    if (!PlatformUtils.isDesktop || !_isDesktopPip) return;
+    try {
+      await windowManager.setAlwaysOnTop(_prePipAlwaysOnTop ?? false);
+      if (_prePipSize != null) {
+        await windowManager.setSize(_prePipSize!);
+      } else {
+        await windowManager.setSize(const Size(1280, 720));
+      }
+      if (_prePipPosition != null) {
+        await windowManager.setPosition(_prePipPosition!);
+      } else {
+        await windowManager.setAlignment(Alignment.center);
+      }
+    } catch (e) {
+      debugPrint('Error exiting desktop PiP: $e');
+    }
+    if (mounted) {
+      setState(() {
+        _isInPipMode = false;
+        _isDesktopPip = false;
+        _showControls = true;
+      });
     }
   }
 
@@ -2606,41 +2968,50 @@ class _PlayerScreenState extends State<PlayerScreen> {
             // Center section: Start Time, 16:9 Preview card, End Time (Screenshot 2)
             Expanded(
               child: Center(
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  crossAxisAlignment: CrossAxisAlignment.center,
-                  children: [
-                    // Start Column (Green label + Time)
-                    Padding(
-                      padding: const EdgeInsets.only(right: 24),
-                      child: Column(
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          const Text(
-                            'Start',
-                            style: TextStyle(
-                              color: Color(0xFF2ECC71),
-                              fontSize: 15,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                          const SizedBox(height: 6),
-                          Text(
-                            _formatDuration(Duration(seconds: _clipStartSeconds.toInt())),
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 24,
-                              fontWeight: FontWeight.bold,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
+                child: LayoutBuilder(
+                  builder: (context, constraints) {
+                    final maxW = constraints.maxWidth;
+                    final isCompact = maxW < 620;
+                    final previewWidth = (maxW * (isCompact ? 0.60 : 0.45)).clamp(200.0, 420.0);
+                    final previewHeight = previewWidth * 9 / 16;
+                    final timeFontSize = isCompact ? 18.0 : 24.0;
+                    final labelSpacing = isCompact ? 12.0 : 24.0;
 
-                    // Center Preview Card (16:9 framed video)
-                    Container(
-                      width: 380,
-                      height: 380 * 9 / 16,
+                    return Row(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.center,
+                      children: [
+                        // Start Column (Green label + Time)
+                        Padding(
+                          padding: EdgeInsets.only(right: labelSpacing),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Text(
+                                'Start',
+                                style: TextStyle(
+                                  color: Color(0xFF2ECC71),
+                                  fontSize: 15,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                              const SizedBox(height: 6),
+                              Text(
+                                _formatDuration(Duration(seconds: _clipStartSeconds.toInt())),
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: timeFontSize,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+
+                        // Center Preview Card (16:9 framed video)
+                        Container(
+                          width: previewWidth,
+                          height: previewHeight,
                       decoration: BoxDecoration(
                         color: Colors.black,
                         border: Border.all(color: Colors.white24, width: 1.2),
@@ -2740,7 +3111,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
                     // End Column (Red label + Time)
                     Padding(
-                      padding: const EdgeInsets.only(left: 24),
+                      padding: EdgeInsets.only(left: labelSpacing),
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
@@ -2755,9 +3126,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
                           const SizedBox(height: 6),
                           Text(
                             _formatDuration(Duration(seconds: _clipEndSeconds.toInt())),
-                            style: const TextStyle(
+                            style: TextStyle(
                               color: Colors.white,
-                              fontSize: 24,
+                              fontSize: timeFontSize,
                               fontWeight: FontWeight.bold,
                             ),
                           ),
@@ -2765,9 +3136,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
                       ),
                     ),
                   ],
-                ),
-              ),
+                );
+              },
             ),
+          ),
+        ),
 
             // Current Playhead Time Label & Duration Badge below preview
             Padding(
@@ -3258,6 +3631,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
         ? _selectedServerIndex
         : 0;
     final currentServer = ServerConfig.servers[safeIndex];
+    final isTv = TvModeService().isTvMode;
+    final isPc = !kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS);
 
     return PopScope(
       canPop: false,
@@ -3292,7 +3667,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
               // ---------------------------------------------------------------
               if (_isNativeMode &&
                   _videoPlayerController != null &&
-                  _videoPlayerController!.value.isInitialized)
+                  _videoPlayerController!.value.isInitialized &&
+                  !_isClippingMoment)
                 AnimatedSwitcher(
                   duration: const Duration(milliseconds: 250),
                   child: _isZoomedToFill
@@ -3543,7 +3919,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
               // ---------------------------------------------------------------
               // Layer 8: Screen Locked Unlock Button (Transparent Glassy Disc)
               // ---------------------------------------------------------------
-              if (_isNativeMode && _isLocked && _showLockPill && !_isClippingMoment)
+              if (_isNativeMode && _isLocked && _showLockPill && !_isClippingMoment && !isTv && !isPc)
                 Center(
                   child: Material(
                     color: Colors.transparent,
@@ -3656,33 +4032,54 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                         ),
                                       ),
                                     ),
-                                    ListenableBuilder(
-                                      listenable: CastService(),
-                                      builder: (context, _) {
-                                        final isCasting = CastService().isCasting;
-                                        return IconButton(
-                                          icon: Icon(
-                                            isCasting ? Icons.cast_connected_rounded : Icons.cast_rounded,
-                                            color: isCasting ? const Color(0xFF00D2FF) : Colors.white,
-                                            size: 24,
-                                          ),
-                                          tooltip: isCasting ? 'Casting Active' : 'Cast to TV',
-                                          onPressed: _openCastDialog,
-                                        );
-                                      },
-                                    ),
-                                    const SizedBox(width: 4),
-                                    IconButton(
-                                      icon: const Icon(Icons.picture_in_picture_alt_rounded, color: Colors.white, size: 24),
-                                      tooltip: 'Picture-in-Picture',
-                                      onPressed: _enterPipMode,
-                                    ),
-                                    const SizedBox(width: 4),
-                                    IconButton(
-                                      icon: const Icon(Icons.lock_outline_rounded, color: Colors.white, size: 24),
-                                      tooltip: 'Lock',
-                                      onPressed: _toggleScreenLock,
-                                    ),
+                                    if (!isTv)
+                                      ListenableBuilder(
+                                        listenable: CastService(),
+                                        builder: (context, _) {
+                                          final isCasting = CastService().isCasting;
+                                          return IconButton(
+                                            icon: Icon(
+                                              isCasting ? Icons.cast_connected_rounded : Icons.cast_rounded,
+                                              color: isCasting ? const Color(0xFF00D2FF) : Colors.white,
+                                              size: 24,
+                                            ),
+                                            tooltip: isCasting ? 'Casting Active' : 'Cast to TV',
+                                            onPressed: _openCastDialog,
+                                          );
+                                        },
+                                      ),
+                                    if (!isTv) ...[
+                                      const SizedBox(width: 4),
+                                      IconButton(
+                                        icon: const Icon(Icons.picture_in_picture_alt_rounded, color: Colors.white, size: 24),
+                                        tooltip: 'Picture-in-Picture',
+                                        onPressed: _enterPipMode,
+                                      ),
+                                    ],
+                                    if (!isTv && !isPc) ...[
+                                      const SizedBox(width: 4),
+                                      IconButton(
+                                        icon: const Icon(Icons.lock_outline_rounded, color: Colors.white, size: 24),
+                                        tooltip: 'Lock',
+                                        onPressed: _toggleScreenLock,
+                                      ),
+                                    ],
+                                    if (isPc) ...[
+                                      const SizedBox(width: 4),
+                                      IconButton(
+                                        icon: Icon(
+                                          _isDesktopFullscreen
+                                              ? Icons.fullscreen_exit_rounded
+                                              : Icons.fullscreen_rounded,
+                                          color: Colors.white,
+                                          size: 26,
+                                        ),
+                                        tooltip: _isDesktopFullscreen
+                                            ? 'Exit Fullscreen (F11)'
+                                            : 'Fullscreen (F11)',
+                                        onPressed: _toggleFullscreen,
+                                      ),
+                                    ],
                                   ],
                                 ),
                               ),
@@ -3790,11 +4187,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                     child: Row(
                                       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                                       children: [
-                                        _NetflixBarButton(
-                                          icon: Icons.content_cut_rounded,
-                                          label: 'Clip',
-                                          onTap: _openClipMoment,
-                                        ),
+                                        if (!isTv && _isNativeMode)
+                                          _NetflixBarButton(
+                                            icon: Icons.content_cut_rounded,
+                                            label: 'Clip',
+                                            onTap: _openClipMoment,
+                                          ),
                                         _NetflixBarButton(
                                           icon: _isMuted || _volume == 0
                                               ? Icons.volume_off_rounded
@@ -3836,7 +4234,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                             label: 'Server',
                                             onTap: _openServerPicker,
                                           ),
-                                        if (_isNativeMode)
+                                        if (_isNativeMode && !isTv)
                                           _NetflixBarButton(
                                             icon: _isInParty ? Icons.group_rounded : Icons.group_add_rounded,
                                             label: _isInParty ? 'Sync (${_partyRoom?.members.length ?? 1})' : 'Watch Party',
@@ -4033,7 +4431,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
               // ---------------------------------------------------------------
               // Layer 14: Watch Party Floating Sync Status Pill (Top Left)
               // ---------------------------------------------------------------
-              if (_isNativeMode && _isInParty && !_isClippingMoment)
+              if (_isNativeMode && _isInParty && !_isClippingMoment && !isTv)
                 Positioned(
                   top: 16,
                   left: _showControls ? 60 : 20,
@@ -4043,7 +4441,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
               // ---------------------------------------------------------------
               // Layer 15: Watch Party Floating Chat Toast Messages (Bottom Left)
               // ---------------------------------------------------------------
-              if (_isNativeMode && _floatingPartyMessages.isNotEmpty)
+              if (_isNativeMode && _floatingPartyMessages.isNotEmpty && !isTv)
                 Positioned(
                   bottom: _showControls ? 95 : 30,
                   left: 20,
@@ -4084,7 +4482,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
               // ---------------------------------------------------------------
               // Layer 16: Watch Party Notification HUD Toast (Top Center Pill)
               // ---------------------------------------------------------------
-              if (_partyHudMessage != null)
+              if (_partyHudMessage != null && !isTv)
                 Positioned(
                   top: 24,
                   left: 0,
@@ -4093,6 +4491,21 @@ class _PlayerScreenState extends State<PlayerScreen> {
                     child: IgnorePointer(
                       child: _buildPartyToastHud(),
                     ),
+                  ),
+                ),
+
+              // ---------------------------------------------------------------
+              // Layer 17: PC Desktop PiP Mini Floating Window Overlay
+              // ---------------------------------------------------------------
+              if (_isDesktopPip)
+                Positioned.fill(
+                  child: _DesktopPipOverlay(
+                    isPlaying: _isPlaying,
+                    onTogglePlayPause: _togglePlayPause,
+                    onSeekBack: () => _seekRelative(-10),
+                    onSeekForward: () => _seekRelative(10),
+                    onExpand: _exitDesktopPipMode,
+                    onClose: _handleSmoothBack,
                   ),
                 ),
               ],
@@ -5552,8 +5965,22 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
   }
 
-  void _toggleFullscreen() {
+  Future<void> _toggleFullscreen() async {
     _revealControls();
+    if (PlatformUtils.isDesktop) {
+      try {
+        final isCurrentlyFull = await windowManager.isFullScreen();
+        await windowManager.setFullScreen(!isCurrentlyFull);
+        if (mounted) {
+          setState(() {
+            _isDesktopFullscreen = !isCurrentlyFull;
+          });
+        }
+        return;
+      } catch (e) {
+        debugPrint('Desktop fullscreen toggle error: $e');
+      }
+    }
     setState(() => _isZoomedToFill = !_isZoomedToFill);
   }
 
@@ -5621,20 +6048,41 @@ class _PlayerScreenState extends State<PlayerScreen> {
     if (event is! KeyDownEvent) return;
 
     final key = event.logicalKey;
-
-    if (key == LogicalKeyboardKey.select ||
+    final isCenterKey = key == LogicalKeyboardKey.select ||
         key == LogicalKeyboardKey.enter ||
+        key == LogicalKeyboardKey.numpadEnter ||
         key == LogicalKeyboardKey.space ||
-        key == LogicalKeyboardKey.keyK) {
-      _togglePlayPause();
-    } else if (key == LogicalKeyboardKey.arrowLeft || key == LogicalKeyboardKey.keyJ) {
+        key == LogicalKeyboardKey.gameButtonA ||
+        key == LogicalKeyboardKey.gameButtonSelect ||
+        key == LogicalKeyboardKey.keyK ||
+        key.keyId == 0x00100000017; // Android KEYCODE_DPAD_CENTER
+
+    if (isCenterKey) {
+      if (!_showControls) {
+        _revealControls();
+      } else {
+        _togglePlayPause();
+      }
+    } else if (key == LogicalKeyboardKey.arrowLeft ||
+        key == LogicalKeyboardKey.keyJ) {
       _seekRelative(-10);
-    } else if (key == LogicalKeyboardKey.arrowRight || key == LogicalKeyboardKey.keyL) {
+      _revealControls();
+    } else if (key == LogicalKeyboardKey.arrowRight ||
+        key == LogicalKeyboardKey.keyL) {
       _seekRelative(10);
+      _revealControls();
     } else if (key == LogicalKeyboardKey.arrowUp) {
-      _adjustVolume(0.05);
+      if (!_showControls) {
+        _revealControls();
+      } else {
+        _adjustVolume(0.05);
+      }
     } else if (key == LogicalKeyboardKey.arrowDown) {
-      _adjustVolume(-0.05);
+      if (!_showControls) {
+        _revealControls();
+      } else {
+        _adjustVolume(-0.05);
+      }
     } else if (key == LogicalKeyboardKey.keyM) {
       _toggleMute();
     } else if (key == LogicalKeyboardKey.keyF || key == LogicalKeyboardKey.f11) {
@@ -5645,18 +6093,30 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _adjustSpeed(-1);
     } else if (key == LogicalKeyboardKey.bracketRight) {
       _adjustSpeed(1);
-    } else if (key == LogicalKeyboardKey.escape) {
+    } else if (key == LogicalKeyboardKey.escape ||
+        key == LogicalKeyboardKey.backspace ||
+        key == LogicalKeyboardKey.goBack) {
       if (_showControls) {
-        Navigator.of(context).maybePop();
+        setState(() => _showControls = false);
       } else {
-        _revealControls();
+        _handleSmoothBack();
       }
+    } else if (key == LogicalKeyboardKey.mediaPlay) {
+      if (!_isPlaying) _togglePlayPause();
+    } else if (key == LogicalKeyboardKey.mediaPause) {
+      if (_isPlaying) _togglePlayPause();
     } else if (key == LogicalKeyboardKey.mediaPlayPause) {
       _togglePlayPause();
     } else if (key == LogicalKeyboardKey.mediaFastForward) {
       _seekRelative(10);
+      _revealControls();
     } else if (key == LogicalKeyboardKey.mediaRewind) {
       _seekRelative(-10);
+      _revealControls();
+    } else if (key == LogicalKeyboardKey.mediaTrackNext && widget.mediaType == 'tv') {
+      _nextEpisode();
+    } else if (key == LogicalKeyboardKey.mediaStop) {
+      _handleSmoothBack();
     } else if (key == LogicalKeyboardKey.keyS && _showSkipIntro) {
       _skipIntro();
     } else if (key == LogicalKeyboardKey.keyN && widget.mediaType == 'tv') {
@@ -5700,6 +6160,103 @@ class _NetflixBarButton extends StatelessWidget {
               ),
             ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _DesktopPipOverlay extends StatefulWidget {
+  final bool isPlaying;
+  final VoidCallback onTogglePlayPause;
+  final VoidCallback onSeekBack;
+  final VoidCallback onSeekForward;
+  final VoidCallback onExpand;
+  final VoidCallback onClose;
+
+  const _DesktopPipOverlay({
+    required this.isPlaying,
+    required this.onTogglePlayPause,
+    required this.onSeekBack,
+    required this.onSeekForward,
+    required this.onExpand,
+    required this.onClose,
+  });
+
+  @override
+  State<_DesktopPipOverlay> createState() => _DesktopPipOverlayState();
+}
+
+class _DesktopPipOverlayState extends State<_DesktopPipOverlay> {
+  bool _isHovered = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return MouseRegion(
+      onEnter: (_) => setState(() => _isHovered = true),
+      onExit: (_) => setState(() => _isHovered = false),
+      child: AnimatedOpacity(
+        opacity: _isHovered ? 1.0 : 0.0,
+        duration: const Duration(milliseconds: 180),
+        child: Container(
+          color: Colors.black.withValues(alpha: 0.55),
+          child: Stack(
+            children: [
+              Positioned(
+                top: 8,
+                left: 8,
+                right: 8,
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    IconButton(
+                      iconSize: 20,
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                      icon: const Icon(Icons.close_rounded, color: Colors.white70),
+                      tooltip: 'Close PiP',
+                      onPressed: widget.onClose,
+                    ),
+                    IconButton(
+                      iconSize: 20,
+                      padding: EdgeInsets.zero,
+                      constraints: const BoxConstraints(),
+                      icon: const Icon(Icons.open_in_full_rounded, color: Colors.white),
+                      tooltip: 'Expand Window',
+                      onPressed: widget.onExpand,
+                    ),
+                  ],
+                ),
+              ),
+              Center(
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    IconButton(
+                      iconSize: 28,
+                      icon: const Icon(Icons.replay_10_rounded, color: Colors.white),
+                      onPressed: widget.onSeekBack,
+                    ),
+                    const SizedBox(width: 16),
+                    IconButton(
+                      iconSize: 44,
+                      icon: Icon(
+                        widget.isPlaying ? Icons.pause_circle_filled_rounded : Icons.play_circle_fill_rounded,
+                        color: Colors.white,
+                      ),
+                      onPressed: widget.onTogglePlayPause,
+                    ),
+                    const SizedBox(width: 16),
+                    IconButton(
+                      iconSize: 28,
+                      icon: const Icon(Icons.forward_10_rounded, color: Colors.white),
+                      onPressed: widget.onSeekForward,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

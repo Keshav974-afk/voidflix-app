@@ -5,6 +5,7 @@ import 'package:webview_flutter/webview_flutter.dart';
 import '../core/constants/theme_constants.dart';
 import '../core/utils/platform_utils.dart';
 import '../models/live_channel.dart';
+import '../widgets/tv_back_button.dart';
 
 class LiveTvScreen extends StatefulWidget {
   const LiveTvScreen({super.key});
@@ -31,51 +32,59 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Header
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                      decoration: BoxDecoration(
-                        color: AppTheme.primaryRed,
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: const Row(
-                        children: [
-                          Icon(Icons.fiber_manual_record, color: Colors.white, size: 10),
-                          SizedBox(width: 4),
-                          Text(
-                            'LIVE',
-                            style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.white,
-                              letterSpacing: 1.0,
+    final canPop = Navigator.of(context).canPop();
+
+    return TvScreenWrapper(
+      onBack: canPop ? () => Navigator.of(context).pop() : null,
+      child: SingleChildScrollView(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Header
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      if (canPop) ...[
+                        const TvBackButton(),
+                        const SizedBox(width: 12),
+                      ],
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: AppTheme.primaryRed,
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: const Row(
+                          children: [
+                            Icon(Icons.fiber_manual_record, color: Colors.white, size: 10),
+                            SizedBox(width: 4),
+                            Text(
+                              'LIVE',
+                              style: TextStyle(
+                                fontSize: 11,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.white,
+                                letterSpacing: 1.0,
+                              ),
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
-                    ),
-                    const SizedBox(width: 10),
-                    Text(
-                      'IPTV & SPORTS CHANNELS',
-                      style: GoogleFonts.bebasNeue(
-                        fontSize: 32,
-                        letterSpacing: 1.5,
-                        color: Colors.white,
+                      const SizedBox(width: 10),
+                      Text(
+                        'IPTV & SPORTS CHANNELS',
+                        style: GoogleFonts.bebasNeue(
+                          fontSize: 32,
+                          letterSpacing: 1.5,
+                          color: Colors.white,
+                        ),
                       ),
-                    ),
-                  ],
-                ),
+                    ],
+                  ),
                 const SizedBox(height: 4),
                 const Text(
                   'Stream 24/7 global sports, news broadcasts, entertainment, and movie networks.',
@@ -216,8 +225,9 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
           const SizedBox(height: 36),
         ],
       ),
-    );
-  }
+    ),
+  );
+}
 }
 
 class LiveChannelPlayerScreen extends StatefulWidget {
@@ -255,12 +265,15 @@ class _LiveChannelPlayerScreenState extends State<LiveChannelPlayerScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.black,
-      appBar: AppBar(
-        title: Text(widget.channel.name, style: const TextStyle(fontSize: 16)),
+    return TvScreenWrapper(
+      onBack: () => Navigator.of(context).pop(),
+      child: Scaffold(
         backgroundColor: Colors.black,
-      ),
+        appBar: AppBar(
+          leading: const TvBackButton(),
+          title: Text(widget.channel.name, style: const TextStyle(fontSize: 16)),
+          backgroundColor: Colors.black,
+        ),
       body: Stack(
         children: [
           if (_webViewController != null)
@@ -307,6 +320,7 @@ class _LiveChannelPlayerScreenState extends State<LiveChannelPlayerScreen> {
             ),
         ],
       ),
-    );
-  }
+    ),
+  );
+}
 }

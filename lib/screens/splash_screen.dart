@@ -209,74 +209,305 @@ $voidflixSwoopSvg
                 ),
               )
             else
-              Center(
-                child: TweenAnimationBuilder<double>(
-                  tween: Tween<double>(begin: 0.85, end: 1.0),
-                  duration: const Duration(milliseconds: 900),
-                  curve: Curves.easeOutCubic,
-                  builder: (context, scale, child) {
-                    return Transform.scale(
-                      scale: scale,
-                      child: child,
-                    );
-                  },
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Container(
-                        width: 88,
-                        height: 88,
-                        decoration: BoxDecoration(
-                          shape: BoxShape.circle,
-                          color: const Color(0xFFE50914).withValues(alpha: 0.15),
-                          boxShadow: [
-                            BoxShadow(
-                              color: const Color(0xFFE50914).withValues(alpha: 0.4),
-                              blurRadius: 32,
-                              spreadRadius: 6,
-                            ),
-                          ],
-                        ),
-                        child: const Center(
-                          child: Icon(
-                            Icons.play_arrow_rounded,
-                            size: 56,
-                            color: Colors.white,
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 24),
-                      Text(
-                        'VOIDFLIX',
-                        style: GoogleFonts.bebasNeue(
-                          fontSize: 48,
-                          letterSpacing: 6,
-                          color: const Color(0xFFE50914),
-                          shadows: [
-                            Shadow(
-                              color: const Color(0xFFE50914).withValues(alpha: 0.6),
-                              blurRadius: 16,
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      const Text(
-                        'ULTRA HD STREAMING',
-                        style: TextStyle(
-                          fontSize: 11,
-                          letterSpacing: 4,
-                          fontWeight: FontWeight.w600,
-                          color: Colors.white54,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
+              const SizedBox.expand(
+                child: _NativeNetflixCinematicIntro(),
               ),
           ],
         ),
       ),
     );
+  }
+}
+
+class _NativeNetflixCinematicIntro extends StatefulWidget {
+  const _NativeNetflixCinematicIntro();
+
+  @override
+  State<_NativeNetflixCinematicIntro> createState() => _NativeNetflixCinematicIntroState();
+}
+
+class _NativeNetflixCinematicIntroState extends State<_NativeNetflixCinematicIntro>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 3200),
+    )..forward();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedBuilder(
+      animation: _controller,
+      builder: (context, child) {
+        return CustomPaint(
+          size: Size.infinite,
+          painter: _NetflixCinematicPainter(progress: _controller.value),
+          child: Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const SizedBox(height: 180),
+                // Glowing VOIDFLIX Wordmark
+                Opacity(
+                  opacity: (_controller.value < 0.4)
+                      ? 0.0
+                      : ((_controller.value - 0.4) / 0.3).clamp(0.0, 1.0),
+                  child: Transform.scale(
+                    scale: 0.92 + 0.08 * ((_controller.value - 0.4) / 0.6).clamp(0.0, 1.0),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          'VOIDFLIX',
+                          style: GoogleFonts.bebasNeue(
+                            fontSize: 54,
+                            letterSpacing: 8,
+                            color: const Color(0xFFE50914),
+                            shadows: [
+                              Shadow(
+                                color: const Color(0xFFE50914).withValues(alpha: 0.8),
+                                blurRadius: 28,
+                              ),
+                              Shadow(
+                                color: Colors.black.withValues(alpha: 0.9),
+                                blurRadius: 12,
+                                offset: const Offset(0, 4),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(height: 6),
+                        Text(
+                          'ULTRA HD STREAMING',
+                          style: TextStyle(
+                            fontSize: 12,
+                            letterSpacing: 5,
+                            fontWeight: FontWeight.w700,
+                            color: Colors.white.withValues(
+                              alpha: (_controller.value < 0.55)
+                                  ? 0.0
+                                  : ((_controller.value - 0.55) / 0.35).clamp(0.0, 0.7),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _NetflixCinematicPainter extends CustomPainter {
+  final double progress;
+
+  _NetflixCinematicPainter({required this.progress});
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width / 2, size.height / 2 - 30);
+
+    // 1. Deep Core Ambient Crimson Glow
+    final glowProgress = (progress < 0.3)
+        ? progress / 0.3
+        : (progress < 0.7 ? 1.0 : (1.0 - (progress - 0.7) / 0.3));
+    final glowRadius = (size.shortestSide * 0.45) * (0.8 + 0.3 * glowProgress);
+
+    final glowPaint = Paint()
+      ..shader = RadialGradient(
+        colors: [
+          const Color(0xFFE50914).withValues(alpha: 0.28 * glowProgress),
+          const Color(0xFF900008).withValues(alpha: 0.12 * glowProgress),
+          Colors.transparent,
+        ],
+        stops: const [0.0, 0.45, 1.0],
+      ).createShader(Rect.fromCircle(center: center, radius: glowRadius));
+
+    canvas.drawCircle(center, glowRadius, glowPaint);
+
+    // 2. Prismatic Light Streaks / Spectrum Blast (The iconic Netflix transition)
+    if (progress > 0.45) {
+      final rayProgress = ((progress - 0.45) / 0.50).clamp(0.0, 1.0);
+      final rayOpacity = (rayProgress < 0.3)
+          ? rayProgress / 0.3
+          : (1.0 - (rayProgress - 0.3) / 0.7);
+
+      final rayColors = [
+        const Color(0xFFE50914), // Red
+        const Color(0xFFD50000), // Dark Red
+        const Color(0xFF9C27B0), // Purple
+        const Color(0xFF673AB7), // Deep Purple
+        const Color(0xFF2196F3), // Blue
+        const Color(0xFF00E5FF), // Cyan
+        const Color(0xFF00B0FF), // Light Blue
+        const Color(0xFFFF4081), // Pink
+        const Color(0xFFFF1744), // Neon Red
+        const Color(0xFFFF9100), // Orange
+        const Color(0xFFFFD600), // Yellow
+        const Color(0xFF00E676), // Green
+        const Color(0xFF651FFF), // Indigo
+        const Color(0xFFE50914), // Red
+      ];
+
+      final rayCount = rayColors.length;
+      final rayWidth = size.width * 0.015;
+      final maxRayHeight = size.height * 0.95;
+
+      for (int i = 0; i < rayCount; i++) {
+        final relIdx = (i - rayCount / 2);
+        final xOffset = center.dx + relIdx * (rayWidth * 2.4);
+        final color = rayColors[i];
+        final currentRayHeight = maxRayHeight * (0.3 + 0.7 * Curves.easeOutCubic.transform(rayProgress));
+
+        final rayPaint = Paint()
+          ..shader = LinearGradient(
+            begin: Alignment.topCenter,
+            end: Alignment.bottomCenter,
+            colors: [
+              Colors.transparent,
+              color.withValues(alpha: 0.75 * rayOpacity),
+              color.withValues(alpha: 0.95 * rayOpacity),
+              color.withValues(alpha: 0.75 * rayOpacity),
+              Colors.transparent,
+            ],
+            stops: const [0.0, 0.25, 0.5, 0.75, 1.0],
+          ).createShader(Rect.fromLTWH(
+            xOffset - rayWidth / 2,
+            center.dy - currentRayHeight / 2,
+            rayWidth,
+            currentRayHeight,
+          ));
+
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(
+            Rect.fromLTWH(
+              xOffset - rayWidth / 2,
+              center.dy - currentRayHeight / 2,
+              rayWidth,
+              currentRayHeight,
+            ),
+            const Radius.circular(2),
+          ),
+          rayPaint,
+        );
+      }
+    }
+
+    // 3. The 3D Ribbon 'V' Monogram
+    canvas.save();
+    canvas.translate(center.dx, center.dy - 35);
+
+    // Hero scale expansion
+    final scaleProgress = Curves.easeOutCubic.transform(progress.clamp(0.0, 0.7) / 0.7);
+    final scale = 0.5 + 0.5 * scaleProgress;
+    canvas.scale(scale, scale);
+
+    final ribbonHeight = 160.0;
+    final ribbonWidth = 34.0;
+    final armSpread = 58.0;
+
+    // Left Ribbon Arm (Dark Crimson base fold)
+    final leftArmProgress = Curves.easeInOut.transform(progress.clamp(0.0, 0.4) / 0.4);
+    if (leftArmProgress > 0) {
+      final leftPath = Path()
+        ..moveTo(-armSpread, -ribbonHeight / 2)
+        ..lineTo(-armSpread + ribbonWidth, -ribbonHeight / 2)
+        ..lineTo(ribbonWidth / 2 * leftArmProgress, (ribbonHeight / 2) * leftArmProgress)
+        ..lineTo((-ribbonWidth / 2) * leftArmProgress, (ribbonHeight / 2) * leftArmProgress)
+        ..close();
+
+      final leftShader = const LinearGradient(
+        begin: Alignment.topLeft,
+        end: Alignment.bottomRight,
+        colors: [
+          Color(0xFF800004),
+          Color(0xFFB1060F),
+          Color(0xFF6B0003),
+        ],
+      ).createShader(Rect.fromLTWH(-armSpread, -ribbonHeight / 2, armSpread + ribbonWidth, ribbonHeight));
+
+      canvas.drawPath(leftPath, Paint()..shader = leftShader);
+    }
+
+    // Shadow cast by Right Arm onto Left Arm
+    if (progress > 0.15) {
+      final shadowProgress = Curves.easeInOut.transform(((progress - 0.15) / 0.35).clamp(0.0, 1.0));
+      final shadowPath = Path()
+        ..moveTo(-8, -20)
+        ..lineTo(ribbonWidth, -ribbonHeight / 2)
+        ..lineTo(armSpread, -ribbonHeight / 2)
+        ..lineTo(0, (ribbonHeight / 2) * shadowProgress)
+        ..close();
+
+      final shadowPaint = Paint()
+        ..color = Colors.black.withValues(alpha: 0.65 * shadowProgress)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 10);
+
+      canvas.drawPath(shadowPath, shadowPaint);
+    }
+
+    // Right Ribbon Arm (Foreground vibrant red with drop shadow)
+    final rightArmProgress = Curves.easeInOut.transform(((progress - 0.1) / 0.4).clamp(0.0, 1.0));
+    if (rightArmProgress > 0) {
+      final rightPath = Path()
+        ..moveTo(armSpread, -ribbonHeight / 2)
+        ..lineTo(armSpread - ribbonWidth, -ribbonHeight / 2)
+        ..lineTo((-ribbonWidth / 2) * rightArmProgress, (ribbonHeight / 2) * rightArmProgress)
+        ..lineTo((ribbonWidth / 2) * rightArmProgress, (ribbonHeight / 2) * rightArmProgress)
+        ..close();
+
+      // Outer glow for Right Arm
+      final rightGlowPaint = Paint()
+        ..color = const Color(0xFFE50914).withValues(alpha: 0.4)
+        ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 16);
+      canvas.drawPath(rightPath, rightGlowPaint);
+
+      final rightShader = const LinearGradient(
+        begin: Alignment.topRight,
+        end: Alignment.bottomLeft,
+        colors: [
+          Color(0xFFFF2430),
+          Color(0xFFE50914),
+          Color(0xFFB1060F),
+        ],
+      ).createShader(Rect.fromLTWH(-ribbonWidth / 2, -ribbonHeight / 2, armSpread + ribbonWidth, ribbonHeight));
+
+      canvas.drawPath(rightPath, Paint()..shader = rightShader);
+
+      // High-Gloss Specular Edge Line
+      final sheenPaint = Paint()
+        ..color = Colors.white.withValues(alpha: 0.45)
+        ..strokeWidth = 2.0
+        ..style = PaintingStyle.stroke;
+
+      canvas.drawLine(
+        Offset(armSpread, -ribbonHeight / 2),
+        Offset(ribbonWidth / 2 * rightArmProgress, ribbonHeight / 2 * rightArmProgress),
+        sheenPaint,
+      );
+    }
+
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(covariant _NetflixCinematicPainter oldDelegate) {
+    return oldDelegate.progress != progress;
   }
 }

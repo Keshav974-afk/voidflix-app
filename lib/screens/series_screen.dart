@@ -4,6 +4,7 @@ import '../core/constants/theme_constants.dart';
 import '../core/network/api_service.dart';
 import '../models/media_item.dart';
 import '../widgets/media_card.dart';
+import '../widgets/tv_back_button.dart';
 
 class SeriesScreen extends StatefulWidget {
   const SeriesScreen({super.key});
@@ -70,24 +71,37 @@ class _SeriesScreenState extends State<SeriesScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Header with Title and Sort
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Text(
-                  'TV & SERIES',
-                  style: GoogleFonts.bebasNeue(
-                    fontSize: 34,
-                    letterSpacing: 1.5,
-                    color: Colors.white,
+    final canPop = Navigator.of(context).canPop();
+
+    return TvScreenWrapper(
+      onBack: canPop ? () => Navigator.of(context).pop() : null,
+      child: SingleChildScrollView(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Header with Title and Sort
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+              child: Row(
+                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                children: [
+                  Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (canPop) ...[
+                        const TvBackButton(),
+                        const SizedBox(width: 12),
+                      ],
+                      Text(
+                        'TV & SERIES',
+                        style: GoogleFonts.bebasNeue(
+                          fontSize: 34,
+                          letterSpacing: 1.5,
+                          color: Colors.white,
+                        ),
+                      ),
+                    ],
                   ),
-                ),
                 PopupMenuButton<String>(
                   color: const Color(0xFF222222),
                   icon: Container(
@@ -218,6 +232,7 @@ class _SeriesScreenState extends State<SeriesScreen> {
           const SizedBox(height: 36),
         ],
       ),
-    );
-  }
+    ),
+  );
+}
 }

@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../providers/profile_provider.dart';
 import '../services/avatar_service.dart';
+import '../widgets/tv_back_button.dart';
 
 class AvatarItem {
   final String id;
@@ -154,24 +155,23 @@ class _ChooseIconScreenState extends State<ChooseIconScreen> {
     final isSearching = _searchQuery.isNotEmpty;
     final searchResults = isSearching ? _avatarService.search(_searchQuery) : <NetflixAvatar>[];
 
-    return Scaffold(
-      backgroundColor: Colors.black,
-      appBar: AppBar(
+    return TvScreenWrapper(
+      onBack: () => Navigator.of(context).pop(),
+      child: Scaffold(
         backgroundColor: Colors.black,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.white),
-          onPressed: () => Navigator.of(context).pop(),
-        ),
-        title: const Text(
-          'Choose Icon',
-          style: TextStyle(
-            color: Colors.white,
-            fontSize: 20,
-            fontWeight: FontWeight.bold,
+        appBar: AppBar(
+          backgroundColor: Colors.black,
+          elevation: 0,
+          leading: const TvBackButton(),
+          title: const Text(
+            'Choose Icon',
+            style: TextStyle(
+              color: Colors.white,
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+            ),
           ),
         ),
-      ),
       body: _isLoading
           ? const Center(
               child: CircularProgressIndicator(color: Color(0xFFE50914)),
@@ -294,6 +294,7 @@ class _ChooseIconScreenState extends State<ChooseIconScreen> {
                 ),
               ],
             ),
+      ),
     );
   }
 }

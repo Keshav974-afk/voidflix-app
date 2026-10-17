@@ -2,8 +2,11 @@ import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../core/constants/api_constants.dart';
 import '../core/constants/theme_constants.dart';
+import '../core/services/tv_mode_service.dart';
 import '../models/media_item.dart';
+import '../screens/detail_screen.dart';
 import 'detail_modal.dart';
+import 'tv_focusable.dart';
 
 class MediaCard extends StatelessWidget {
   final MediaItem item;
@@ -11,6 +14,7 @@ class MediaCard extends StatelessWidget {
   final double? width;
   final double? height;
   final VoidCallback? onTap;
+  final bool isLandscape;
 
   const MediaCard({
     super.key,
@@ -19,6 +23,7 @@ class MediaCard extends StatelessWidget {
     this.width,
     this.height,
     this.onTap,
+    this.isLandscape = false,
   });
 
   @override
@@ -36,7 +41,9 @@ class MediaCard extends StatelessWidget {
       genreIds: item.genreIds,
     );
 
-    final posterUrl = ApiConstants.getImageUrl(item.posterPath, size: 'w500');
+    final posterUrl = isLandscape
+        ? ApiConstants.getImageUrl(item.backdropPath ?? item.posterPath, size: 'w780')
+        : ApiConstants.getImageUrl(item.posterPath, size: 'w500');
     final match = item.voteAverage > 0
         ? (item.voteAverage * 10).round().clamp(75, 99)
         : null;
@@ -141,14 +148,28 @@ class MediaCard extends StatelessWidget {
       ),
     );
 
-    return GestureDetector(
-      onTap: () {
-        if (onTap != null) {
-          onTap!();
-        } else {
-          DetailModal.show(context, effectiveItem);
-        }
-      },
+    void handleAction() {
+      if (onTap != null) {
+        onTap!();
+      } else if (TvModeService().isTvMode) {
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => DetailScreen(
+              mediaId: effectiveItem.id,
+              mediaType: effectiveItem.mediaType,
+            ),
+          ),
+        );
+      } else {
+        DetailModal.show(context, effectiveItem);
+      }
+    }
+
+    return TvFocusable(
+      scaleFactor: 1.07,
+      glowColor: AppTheme.primaryRed,
+      borderRadius: BorderRadius.circular(6),
+      onPressed: handleAction,
       child: cardContent,
     );
   }

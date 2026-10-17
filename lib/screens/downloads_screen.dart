@@ -8,6 +8,7 @@ import 'package:share_plus/share_plus.dart';
 import '../core/constants/theme_constants.dart';
 import '../models/downloaded_item.dart';
 import '../providers/download_provider.dart';
+import '../widgets/tv_back_button.dart';
 import 'player_screen.dart';
 
 class _SavedClip {
@@ -277,42 +278,42 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
         ? (widget.seriesTitle ?? (items.isNotEmpty ? DownloadsScreen.sanitizeTitle(items.first.title) : 'Downloads'))
         : 'Downloads';
 
-    return Scaffold(
-      backgroundColor: Colors.black,
-      appBar: AppBar(
+    return TvScreenWrapper(
+      onBack: () => Navigator.of(context).pop(),
+      child: Scaffold(
         backgroundColor: Colors.black,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.white, size: 24),
-          onPressed: () => Navigator.of(context).pop(),
-        ),
-        title: Text(
-          displayTitle,
-          style: const TextStyle(
-            fontSize: 20,
-            fontWeight: FontWeight.bold,
-            color: Colors.white,
-          ),
-        ),
-        actions: [
-          if (items.isNotEmpty || _savedClips.isNotEmpty)
-            IconButton(
-              icon: Icon(
-                _isEditing ? Icons.check : Icons.edit_outlined,
-                color: Colors.white,
-                size: 22,
-              ),
-              onPressed: () {
-                setState(() => _isEditing = !_isEditing);
-              },
+        appBar: AppBar(
+          backgroundColor: Colors.black,
+          elevation: 0,
+          leading: const TvBackButton(),
+          title: Text(
+            displayTitle,
+            style: const TextStyle(
+              fontSize: 20,
+              fontWeight: FontWeight.bold,
+              color: Colors.white,
             ),
-        ],
+          ),
+          actions: [
+            if (items.isNotEmpty || _savedClips.isNotEmpty)
+              IconButton(
+                icon: Icon(
+                  _isEditing ? Icons.check : Icons.edit_outlined,
+                  color: Colors.white,
+                  size: 22,
+                ),
+                onPressed: () {
+                  setState(() => _isEditing = !_isEditing);
+                },
+              ),
+          ],
+        ),
+        body: (items.isEmpty && _savedClips.isEmpty)
+            ? _buildEmptyState(context)
+            : isSeriesSubView
+                ? _buildSeriesDetailView(context, items, downloadProvider)
+                : _buildTopLevelGroupedView(context, allItems, downloadProvider),
       ),
-      body: (items.isEmpty && _savedClips.isEmpty)
-          ? _buildEmptyState(context)
-          : isSeriesSubView
-              ? _buildSeriesDetailView(context, items, downloadProvider)
-              : _buildTopLevelGroupedView(context, allItems, downloadProvider),
     );
   }
 

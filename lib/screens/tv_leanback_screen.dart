@@ -16,6 +16,7 @@ import '../widgets/tv_focusable.dart';
 import 'detail_screen.dart';
 import 'live_tv_screen.dart';
 import 'movies_screen.dart';
+import 'new_popular_screen.dart';
 import 'player_screen.dart';
 import 'search_screen.dart';
 import 'series_screen.dart';
@@ -98,21 +99,24 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
         }
         break;
       case 2:
-        Navigator.of(context).push(MaterialPageRoute(builder: (_) => const MoviesScreen()));
+        Navigator.of(context).push(MaterialPageRoute(builder: (_) => const NewPopularScreen()));
         break;
       case 3:
         Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SeriesScreen()));
         break;
       case 4:
-        Navigator.of(context).push(MaterialPageRoute(builder: (_) => const LiveTvScreen()));
+        Navigator.of(context).push(MaterialPageRoute(builder: (_) => const MoviesScreen()));
         break;
       case 5:
         Navigator.of(context).push(MaterialPageRoute(builder: (_) => const WatchlistScreen()));
         break;
       case 6:
-        Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SettingsScreen()));
+        Navigator.of(context).push(MaterialPageRoute(builder: (_) => const LiveTvScreen()));
         break;
       case 7:
+        Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SettingsScreen()));
+        break;
+      case 8:
         // Switch back to Desktop / Mobile UI
         TvModeService().setTvMode(false);
         if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
@@ -208,7 +212,7 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
                       _buildContinueWatchingRow(historyProvider),
 
                     if (mediaProvider.trending.isNotEmpty)
-                      _buildMediaRow('TRENDING ON VOIDFLIX', mediaProvider.trending),
+                      _buildMediaRow('POPULAR ON VOIDFLIX', mediaProvider.trending, isLandscape: true),
 
                     if (mediaProvider.popularMovies.isNotEmpty)
                       _buildMediaRow('TOP MOVIES', mediaProvider.popularMovies),
@@ -245,10 +249,11 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
     final navItems = [
       {'icon': Icons.search_rounded, 'label': 'Search'},
       {'icon': Icons.home_rounded, 'label': 'Home'},
-      {'icon': Icons.movie_outlined, 'label': 'Movies'},
+      {'icon': Icons.calendar_today_rounded, 'label': 'New & Popular'},
       {'icon': Icons.tv_rounded, 'label': 'Series'},
+      {'icon': Icons.movie_outlined, 'label': 'Movies'},
+      {'icon': Icons.add_rounded, 'label': 'My List'},
       {'icon': Icons.live_tv_rounded, 'label': 'Live TV'},
-      {'icon': Icons.bookmark_border_rounded, 'label': 'My List'},
       {'icon': Icons.settings_outlined, 'label': 'Settings'},
       {
         'icon': Icons.desktop_windows_rounded,
@@ -499,6 +504,38 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
+          // V SERIES / V FILM badge (Screenshot 1)
+          Row(
+            children: [
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2),
+                decoration: BoxDecoration(
+                  color: AppTheme.primaryRed,
+                  borderRadius: BorderRadius.circular(3),
+                ),
+                child: const Text(
+                  'V',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 12,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                (item.mediaType == 'tv' ? 'SERIES' : 'FILM'),
+                style: const TextStyle(
+                  color: Colors.white70,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w800,
+                  letterSpacing: 3.5,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+
           // Logo or Title
           ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 650),
@@ -506,7 +543,7 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
               item.title,
               style: const TextStyle(
                 color: Colors.white,
-                fontSize: 36,
+                fontSize: 38,
                 fontWeight: FontWeight.w900,
                 letterSpacing: -0.5,
                 shadows: [
@@ -607,7 +644,7 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
           ),
           const SizedBox(height: 22),
 
-          // Action Buttons: Play, Add to Watchlist, Details
+          // Action Buttons: Play, More Info, Add to Watchlist (Screenshot 1)
           Row(
             children: [
               // 1. Play Button
@@ -641,7 +678,38 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
               ),
               const SizedBox(width: 14),
 
-              // 2. Watchlist Button
+              // 2. More Info Button (Screenshot 1)
+              TvFocusable(
+                scaleFactor: 1.06,
+                glowColor: Colors.white70,
+                borderRadius: BorderRadius.circular(8),
+                onPressed: () => _openDetail(item),
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.22),
+                    borderRadius: BorderRadius.circular(8),
+                    border: Border.all(color: Colors.white24),
+                  ),
+                  child: const Row(
+                    children: [
+                      Icon(Icons.info_outline_rounded, color: Colors.white, size: 22),
+                      SizedBox(width: 8),
+                      Text(
+                        'More Info',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              const SizedBox(width: 14),
+
+              // 3. Watchlist Button
               Consumer<WatchlistProvider>(
                 builder: (context, watchlist, _) {
                   final inList = watchlist.isInWatchlist(item.id);
@@ -679,37 +747,6 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
                   );
                 },
               ),
-              const SizedBox(width: 14),
-
-              // 3. Details Button
-              TvFocusable(
-                scaleFactor: 1.06,
-                glowColor: Colors.white70,
-                borderRadius: BorderRadius.circular(8),
-                onPressed: () => _openDetail(item),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(8),
-                    border: Border.all(color: Colors.white24),
-                  ),
-                  child: const Row(
-                    children: [
-                      Icon(Icons.info_outline_rounded, color: Colors.white, size: 22),
-                      SizedBox(width: 8),
-                      Text(
-                        'Details',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 15,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
             ],
           ),
         ],
@@ -721,7 +758,11 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
   // CONTENT CAROUSEL ROW
   // ═══════════════════════════════════════════════════════════════
 
-  Widget _buildMediaRow(String categoryTitle, List<MediaItem> items) {
+  Widget _buildMediaRow(String categoryTitle, List<MediaItem> items, {bool isLandscape = false}) {
+    final rowHeight = isLandscape ? 165.0 : 215.0;
+    final cardWidth = isLandscape ? 240.0 : 130.0;
+    final cardHeight = isLandscape ? 138.0 : 195.0;
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -738,14 +779,16 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
           ),
         ),
         SizedBox(
-          height: 215,
+          height: rowHeight,
           child: ListView.builder(
             scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.symmetric(horizontal: 36),
             itemCount: items.length,
             itemBuilder: (ctx, idx) {
               final item = items[idx];
-              final posterUrl = ApiConstants.getImageUrl(item.posterPath, size: 'w342');
+              final imageUrl = isLandscape
+                  ? ApiConstants.getImageUrl(item.backdropPath ?? item.posterPath, size: 'w780')
+                  : ApiConstants.getImageUrl(item.posterPath, size: 'w342');
 
               return TvFocusable(
                 scaleFactor: 1.10,
@@ -759,16 +802,16 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
                 },
                 onPressed: () => _openDetail(item),
                 child: SizedBox(
-                  width: 130,
-                  height: 195,
+                  width: cardWidth,
+                  height: cardHeight,
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(8),
                     child: Stack(
                       fit: StackFit.expand,
                       children: [
-                        if (posterUrl.isNotEmpty)
+                        if (imageUrl.isNotEmpty)
                           CachedNetworkImage(
-                            imageUrl: posterUrl,
+                            imageUrl: imageUrl,
                             fit: BoxFit.cover,
                             placeholder: (_, __) => Container(color: const Color(0xFF161622)),
                             errorWidget: (_, __, ___) => Container(
@@ -789,6 +832,35 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
                               item.title,
                               textAlign: TextAlign.center,
                               style: const TextStyle(color: Colors.white54, fontSize: 11),
+                            ),
+                          ),
+                        if (isLandscape)
+                          Positioned(
+                            left: 0,
+                            right: 0,
+                            bottom: 0,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                              decoration: BoxDecoration(
+                                gradient: LinearGradient(
+                                  begin: Alignment.bottomCenter,
+                                  end: Alignment.topCenter,
+                                  colors: [
+                                    Colors.black.withValues(alpha: 0.9),
+                                    Colors.transparent,
+                                  ],
+                                ),
+                              ),
+                              child: Text(
+                                item.title,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 12,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
                             ),
                           ),
                       ],

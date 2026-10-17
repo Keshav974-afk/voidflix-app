@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:fvp/fvp.dart' as fvp;
+import 'package:window_manager/window_manager.dart';
 import 'core/constants/theme_constants.dart';
 import 'core/services/app_logger.dart';
 import 'core/services/tv_mode_service.dart';
@@ -45,14 +46,43 @@ void main() async {
         'video.decoders': ['D3D11', 'FFmpeg'],
         'player': {
           'avio.reconnect': '1',
-          'avio.reconnect_delay_max': '7',
+          'avio.reconnect_delay_max': '15',
+          'reconnect_streamed': '1',
+          'reconnect_at_eof': '1',
           'avformat.allowed_extensions': 'ALL',
+          'buffer_size': '15728640', // 15MB buffer for smooth playback on slow networks
+          'max_buffer_size': '31457280', // 30MB max buffer
+          'probesize': '10000000',
+          'analyzeduration': '10000000',
+          'http-persistent': '1',
         },
         'fastSeek': true,
       },
     );
-    AppLogger.instance.log('Main', 'Registered fvp media engine for desktop (D3D11/FFmpeg)');
+    AppLogger.instance.log('Main', 'Registered fvp media engine for desktop (D3D11/FFmpeg with high-buffer resilience)');
   }
+
+  if (!kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
+    try {
+      await windowManager.ensureInitialized();
+      const windowOptions = WindowOptions(
+        size: Size(1280, 720),
+        minimumSize: Size(420, 260),
+        center: true,
+        backgroundColor: Colors.transparent,
+        skipTaskbar: false,
+        titleBarStyle: TitleBarStyle.normal,
+        title: 'Voidflix',
+      );
+      windowManager.waitUntilReadyToShow(windowOptions, () async {
+        await windowManager.show();
+        await windowManager.focus();
+      });
+    } catch (e) {
+      debugPrint('windowManager init warning: $e');
+    }
+  }
+
   HttpOverrides.global = VoidflixHttpOverrides();
 
   // Dark system navigation bar & status bar

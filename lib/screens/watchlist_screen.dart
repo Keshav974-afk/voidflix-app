@@ -6,6 +6,7 @@ import '../providers/profile_provider.dart';
 import '../providers/watchlist_provider.dart';
 import '../widgets/continue_watching_row.dart';
 import '../widgets/media_card.dart';
+import '../widgets/tv_back_button.dart';
 import 'profile_screen.dart';
 
 class WatchlistScreen extends StatelessWidget {
@@ -15,26 +16,36 @@ class WatchlistScreen extends StatelessWidget {
   Widget build(BuildContext context) {
     final profileProvider = context.watch<ProfileProvider>();
     final activeProfile = profileProvider.activeProfile;
+    final canPop = Navigator.of(context).canPop();
 
-    return Scaffold(
-      backgroundColor: AppTheme.background,
-      body: SafeArea(
-        child: SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Top Profile Bar
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    GestureDetector(
-                      onTap: () {
-                        Navigator.of(context).push(
-                          MaterialPageRoute(builder: (_) => const ProfileScreen()),
-                        );
-                      },
+    return TvScreenWrapper(
+      onBack: canPop ? () => Navigator.of(context).pop() : null,
+      child: Scaffold(
+        backgroundColor: AppTheme.background,
+        body: SafeArea(
+          child: SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Top Profile Bar
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          if (canPop) ...[
+                            const TvBackButton(),
+                            const SizedBox(width: 12),
+                          ],
+                          GestureDetector(
+                            onTap: () {
+                              Navigator.of(context).push(
+                                MaterialPageRoute(builder: (_) => const ProfileScreen()),
+                              );
+                            },
                       child: Row(
                         children: [
                           ClipRRect(
@@ -102,7 +113,9 @@ class WatchlistScreen extends StatelessWidget {
                         ],
                       ),
                     ),
-                    IconButton(
+                  ],
+                ),
+                IconButton(
                       icon: const Icon(Icons.settings_outlined, color: Colors.white),
                       onPressed: () {
                         Navigator.of(context).push(
@@ -203,6 +216,7 @@ class WatchlistScreen extends StatelessWidget {
           ),
         ),
       ),
-    );
-  }
+    ),
+  );
+}
 }

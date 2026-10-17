@@ -49,6 +49,8 @@ dependencies:
   url_launcher: ^6.3.3
   wakelock_plus: ^1.8.1
   fvp: ^0.39.1
+  window_manager: ^0.5.2
+  screen_retriever: ^0.2.2
 
 dev_dependencies:
   flutter_test:

@@ -5,32 +5,41 @@ import '../core/constants/theme_constants.dart';
 import '../providers/media_provider.dart';
 import '../widgets/media_card.dart';
 import '../widgets/media_row.dart';
+import '../widgets/tv_back_button.dart';
 
 class AnimeScreen extends StatelessWidget {
   const AnimeScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return Consumer<MediaProvider>(
-      builder: (context, mediaProvider, child) {
-        final anime = mediaProvider.anime;
+    final canPop = Navigator.of(context).canPop();
 
-        return SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Header
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        const Icon(Icons.bolt, color: AppTheme.primaryRed, size: 28),
-                        const SizedBox(width: 8),
-                        Text(
-                          'ANIME CENTRAL',
+    return TvScreenWrapper(
+      onBack: canPop ? () => Navigator.of(context).pop() : null,
+      child: Consumer<MediaProvider>(
+        builder: (context, mediaProvider, child) {
+          final anime = mediaProvider.anime;
+
+          return SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Header
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          if (canPop) ...[
+                            const TvBackButton(),
+                            const SizedBox(width: 12),
+                          ],
+                          const Icon(Icons.bolt, color: AppTheme.primaryRed, size: 28),
+                          const SizedBox(width: 8),
+                          Text(
+                            'ANIME CENTRAL',
                           style: GoogleFonts.bebasNeue(
                             fontSize: 34,
                             letterSpacing: 1.5,
@@ -89,8 +98,9 @@ class AnimeScreen extends StatelessWidget {
               const SizedBox(height: 32),
             ],
           ),
-        );
-      },
+          );
+        },
+      ),
     );
   }
 }

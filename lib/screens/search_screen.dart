@@ -8,6 +8,7 @@ import '../core/network/api_service.dart';
 import '../models/media_item.dart';
 import 'detail_screen.dart';
 import 'player_screen.dart';
+import '../widgets/tv_back_button.dart';
 
 class SearchScreen extends StatefulWidget {
   const SearchScreen({super.key});
@@ -118,13 +119,18 @@ class _SearchScreenState extends State<SearchScreen> {
   Widget build(BuildContext context) {
     final isSearching = _controller.text.trim().isNotEmpty;
     final displayList = isSearching ? _results : _recommendations;
+    final canPop = Navigator.of(context).canPop();
 
-    return Scaffold(
-      backgroundColor: AppTheme.background,
-      appBar: AppBar(
+    return TvScreenWrapper(
+      onBack: canPop ? () => Navigator.of(context).pop() : null,
+      child: Scaffold(
         backgroundColor: AppTheme.background,
-        elevation: 0,
-        titleSpacing: 14,
+        appBar: AppBar(
+          backgroundColor: AppTheme.background,
+          elevation: 0,
+          leading: canPop ? const TvBackButton() : null,
+          automaticallyImplyLeading: false,
+          titleSpacing: canPop ? 0 : 14,
         title: Container(
           height: 46,
           decoration: BoxDecoration(
@@ -286,6 +292,7 @@ class _SearchScreenState extends State<SearchScreen> {
           ),
         ],
       ),
-    );
-  }
+    ),
+  );
+}
 }

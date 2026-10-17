@@ -942,7 +942,7 @@ class DownloadProvider extends ChangeNotifier {
           final segFile = File('${segDir.path}/$segFileName');
 
           bool segSuccess = false;
-          for (int attempt = 0; attempt < 3; attempt++) {
+          for (int attempt = 0; attempt < 5; attempt++) {
             if (!_activeClients.containsKey(downloadId)) {
               hasAborted = true;
               return;
@@ -950,7 +950,7 @@ class DownloadProvider extends ChangeNotifier {
             try {
               final segRes = await client
                   .get(segUri, headers: reqHeaders)
-                  .timeout(const Duration(seconds: 15));
+                  .timeout(const Duration(seconds: 25));
               if (segRes.statusCode == 200 && segRes.bodyBytes.isNotEmpty) {
                 await segFile.writeAsBytes(segRes.bodyBytes, flush: true);
                 totalDownloadedBytes += segRes.bodyBytes.length;
@@ -959,14 +959,14 @@ class DownloadProvider extends ChangeNotifier {
                 break;
               }
             } catch (_) {
-              if (attempt < 2) {
-                await Future.delayed(const Duration(milliseconds: 250));
+              if (attempt < 4) {
+                await Future.delayed(Duration(milliseconds: 300 * (attempt + 1)));
               }
             }
           }
 
           if (!segSuccess) {
-            // Failed segment after 3 attempts
+            // Failed segment after 5 attempts
             hasAborted = true;
             return;
           }
@@ -1020,12 +1020,18 @@ class DownloadProvider extends ChangeNotifier {
       final partLen = await partFile.length();
       if (partLen > 100000) {
         final targetFile = File(targetPath);
-        if (targetFile.existsSync()) {
-          try {
+        try {
+          if (targetFile.existsSync()) {
             targetFile.deleteSync();
+          }
+          await partFile.rename(targetPath);
+        } catch (_) {
+          // Windows filesystem lock fallback: copy & delete
+          await partFile.copy(targetPath);
+          try {
+            partFile.deleteSync();
           } catch (_) {}
         }
-        await partFile.rename(targetPath);
 
         // Clean up temporary segments folder
         try {
@@ -1119,12 +1125,18 @@ class DownloadProvider extends ChangeNotifier {
       final downloadedLength = await partFile.length();
       if (downloadedLength > 100000) {
         final targetFile = File(targetPath);
-        if (targetFile.existsSync()) {
-          try {
+        try {
+          if (targetFile.existsSync()) {
             targetFile.deleteSync();
+          }
+          await partFile.rename(targetPath);
+        } catch (_) {
+          // Windows filesystem lock fallback: copy & delete
+          await partFile.copy(targetPath);
+          try {
+            partFile.deleteSync();
           } catch (_) {}
         }
-        await partFile.rename(targetPath);
         return true;
       }
       return false;

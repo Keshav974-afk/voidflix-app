@@ -5,32 +5,41 @@ import '../core/constants/theme_constants.dart';
 import '../providers/media_provider.dart';
 import '../widgets/media_card.dart';
 import '../widgets/media_row.dart';
+import '../widgets/tv_back_button.dart';
 
 class DramaScreen extends StatelessWidget {
   const DramaScreen({super.key});
 
   @override
   Widget build(BuildContext context) {
-    return Consumer<MediaProvider>(
-      builder: (context, mediaProvider, child) {
-        final drama = mediaProvider.asianDrama;
+    final canPop = Navigator.of(context).canPop();
 
-        return SingleChildScrollView(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Header
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        const Icon(Icons.favorite, color: AppTheme.primaryRed, size: 28),
-                        const SizedBox(width: 8),
-                        Text(
-                          'K-DRAMA & ASIAN SERIES',
+    return TvScreenWrapper(
+      onBack: canPop ? () => Navigator.of(context).pop() : null,
+      child: Consumer<MediaProvider>(
+        builder: (context, mediaProvider, child) {
+          final drama = mediaProvider.asianDrama;
+
+          return SingleChildScrollView(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Header
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          if (canPop) ...[
+                            const TvBackButton(),
+                            const SizedBox(width: 12),
+                          ],
+                          const Icon(Icons.favorite, color: AppTheme.primaryRed, size: 28),
+                          const SizedBox(width: 8),
+                          Text(
+                            'K-DRAMA & ASIAN SERIES',
                           style: GoogleFonts.bebasNeue(
                             fontSize: 34,
                             letterSpacing: 1.5,
@@ -89,8 +98,9 @@ class DramaScreen extends StatelessWidget {
               const SizedBox(height: 32),
             ],
           ),
-        );
-      },
+          );
+        },
+      ),
     );
   }
 }

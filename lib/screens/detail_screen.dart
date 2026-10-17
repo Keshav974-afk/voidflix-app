@@ -8,6 +8,7 @@ import '../core/constants/api_constants.dart';
 import '../core/constants/theme_constants.dart';
 import '../core/network/api_service.dart';
 import '../core/services/youtube_service.dart';
+import '../core/utils/platform_utils.dart';
 import '../models/media_detail.dart';
 import '../providers/download_provider.dart';
 import '../providers/history_provider.dart';
@@ -16,7 +17,7 @@ import '../widgets/netflix_season_picker.dart';
 import '../widgets/cast_dialog.dart';
 import '../core/services/cast_service.dart';
 import '../core/services/stream_extractor.dart';
-import '../core/utils/platform_utils.dart';
+import '../widgets/tv_back_button.dart';
 import 'downloads_screen.dart';
 import 'player_screen.dart';
 
@@ -322,26 +323,18 @@ class _DetailScreenState extends State<DetailScreen> {
 
     final totalEpisodes = detail.seasons.fold<int>(0, (sum, s) => sum + s.episodeCount);
 
-    return Scaffold(
-      backgroundColor: AppTheme.background,
-      body: CustomScrollView(
-        slivers: [
-          // Collapsible Trailer / Video Header (Screenshots 1 & 4)
-          SliverAppBar(
-            expandedHeight: 280,
-            pinned: true,
-            backgroundColor: Colors.black,
-            leading: IconButton(
-              icon: Container(
-                padding: const EdgeInsets.all(6),
-                decoration: BoxDecoration(
-                  shape: BoxShape.circle,
-                  color: Colors.black.withValues(alpha: 0.6),
-                ),
-                child: const Icon(Icons.arrow_back, color: Colors.white, size: 20),
-              ),
-              onPressed: () => Navigator.of(context).pop(),
-            ),
+    return TvScreenWrapper(
+      onBack: () => Navigator.of(context).pop(),
+      child: Scaffold(
+        backgroundColor: AppTheme.background,
+        body: CustomScrollView(
+          slivers: [
+            // Collapsible Trailer / Video Header (Screenshots 1 & 4)
+            SliverAppBar(
+              expandedHeight: 280,
+              pinned: true,
+              backgroundColor: Colors.black,
+              leading: const TvBackButton(showBackground: true),
             actions: [
               ListenableBuilder(
                 listenable: CastService(),
@@ -1382,6 +1375,7 @@ class _DetailScreenState extends State<DetailScreen> {
           ),
         ],
       ),
-    );
-  }
+    ),
+  );
+}
 }

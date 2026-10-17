@@ -14,6 +14,7 @@ import '../providers/watchlist_provider.dart';
 import '../core/services/tv_mode_service.dart';
 import '../core/services/cast_service.dart';
 import '../widgets/cast_dialog.dart';
+import '../widgets/tv_back_button.dart';
 import 'profile_gate_screen.dart';
 
 enum SettingsSection { appSettings, account, help }
@@ -567,24 +568,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ? '${(downloadedBytes / (1024 * 1024)).toStringAsFixed(0)} MB'
             : '21 B';
 
-    return Scaffold(
-      backgroundColor: Colors.black,
-      appBar: AppBar(
+    return TvScreenWrapper(
+      onBack: () => Navigator.pop(context),
+      child: Scaffold(
         backgroundColor: Colors.black,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.white),
-          onPressed: () => Navigator.pop(context),
-        ),
-        title: const Text(
-          'App Settings',
-          style: TextStyle(
-            color: Colors.white,
-            fontWeight: FontWeight.bold,
-            fontSize: 20,
+        appBar: AppBar(
+          backgroundColor: Colors.black,
+          elevation: 0,
+          leading: const TvBackButton(),
+          title: const Text(
+            'App Settings',
+            style: TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.bold,
+              fontSize: 20,
+            ),
           ),
         ),
-      ),
       body: ListView(
         padding: const EdgeInsets.only(bottom: 60),
         children: [
@@ -889,8 +889,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
           ),
         ],
       ),
-    );
-  }
+    ),
+  );
+}
 
   Widget _buildCategoryHeader(String title) {
     return Padding(

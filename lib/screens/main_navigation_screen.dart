@@ -138,15 +138,13 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
 
     final navLinks = [
       {'label': 'Home', 'cat': 0, 'tab': 0},
-      {'label': 'Series', 'cat': 1, 'tab': 0},
-      {'label': 'Films', 'cat': 2, 'tab': 0},
+      {'label': 'Shows', 'cat': 1, 'tab': 0},
+      {'label': 'Movies', 'cat': 2, 'tab': 0},
+      {'label': 'Games', 'cat': 0, 'tab': 1},
       {'label': 'New & Popular', 'cat': 3, 'tab': 0},
-      {'label': 'Anime', 'cat': 4, 'tab': 0},
-      {'label': 'Drama', 'cat': 5, 'tab': 0},
+      {'label': 'My Voidflix', 'cat': 0, 'tab': 3},
+      {'label': 'Browse by Languages', 'cat': 4, 'tab': 0},
       {'label': 'Live TV', 'cat': 6, 'tab': 0},
-      {'label': 'Clips', 'cat': 0, 'tab': 1},
-      {'label': 'Search', 'cat': 0, 'tab': 2},
-      {'label': 'My List', 'cat': 0, 'tab': 3},
     ];
 
     return PreferredSize(
@@ -255,6 +253,15 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
               ),
             ),
             const SizedBox(width: 8),
+
+            // Search Button
+            IconButton(
+              icon: const Icon(Icons.search_rounded, color: Colors.white, size: 22),
+              tooltip: 'Search',
+              onPressed: () {
+                setState(() => _bottomTabIndex = 2);
+              },
+            ),
 
             // Downloads Button
             IconButton(

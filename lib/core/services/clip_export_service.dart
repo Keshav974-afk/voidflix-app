@@ -9,8 +9,20 @@ import 'package:path_provider/path_provider.dart';
 class ClipExportService {
   static const _channel = MethodChannel('org.voidflix/notifications');
 
-  /// Resolves the optimal directory to save the clip so it is visible in the device's Gallery.
+  /// Resolves the optimal directory to save the clip so it is visible in the device's Gallery / Downloads.
   static Future<Directory> _getGalleryClipDirectory() async {
+    // 0. Desktop platforms (Windows, macOS, Linux): Save into user's Downloads/Voidflix
+    if (!kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS)) {
+      try {
+        final downloads = await getDownloadsDirectory();
+        if (downloads != null) {
+          final dir = Directory('${downloads.path}/Voidflix');
+          if (!dir.existsSync()) dir.createSync(recursive: true);
+          return dir;
+        }
+      } catch (_) {}
+    }
+
     // 1. Try public Movies/Voidflix directory on Android
     final moviesDir = Directory('/storage/emulated/0/Movies/Voidflix');
     try {
@@ -251,9 +263,10 @@ class ClipExportService {
                 } catch (_) {}
 
                 inputVideoPath = tempSourceFile.path;
-                final clipDurMs = ((endSeconds - startSeconds) * 1000).toInt();
-                startMs = 0;
-                endMs = clipDurMs;
+                final firstSegStartTime = targetSegments.first.startTime;
+                final offsetSeconds = (startSeconds - firstSegStartTime).clamp(0.0, double.infinity);
+                startMs = (offsetSeconds * 1000).toInt();
+                endMs = (startMs + ((endSeconds - startSeconds) * 1000)).toInt();
 
                 adjustedCues = subtitleList.map((c) {
                   return {

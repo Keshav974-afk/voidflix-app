@@ -19,6 +19,7 @@ import 'downloads_screen.dart';
 import 'player_screen.dart';
 import 'settings_screen.dart';
 import 'watchlist_screen.dart';
+import '../widgets/tv_back_button.dart';
 
 class MyVoidflixScreen extends StatelessWidget {
   const MyVoidflixScreen({super.key});
@@ -37,13 +38,17 @@ class MyVoidflixScreen extends StatelessWidget {
     final watchlistItems = watchlistProvider.watchlist;
     final likedItems = mediaProvider.trending.take(6).toList();
     final downloadCount = downloadProvider.completedItems.length;
+    final canPop = Navigator.of(context).canPop();
 
-    return Scaffold(
-      backgroundColor: Colors.black,
-      appBar: AppBar(
+    return TvScreenWrapper(
+      onBack: canPop ? () => Navigator.of(context).pop() : null,
+      child: Scaffold(
         backgroundColor: Colors.black,
-        elevation: 0,
-        automaticallyImplyLeading: false,
+        appBar: AppBar(
+          backgroundColor: Colors.black,
+          elevation: 0,
+          automaticallyImplyLeading: false,
+          leading: canPop ? const TvBackButton() : null,
         title: GestureDetector(
           onTap: () => ProfileSwitcherSheet.show(context),
           behavior: HitTestBehavior.opaque,
@@ -483,8 +488,9 @@ class MyVoidflixScreen extends StatelessWidget {
             ),
         ],
       ),
-    );
-  }
+    ),
+  );
+}
 }
 
 typedef MyNetflixScreen = MyVoidflixScreen;

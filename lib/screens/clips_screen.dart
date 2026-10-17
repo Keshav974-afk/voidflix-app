@@ -2,16 +2,20 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:video_player/video_player.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
 import '../core/constants/theme_constants.dart';
 import '../core/network/api_service.dart';
 import '../core/services/youtube_service.dart';
+import '../core/services/tv_mode_service.dart';
 import '../core/utils/platform_utils.dart';
 import '../models/media_item.dart';
 import '../providers/media_provider.dart';
 import '../providers/watchlist_provider.dart';
 import '../widgets/detail_modal.dart';
+import '../widgets/tv_back_button.dart';
 import 'player_screen.dart';
 
 class ClipsScreen extends StatefulWidget {
@@ -34,39 +38,67 @@ class _ClipsScreenState extends State<ClipsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Strictly exclude Clips from Android TV mode
+    if (TvModeService().isTvMode) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && Navigator.of(context).canPop()) {
+          Navigator.of(context).pop();
+        }
+      });
+      return const Scaffold(backgroundColor: Colors.black);
+    }
+
     final mediaProvider = context.watch<MediaProvider>();
     final clips = mediaProvider.trending;
+    final canPop = Navigator.of(context).canPop();
 
     if (clips.isEmpty) {
-      return const Scaffold(
-        backgroundColor: Colors.black,
-        body: Center(child: CircularProgressIndicator(color: AppTheme.primaryRed)),
+      return TvScreenWrapper(
+        onBack: canPop ? () => Navigator.of(context).pop() : null,
+        child: const Scaffold(
+          backgroundColor: Colors.black,
+          body: Center(child: CircularProgressIndicator(color: AppTheme.primaryRed)),
+        ),
       );
     }
 
-    return Scaffold(
-      backgroundColor: Colors.black,
-      body: PageView.builder(
-        controller: _pageController,
-        scrollDirection: Axis.vertical,
-        itemCount: clips.length,
-        onPageChanged: (index) {
-          setState(() => _currentPage = index);
-        },
-        itemBuilder: (context, index) {
-          final item = clips[index];
-          final isCurrent = index == _currentPage;
+    return TvScreenWrapper(
+      onBack: canPop ? () => Navigator.of(context).pop() : null,
+      child: Scaffold(
+        backgroundColor: Colors.black,
+        body: Stack(
+          children: [
+            PageView.builder(
+              controller: _pageController,
+              scrollDirection: Axis.vertical,
+              itemCount: clips.length,
+              onPageChanged: (index) {
+                setState(() => _currentPage = index);
+              },
+              itemBuilder: (context, index) {
+                final item = clips[index];
+                final isCurrent = index == _currentPage;
 
-          return ClipPlayerTile(
-            key: ValueKey('clip_${item.id}'),
-            item: item,
-            isActive: isCurrent,
-            isMuted: _isMuted,
-            onToggleMute: () {
-              setState(() => _isMuted = !_isMuted);
-            },
-          );
-        },
+                return ClipPlayerTile(
+                  key: ValueKey('clip_${item.id}'),
+                  item: item,
+                  isActive: isCurrent,
+                  isMuted: _isMuted,
+                  onToggleMute: () {
+                    setState(() => _isMuted = !_isMuted);
+                  },
+                );
+              },
+            ),
+            if (canPop)
+              const SafeArea(
+                child: Padding(
+                  padding: EdgeInsets.all(16.0),
+                  child: TvBackButton(showBackground: true),
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }
@@ -94,6 +126,7 @@ class _ClipPlayerTileState extends State<ClipPlayerTile> {
   final ApiService _apiService = ApiService();
   String? _trailerKey;
   WebViewController? _webController;
+  VideoPlayerController? _videoPlayerController;
   bool _isLiked = false;
 
   @override
@@ -106,10 +139,31 @@ class _ClipPlayerTileState extends State<ClipPlayerTile> {
   void didUpdateWidget(covariant ClipPlayerTile oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.isActive != widget.isActive || oldWidget.isMuted != widget.isMuted) {
-      if (widget.isActive && _trailerKey != null) {
-        _initWebController(_trailerKey!);
+      if (PlatformUtils.isWebViewSupported) {
+        if (widget.isActive && _trailerKey != null) {
+          _initWebController(_trailerKey!);
+        }
+      } else {
+        _videoPlayerController?.setVolume(widget.isMuted ? 0.0 : 1.0);
+        if (widget.isActive) {
+          _videoPlayerController?.play();
+        } else {
+          _videoPlayerController?.pause();
+        }
       }
     }
+  }
+
+  @override
+  void dispose() {
+    _disposeNativePlayer();
+    super.dispose();
+  }
+
+  void _disposeNativePlayer() {
+    final vc = _videoPlayerController;
+    _videoPlayerController = null;
+    vc?.dispose();
   }
 
   Future<void> _fetchTrailer() async {
@@ -125,12 +179,42 @@ class _ClipPlayerTileState extends State<ClipPlayerTile> {
       if (trailer != null && trailer.key.isNotEmpty) {
         _trailerKey = trailer.key;
         if (widget.isActive) {
-          _initWebController(trailer.key);
+          if (PlatformUtils.isWebViewSupported) {
+            _initWebController(trailer.key);
+          } else {
+            _initNativePlayer(trailer.key);
+          }
         }
       }
     } catch (_) {}
     if (mounted) {
       setState(() {});
+    }
+  }
+
+  Future<void> _initNativePlayer(String key) async {
+    _disposeNativePlayer();
+    try {
+      final directUrl = await YoutubeService.extractDirectStream(key);
+      if (!mounted) return;
+      if (directUrl != null && directUrl.isNotEmpty) {
+        final vc = VideoPlayerController.networkUrl(Uri.parse(directUrl));
+        await vc.initialize();
+        if (!mounted) {
+          vc.dispose();
+          return;
+        }
+        vc.setLooping(true);
+        vc.setVolume(widget.isMuted ? 0.0 : 1.0);
+        if (widget.isActive) {
+          await vc.play();
+        }
+        if (mounted) {
+          setState(() => _videoPlayerController = vc);
+        }
+      }
+    } catch (e) {
+      debugPrint('Error playing direct trailer stream: $e');
     }
   }
 
@@ -200,12 +284,42 @@ class _ClipPlayerTileState extends State<ClipPlayerTile> {
               child: WebViewWidget(controller: _webController!),
             ),
           )
+        else if (widget.isActive && _videoPlayerController != null && _videoPlayerController!.value.isInitialized)
+          Positioned.fill(
+            child: FittedBox(
+              fit: BoxFit.cover,
+              child: SizedBox(
+                width: _videoPlayerController!.value.size.width,
+                height: _videoPlayerController!.value.size.height,
+                child: VideoPlayer(_videoPlayerController!),
+              ),
+            ),
+          )
         else
           CachedNetworkImage(
             imageUrl: backdropUrl,
             fit: BoxFit.cover,
             placeholder: (c, u) => Container(color: Colors.black),
             errorWidget: (c, u, e) => Container(color: Colors.black),
+          ),
+
+        // Direct YouTube external launch button if video cannot be embedded/streamed on PC
+        if (!PlatformUtils.isWebViewSupported && _trailerKey != null && (_videoPlayerController == null || !_videoPlayerController!.value.isInitialized))
+          Center(
+            child: ElevatedButton.icon(
+              style: ElevatedButton.styleFrom(
+                backgroundColor: AppTheme.primaryRed,
+                foregroundColor: Colors.white,
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
+              ),
+              icon: const Icon(Icons.play_arrow_rounded, size: 24),
+              label: const Text('Watch Trailer on YouTube', style: TextStyle(fontWeight: FontWeight.bold)),
+              onPressed: () {
+                final ytUrl = 'https://www.youtube.com/watch?v=$_trailerKey';
+                launchUrl(Uri.parse(ytUrl), mode: LaunchMode.externalApplication);
+              },
+            ),
           ),
 
         // 2. Subtle Gradient Overlay for readable UI

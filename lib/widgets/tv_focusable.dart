@@ -69,6 +69,14 @@ class _TvFocusableState extends State<TvFocusable> {
       if (_node.hasFocus) {
         // Subtle haptic tick for TV remote navigation
         HapticFeedback.selectionClick();
+        if (mounted) {
+          Scrollable.ensureVisible(
+            context,
+            alignment: 0.5,
+            duration: const Duration(milliseconds: 240),
+            curve: Curves.easeOutCubic,
+          );
+        }
       }
     }
   }

@@ -34,11 +34,13 @@ class TvModeService extends ChangeNotifier {
 
     try {
       final prefs = await SharedPreferences.getInstance();
-      if (prefs.containsKey(_prefKey)) {
+      if (_isHardwareTv) {
+        // Genuine Android TV / Google TV / Fire TV hardware -> ALWAYS auto-enable TV UI
+        _isTvMode = true;
+      } else if (prefs.containsKey(_prefKey)) {
         _isTvMode = prefs.getBool(_prefKey) ?? false;
       } else {
-        // Auto-enable TV mode if running on genuine TV hardware
-        _isTvMode = _isHardwareTv;
+        _isTvMode = false;
       }
     } catch (_) {
       _isTvMode = _isHardwareTv;

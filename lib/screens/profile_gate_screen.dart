@@ -1,13 +1,18 @@
+import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../core/constants/theme_constants.dart';
 import '../core/network/api_service.dart';
+import '../core/services/tv_mode_service.dart';
 import '../models/media_item.dart';
 import '../providers/media_provider.dart';
 import '../providers/profile_provider.dart';
 import '../widgets/profile_avatar.dart';
+import '../widgets/tv_back_button.dart';
+import '../widgets/tv_focusable.dart';
 import '../services/avatar_service.dart';
 import 'choose_icon_screen.dart';
 import 'edit_profile_screen.dart';
@@ -488,6 +493,14 @@ class _ProfileGateScreenState extends State<ProfileGateScreen> {
         ? ApiService.getImageUrl(featuredItem.backdropPath ?? featuredItem.posterPath, size: 'original')
         : '';
 
+    final isDesktopOrTv = MediaQuery.of(context).size.width >= 600 ||
+        TvModeService().isTvMode ||
+        (!kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS));
+
+    if (isDesktopOrTv) {
+      return _buildDesktopTvScreen(context, profiles, featuredItem, heroImageUrl);
+    }
+
     final screenHeight = MediaQuery.of(context).size.height;
 
     return Scaffold(
@@ -748,6 +761,272 @@ class _ProfileGateScreenState extends State<ProfileGateScreen> {
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildDesktopTvScreen(
+    BuildContext context,
+    List<UserProfile> profiles,
+    MediaItem? featuredItem,
+    String heroImageUrl,
+  ) {
+    return TvScreenWrapper(
+      onBack: (widget.canPop && Navigator.of(context).canPop())
+          ? () => Navigator.of(context).pop()
+          : null,
+      child: Scaffold(
+        backgroundColor: const Color(0xFF111114),
+        body: Stack(
+          fit: StackFit.expand,
+          children: [
+            // Dimmed featured backdrop
+            if (heroImageUrl.isNotEmpty)
+              Positioned.fill(
+                child: Opacity(
+                  opacity: 0.28,
+                  child: CachedNetworkImage(
+                    imageUrl: heroImageUrl,
+                    fit: BoxFit.cover,
+                    alignment: Alignment.center,
+                    placeholder: (_, __) => Container(color: const Color(0xFF111114)),
+                    errorWidget: (_, __, ___) => Container(color: const Color(0xFF111114)),
+                  ),
+                ),
+              ),
+
+            // Vignette gradient overlay
+            Positioned.fill(
+              child: Container(
+                decoration: BoxDecoration(
+                  gradient: RadialGradient(
+                    center: Alignment.center,
+                    radius: 1.1,
+                    colors: [
+                      Colors.black.withValues(alpha: 0.45),
+                      const Color(0xFF0F0F12).withValues(alpha: 0.95),
+                      const Color(0xFF0A0A0D),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+
+            // Top-left: VOIDFLIX logo + optional back button
+            Positioned(
+              top: 36,
+              left: 48,
+              child: Row(
+                children: [
+                  if (widget.canPop && Navigator.of(context).canPop()) ...[
+                    TvBackButton(
+                      showBackground: true,
+                      onPressed: () => Navigator.of(context).pop(),
+                    ),
+                    const SizedBox(width: 16),
+                  ],
+                  RichText(
+                    text: TextSpan(
+                      children: [
+                        TextSpan(
+                          text: 'VOID',
+                          style: GoogleFonts.bebasNeue(
+                            fontSize: 34,
+                            fontWeight: FontWeight.w900,
+                            color: AppTheme.primaryRed,
+                            letterSpacing: 2.5,
+                          ),
+                        ),
+                        TextSpan(
+                          text: 'FLIX',
+                          style: GoogleFonts.bebasNeue(
+                            fontSize: 34,
+                            fontWeight: FontWeight.w900,
+                            color: Colors.white,
+                            letterSpacing: 2.5,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+
+            // Center: "Who's watching?" + Profiles Row + Manage Profiles button
+            Center(
+              child: SingleChildScrollView(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 24),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        "Who's watching?",
+                        style: GoogleFonts.inter(
+                          fontSize: 44,
+                          fontWeight: FontWeight.w500,
+                          color: Colors.white,
+                          letterSpacing: -0.5,
+                        ),
+                      ),
+                      const SizedBox(height: 42),
+
+                      // Profile Cards Wrap
+                      Wrap(
+                        spacing: 32,
+                        runSpacing: 24,
+                        alignment: WrapAlignment.center,
+                        children: [
+                          ...profiles.map((profile) {
+                            return TvFocusable(
+                              scaleFactor: 1.08,
+                              glowColor: AppTheme.primaryRed,
+                              borderRadius: BorderRadius.circular(12),
+                              onPressed: () => _onProfileTapped(profile),
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Stack(
+                                    clipBehavior: Clip.none,
+                                    children: [
+                                      ProfileAvatarTile.fromProfile(
+                                        profile: profile,
+                                        size: 130,
+                                        showEditBadge: _isManaging,
+                                      ),
+                                      if (profile.isLocked && !_isManaging)
+                                        Positioned(
+                                          right: 6,
+                                          bottom: 6,
+                                          child: Container(
+                                            padding: const EdgeInsets.all(5),
+                                            decoration: const BoxDecoration(
+                                              color: Color(0xFF141217),
+                                              shape: BoxShape.circle,
+                                            ),
+                                            child: const Icon(Icons.lock_rounded, color: Colors.amber, size: 20),
+                                          ),
+                                        ),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 14),
+                                  Text(
+                                    profile.name,
+                                    style: GoogleFonts.inter(
+                                      fontSize: 16,
+                                      color: Colors.white70,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            );
+                          }),
+
+                          // Add Profile Card (up to 5 profiles)
+                          if (profiles.length < 5)
+                            TvFocusable(
+                              scaleFactor: 1.08,
+                              glowColor: Colors.white,
+                              borderRadius: BorderRadius.circular(12),
+                              onPressed: _showAddProfileModal,
+                              child: Column(
+                                mainAxisSize: MainAxisSize.min,
+                                children: [
+                                  Container(
+                                    width: 130,
+                                    height: 130,
+                                    decoration: BoxDecoration(
+                                      color: Colors.black.withValues(alpha: 0.4),
+                                      borderRadius: BorderRadius.circular(12),
+                                      border: Border.all(color: Colors.white30, width: 1.5),
+                                    ),
+                                    child: const Center(
+                                      child: Icon(Icons.add_rounded, size: 54, color: Colors.white54),
+                                    ),
+                                  ),
+                                  const SizedBox(height: 14),
+                                  Text(
+                                    'Add Profile',
+                                    style: GoogleFonts.inter(
+                                      fontSize: 16,
+                                      color: Colors.white54,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                        ],
+                      ),
+
+                      const SizedBox(height: 52),
+
+                      // [ MANAGE PROFILES ] Outlined Pill Button
+                      TvFocusable(
+                        scaleFactor: 1.05,
+                        glowColor: Colors.white,
+                        borderRadius: BorderRadius.circular(4),
+                        onPressed: () => setState(() => _isManaging = !_isManaging),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 12),
+                          decoration: BoxDecoration(
+                            color: _isManaging ? Colors.white : Colors.transparent,
+                            borderRadius: BorderRadius.circular(4),
+                            border: Border.all(
+                              color: _isManaging ? Colors.white : Colors.white54,
+                              width: 1.2,
+                            ),
+                          ),
+                          child: Text(
+                            _isManaging ? 'DONE' : 'MANAGE PROFILES',
+                            style: GoogleFonts.inter(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                              color: _isManaging ? Colors.black : Colors.white70,
+                              letterSpacing: 2.0,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+
+            // Bottom-left featured badge
+            if (featuredItem != null)
+              Positioned(
+                left: 48,
+                bottom: 32,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      featuredItem.title.toUpperCase(),
+                      style: GoogleFonts.inter(
+                        fontSize: 14,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.white,
+                        letterSpacing: 1.2,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      'Watch the Limited Series now',
+                      style: GoogleFonts.inter(
+                        fontSize: 12,
+                        color: Colors.white60,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }

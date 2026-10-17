@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:google_fonts/google_fonts.dart';
 import '../core/constants/theme_constants.dart';
 import '../core/services/cast_service.dart';
 
@@ -75,7 +76,7 @@ class _CastDialogState extends State<CastDialog> {
       _connectingDeviceName = device.friendlyName;
     });
 
-    final success = await _castService.castMedia(
+    await _castService.castMedia(
       device: device,
       videoUrl: widget.videoUrl,
       title: widget.title,
@@ -89,9 +90,6 @@ class _CastDialogState extends State<CastDialog> {
         _isConnecting = false;
         _connectingDeviceName = null;
       });
-      if (success) {
-        // Stay in modal to allow immediate playback control!
-      }
     }
   }
 
@@ -126,13 +124,13 @@ class _CastDialogState extends State<CastDialog> {
         maxHeight: MediaQuery.of(context).size.height * 0.75,
       ),
       decoration: const BoxDecoration(
-        color: Color(0xFF14141E),
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+        color: Color(0xFF191919),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black54,
-            blurRadius: 16,
-            offset: Offset(0, -4),
+            color: Colors.black87,
+            blurRadius: 24,
+            offset: Offset(0, -6),
           ),
         ],
       ),
@@ -142,11 +140,11 @@ class _CastDialogState extends State<CastDialog> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // Handle bar
+            // Netflix clean drag handle
             Center(
               child: Container(
-                margin: const EdgeInsets.only(top: 10, bottom: 6),
-                width: 38,
+                margin: const EdgeInsets.only(top: 10, bottom: 8),
+                width: 36,
                 height: 4,
                 decoration: BoxDecoration(
                   color: Colors.white24,
@@ -155,74 +153,51 @@ class _CastDialogState extends State<CastDialog> {
               ),
             ),
 
-            // Header
+            // Header (Netflix: "Connect to a device")
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
               child: Row(
                 children: [
-                  Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: isCasting ? const Color(0xFF00D2FF).withValues(alpha: 0.15) : Colors.white10,
-                      shape: BoxShape.circle,
-                    ),
-                    child: Icon(
-                      isCasting ? Icons.cast_connected_rounded : Icons.cast_rounded,
-                      color: isCasting ? const Color(0xFF00D2FF) : Colors.white,
-                      size: 22,
-                    ),
+                  Icon(
+                    isCasting ? Icons.cast_connected_rounded : Icons.cast_rounded,
+                    color: isCasting ? AppTheme.primaryRed : Colors.white,
+                    size: 22,
                   ),
                   const SizedBox(width: 12),
                   Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          isCasting ? 'Casting to ${device?.friendlyName ?? "TV"}' : 'Cast to TV',
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 17,
-                            fontWeight: FontWeight.bold,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        Text(
-                          isCasting
-                              ? 'Active Playback Control'
-                              : 'Select your Smart TV or Streaming Device',
-                          style: const TextStyle(
-                            color: Colors.white54,
-                            fontSize: 12,
-                          ),
-                        ),
-                      ],
+                    child: Text(
+                      isCasting ? 'Connected to ${device?.friendlyName ?? "TV"}' : 'Connect to a device',
+                      style: GoogleFonts.inter(
+                        color: Colors.white,
+                        fontSize: 16,
+                        fontWeight: FontWeight.bold,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
                     ),
                   ),
                   if (!isCasting)
                     IconButton(
                       icon: _castService.isScanning
                           ? const SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.primaryRed),
+                              width: 16,
+                              height: 16,
+                              child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white70),
                             )
-                          : const Icon(Icons.refresh_rounded, color: Colors.white70),
-                      tooltip: 'Scan for Devices',
-                      onPressed: _castService.isScanning
-                          ? null
-                          : () => _castService.startDiscovery(),
+                          : const Icon(Icons.refresh_rounded, color: Colors.white70, size: 20),
+                      tooltip: 'Rescan',
+                      onPressed: _castService.isScanning ? null : () => _castService.startDiscovery(),
                     ),
                   IconButton(
-                    icon: const Icon(Icons.close_rounded, color: Colors.white70),
+                    icon: const Icon(Icons.close_rounded, color: Colors.white70, size: 22),
                     onPressed: () => Navigator.of(context).pop(),
                   ),
                 ],
               ),
             ),
-            const Divider(color: Color(0xFF262638), height: 1),
+            const Divider(color: Color(0xFF2B2B2B), height: 1),
 
-            // Body: Active Cast Remote vs Device List
+            // Content
             Flexible(
               child: SingleChildScrollView(
                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 20),
@@ -235,10 +210,6 @@ class _CastDialogState extends State<CastDialog> {
     );
   }
 
-  // ═══════════════════════════════════════════════════════════════
-  // ACTIVE REMOTE CONTROL VIEW
-  // ═══════════════════════════════════════════════════════════════
-
   Widget _buildActiveRemoteControl() {
     final status = _castService.status;
     final isPlaying = status == CastPlaybackStatus.playing;
@@ -249,23 +220,23 @@ class _CastDialogState extends State<CastDialog> {
 
     return Column(
       children: [
-        // Media Overview Banner
+        // Media Overview Card
         Container(
           padding: const EdgeInsets.all(12),
           decoration: BoxDecoration(
-            color: const Color(0xFF1E1E2C),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: const Color(0xFF2E2E42)),
+            color: const Color(0xFF222222),
+            borderRadius: BorderRadius.circular(8),
+            border: Border.all(color: Colors.white12),
           ),
           child: Row(
             children: [
               if (widget.posterUrl != null && widget.posterUrl!.isNotEmpty)
                 ClipRRect(
-                  borderRadius: BorderRadius.circular(8),
+                  borderRadius: BorderRadius.circular(4),
                   child: CachedNetworkImage(
                     imageUrl: widget.posterUrl!,
-                    width: 50,
-                    height: 72,
+                    width: 44,
+                    height: 64,
                     fit: BoxFit.cover,
                     placeholder: (_, __) => Container(color: Colors.black26),
                     errorWidget: (_, __, ___) => Container(color: Colors.black26),
@@ -282,36 +253,34 @@ class _CastDialogState extends State<CastDialog> {
                           width: 8,
                           height: 8,
                           decoration: const BoxDecoration(
-                            color: Color(0xFF00E676),
+                            color: Color(0xFF46D369),
                             shape: BoxShape.circle,
                           ),
                         ),
                         const SizedBox(width: 6),
                         const Text(
-                          'CASTING LIVE',
+                          'NOW CASTING',
                           style: TextStyle(
-                            color: Color(0xFF00E676),
-                            fontSize: 11,
+                            color: Color(0xFF46D369),
+                            fontSize: 10,
                             fontWeight: FontWeight.bold,
-                            letterSpacing: 0.8,
+                            letterSpacing: 1.0,
                           ),
                         ),
                       ],
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      _castService.currentTitle.isNotEmpty
-                          ? _castService.currentTitle
-                          : widget.title,
-                      style: const TextStyle(
+                      widget.title,
+                      style: GoogleFonts.inter(
                         color: Colors.white,
-                        fontSize: 15,
-                        fontWeight: FontWeight.bold,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
                       ),
-                      maxLines: 2,
+                      maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                     ),
-                    const SizedBox(height: 4),
+                    const SizedBox(height: 3),
                     Text(
                       _castService.connectedDevice?.friendlyName ?? 'Smart TV',
                       style: const TextStyle(color: Colors.white54, fontSize: 12),
@@ -324,7 +293,7 @@ class _CastDialogState extends State<CastDialog> {
         ),
         const SizedBox(height: 16),
 
-        // Scrubbing Bar
+        // Scrubber
         Column(
           children: [
             SliderTheme(
@@ -332,7 +301,7 @@ class _CastDialogState extends State<CastDialog> {
                 activeTrackColor: AppTheme.primaryRed,
                 inactiveTrackColor: Colors.white24,
                 thumbColor: AppTheme.primaryRed,
-                trackHeight: 3.5,
+                trackHeight: 3.0,
                 thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 6),
                 overlayShape: const RoundSliderOverlayShape(overlayRadius: 12),
               ),
@@ -360,105 +329,67 @@ class _CastDialogState extends State<CastDialog> {
         ),
         const SizedBox(height: 12),
 
-        // Remote Controls: -10s, Play/Pause, +10s
+        // Controls: -10s, Play/Pause, +10s
         Row(
           mainAxisAlignment: MainAxisAlignment.center,
           children: [
             IconButton(
-              iconSize: 38,
+              iconSize: 36,
               icon: const Icon(Icons.replay_10_rounded, color: Colors.white),
               onPressed: () => _castService.seekRelative(-10),
             ),
-            const SizedBox(width: 24),
+            const SizedBox(width: 28),
             Container(
               decoration: const BoxDecoration(
-                color: AppTheme.primaryRed,
+                color: Colors.white,
                 shape: BoxShape.circle,
               ),
               child: IconButton(
-                iconSize: 42,
+                iconSize: 36,
                 icon: Icon(
                   isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
-                  color: Colors.white,
+                  color: Colors.black,
                 ),
                 onPressed: () => _castService.togglePlayPause(),
               ),
             ),
-            const SizedBox(width: 24),
+            const SizedBox(width: 28),
             IconButton(
-              iconSize: 38,
+              iconSize: 36,
               icon: const Icon(Icons.forward_10_rounded, color: Colors.white),
               onPressed: () => _castService.seekRelative(10),
             ),
           ],
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 20),
 
-        // Volume Slider (RenderingControl)
-        if (_castService.connectedDevice?.renderingControlUrl != null)
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Row(
-              children: [
-                const Icon(Icons.volume_down_rounded, color: Colors.white54, size: 20),
-                Expanded(
-                  child: SliderTheme(
-                    data: SliderTheme.of(context).copyWith(
-                      activeTrackColor: const Color(0xFF00D2FF),
-                      inactiveTrackColor: Colors.white12,
-                      thumbColor: const Color(0xFF00D2FF),
-                      trackHeight: 3,
-                      thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 5),
-                    ),
-                    child: Slider(
-                      value: _castService.volume.toDouble(),
-                      min: 0.0,
-                      max: 100.0,
-                      onChanged: (val) => _castService.setVolume(val.toInt()),
-                    ),
-                  ),
-                ),
-                const Icon(Icons.volume_up_rounded, color: Colors.white54, size: 20),
-              ],
-            ),
-          ),
-        const SizedBox(height: 16),
-
-        // Disconnect & Switch TV Actions
+        // Actions: Disconnect & Switch TV
         Row(
           children: [
             Expanded(
-              child: OutlinedButton.icon(
+              child: OutlinedButton(
                 style: OutlinedButton.styleFrom(
-                  side: const BorderSide(color: Color(0xFF38384E)),
+                  side: const BorderSide(color: Colors.white24),
                   foregroundColor: Colors.white70,
                   padding: const EdgeInsets.symmetric(vertical: 12),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
                 ),
-                icon: const Icon(Icons.tv_rounded, size: 18),
-                label: const Text('Switch TV'),
-                onPressed: () {
-                  _castService.startDiscovery();
-                },
+                child: const Text('Switch Device', style: TextStyle(fontWeight: FontWeight.w600)),
+                onPressed: () => _castService.startDiscovery(),
               ),
             ),
             const SizedBox(width: 12),
             Expanded(
-              child: ElevatedButton.icon(
+              child: ElevatedButton(
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: const Color(0xFF281418),
-                  foregroundColor: const Color(0xFFFF5252),
+                  backgroundColor: const Color(0xFF2B1417),
+                  foregroundColor: const Color(0xFFFF4D4D),
+                  side: const BorderSide(color: Color(0xFF6B2228)),
                   padding: const EdgeInsets.symmetric(vertical: 12),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(8),
-                    side: const BorderSide(color: Color(0xFF5A1A22)),
-                  ),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
                 ),
-                icon: const Icon(Icons.stop_circle_outlined, size: 18),
-                label: const Text('Stop Cast'),
-                onPressed: () async {
-                  await _castService.disconnect();
-                },
+                child: const Text('Disconnect', style: TextStyle(fontWeight: FontWeight.bold)),
+                onPressed: () async => await _castService.disconnect(),
               ),
             ),
           ],
@@ -467,107 +398,25 @@ class _CastDialogState extends State<CastDialog> {
     );
   }
 
-  // ═══════════════════════════════════════════════════════════════
-  // DEVICE DISCOVERY & PICKER VIEW
-  // ═══════════════════════════════════════════════════════════════
-
   Widget _buildDeviceList() {
     final devices = _castService.devices;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        // 1. External Player Caster Card (100% Guaranteed Compatibility)
-        Container(
-          margin: const EdgeInsets.only(bottom: 14),
-          decoration: BoxDecoration(
-            gradient: const LinearGradient(
-              colors: [Color(0xFF1E2838), Color(0xFF161E2C)],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-            ),
-            borderRadius: BorderRadius.circular(12),
-            border: Border.all(color: const Color(0xFF2B3A52)),
-          ),
-          child: Material(
-            color: Colors.transparent,
-            child: InkWell(
-              borderRadius: BorderRadius.circular(12),
-              onTap: _handleExternalPlayer,
-              child: Padding(
-                padding: const EdgeInsets.all(14),
-                child: Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(10),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF0071eb).withValues(alpha: 0.2),
-                        borderRadius: BorderRadius.circular(10),
-                      ),
-                      child: const Icon(
-                        Icons.open_in_new_rounded,
-                        color: Color(0xFF3897FF),
-                        size: 24,
-                      ),
-                    ),
-                    const SizedBox(width: 14),
-                    const Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Row(
-                            children: [
-                              Text(
-                                'Cast via External App',
-                                style: TextStyle(
-                                  color: Colors.white,
-                                  fontSize: 15,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                              SizedBox(width: 6),
-                              Text(
-                                'UNIVERSAL',
-                                style: TextStyle(
-                                  color: Color(0xFF00D2FF),
-                                  fontSize: 10,
-                                  fontWeight: FontWeight.bold,
-                                ),
-                              ),
-                            ],
-                          ),
-                          SizedBox(height: 3),
-                          Text(
-                            'Web Video Caster, BubbleUPnP, VLC, MX Player',
-                            style: TextStyle(
-                              color: Colors.white54,
-                              fontSize: 12,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const Icon(Icons.chevron_right_rounded, color: Colors.white38),
-                  ],
-                ),
-              ),
-            ),
-          ),
-        ),
-
-        // Section Title: Available Smart TVs
+        // Available Devices Header
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
           child: Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               const Text(
-                'DISCOVERED SMART TVS & RENDERERS',
+                'AVAILABLE DEVICES',
                 style: TextStyle(
                   color: Colors.white54,
                   fontSize: 11,
                   fontWeight: FontWeight.bold,
-                  letterSpacing: 0.8,
+                  letterSpacing: 1.0,
                 ),
               ),
               if (_castService.isScanning)
@@ -579,88 +428,70 @@ class _CastDialogState extends State<CastDialog> {
                       child: CircularProgressIndicator(strokeWidth: 1.5, color: Colors.white54),
                     ),
                     SizedBox(width: 6),
-                    Text(
-                      'Scanning Wi-Fi...',
-                      style: TextStyle(color: Colors.white54, fontSize: 11),
-                    ),
+                    Text('Searching...', style: TextStyle(color: Colors.white38, fontSize: 11)),
                   ],
                 ),
             ],
           ),
         ),
 
-        // Device Items
+        // Device Items (Clean Netflix style)
         if (devices.isNotEmpty)
           ...devices.map((dev) {
             final isCurrentConnecting = _isConnecting && _connectingDeviceName == dev.friendlyName;
             return Container(
-              margin: const EdgeInsets.only(bottom: 8),
+              margin: const EdgeInsets.only(bottom: 6),
               decoration: BoxDecoration(
-                color: const Color(0xFF1E1E2C),
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: const Color(0xFF262638)),
+                color: const Color(0xFF222222),
+                borderRadius: BorderRadius.circular(8),
+                border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
               ),
               child: ListTile(
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                leading: Container(
-                  padding: const EdgeInsets.all(8),
-                  decoration: BoxDecoration(
-                    color: Colors.white.withValues(alpha: 0.05),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: const Icon(Icons.tv_rounded, color: Colors.white, size: 22),
-                ),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                leading: const Icon(Icons.tv_rounded, color: Colors.white70, size: 24),
                 title: Text(
                   dev.friendlyName,
-                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 14),
+                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w500, fontSize: 14),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
                 subtitle: Text(
-                  '${dev.manufacturer} • ${dev.host}',
-                  style: const TextStyle(color: Colors.white38, fontSize: 11),
+                  dev.manufacturer.isNotEmpty ? dev.manufacturer : 'Smart TV',
+                  style: const TextStyle(color: Colors.white38, fontSize: 12),
                 ),
                 trailing: isCurrentConnecting
                     ? const SizedBox(
-                        width: 20,
-                        height: 20,
+                        width: 18,
+                        height: 18,
                         child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.primaryRed),
                       )
-                    : const Icon(Icons.play_circle_outline_rounded, color: Color(0xFF00D2FF), size: 24),
+                    : const Icon(Icons.chevron_right_rounded, color: Colors.white38),
                 onTap: isCurrentConnecting ? null : () => _handleDeviceSelected(dev),
               ),
             );
           })
         else if (!_castService.isScanning)
           Container(
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: const Color(0xFF181824),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: const Color(0xFF242436)),
-            ),
+            padding: const EdgeInsets.symmetric(vertical: 24, horizontal: 16),
+            alignment: Alignment.center,
             child: Column(
               children: [
                 const Icon(Icons.tv_off_rounded, color: Colors.white38, size: 36),
-                const SizedBox(height: 8),
+                const SizedBox(height: 10),
                 const Text(
-                  'No Smart TVs Found on this Wi-Fi',
+                  'No devices found',
                   style: TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 14),
                 ),
                 const SizedBox(height: 4),
                 const Text(
-                  'Ensure your TV (Samsung, LG, Sony, Roku, Fire TV) is on the same Wi-Fi network with DLNA/Media Sharing enabled.',
+                  'Make sure your Smart TV or streaming device is on the same Wi-Fi network.',
                   textAlign: TextAlign.center,
                   style: TextStyle(color: Colors.white38, fontSize: 12),
                 ),
                 const SizedBox(height: 12),
-                OutlinedButton.icon(
-                  style: OutlinedButton.styleFrom(
-                    side: const BorderSide(color: Color(0xFF38384E)),
-                    foregroundColor: Colors.white,
-                  ),
-                  icon: const Icon(Icons.refresh_rounded, size: 16),
-                  label: const Text('Rescan Network'),
+                TextButton.icon(
+                  icon: const Icon(Icons.refresh_rounded, size: 16, color: Colors.white70),
+                  label: const Text('Search again', style: TextStyle(color: Colors.white70, fontSize: 13)),
                   onPressed: () => _castService.startDiscovery(),
                 ),
               ],
@@ -668,19 +499,39 @@ class _CastDialogState extends State<CastDialog> {
           )
         else
           Container(
-            padding: const EdgeInsets.symmetric(vertical: 24),
+            padding: const EdgeInsets.symmetric(vertical: 28),
             alignment: Alignment.center,
             child: const Column(
               children: [
-                CircularProgressIndicator(strokeWidth: 2.5, color: AppTheme.primaryRed),
+                CircularProgressIndicator(strokeWidth: 2, color: AppTheme.primaryRed),
                 SizedBox(height: 12),
                 Text(
-                  'Searching for Smart TVs & Media Renderers...',
+                  'Searching for devices on Wi-Fi...',
                   style: TextStyle(color: Colors.white54, fontSize: 13),
                 ),
               ],
             ),
           ),
+
+        const SizedBox(height: 12),
+        const Divider(color: Color(0xFF2B2B2B), height: 1),
+        const SizedBox(height: 8),
+
+        // External Player fallback (Clean & muted)
+        ListTile(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+          leading: const Icon(Icons.open_in_new_rounded, color: Colors.white60, size: 20),
+          title: const Text(
+            'Play in external app',
+            style: TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.w500),
+          ),
+          subtitle: const Text(
+            'VLC, BubbleUPnP, Web Video Caster',
+            style: TextStyle(color: Colors.white38, fontSize: 11),
+          ),
+          onTap: _handleExternalPlayer,
+        ),
       ],
     );
   }

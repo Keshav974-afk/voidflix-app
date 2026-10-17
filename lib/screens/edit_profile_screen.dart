@@ -7,6 +7,7 @@ import '../providers/profile_provider.dart';
 import '../widgets/profile_avatar.dart';
 import 'choose_icon_screen.dart';
 import 'subtitle_appearance_screen.dart';
+import '../widgets/tv_back_button.dart';
 
 class EditProfileScreen extends StatefulWidget {
   final UserProfile profile;
@@ -386,29 +387,28 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   Widget build(BuildContext context) {
     final totalProfiles = context.watch<ProfileProvider>().profiles.length;
 
-    return Scaffold(
-      backgroundColor: Colors.black,
-      appBar: AppBar(
+    return TvScreenWrapper(
+      onBack: () => Navigator.of(context).pop(),
+      child: Scaffold(
         backgroundColor: Colors.black,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.white),
-          onPressed: () => Navigator.of(context).pop(),
-        ),
-        title: const Text(
-          'Edit Profile',
-          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 20),
-        ),
-        actions: [
-          TextButton(
-            onPressed: _saveProfile,
-            child: const Text(
-              'Save',
-              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
-            ),
+        appBar: AppBar(
+          backgroundColor: Colors.black,
+          elevation: 0,
+          leading: const TvBackButton(),
+          title: const Text(
+            'Edit Profile',
+            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 20),
           ),
-        ],
-      ),
+          actions: [
+            TextButton(
+              onPressed: _saveProfile,
+              child: const Text(
+                'Save',
+                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+              ),
+            ),
+          ],
+        ),
       body: ListView(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
         children: [
@@ -635,8 +635,9 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
           const SizedBox(height: 40),
         ],
       ),
-    );
-  }
+    ),
+  );
+}
 
   Widget _buildSettingsTile({
     required IconData icon,

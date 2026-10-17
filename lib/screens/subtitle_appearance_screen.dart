@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../core/constants/theme_constants.dart';
+import '../widgets/tv_back_button.dart';
 
 class SubtitleAppearanceScreen extends StatefulWidget {
   const SubtitleAppearanceScreen({super.key});
@@ -185,20 +186,19 @@ class _SubtitleAppearanceScreenState extends State<SubtitleAppearanceScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: Colors.black,
-      appBar: AppBar(
+    return TvScreenWrapper(
+      onBack: () => Navigator.of(context).pop(),
+      child: Scaffold(
         backgroundColor: Colors.black,
-        elevation: 0,
-        leading: IconButton(
-          icon: const Icon(Icons.arrow_back, color: Colors.white),
-          onPressed: () => Navigator.of(context).pop(),
+        appBar: AppBar(
+          backgroundColor: Colors.black,
+          elevation: 0,
+          leading: const TvBackButton(),
+          title: const Text(
+            'Subtitle Appearance',
+            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 19),
+          ),
         ),
-        title: const Text(
-          'Subtitle Appearance',
-          style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 19),
-        ),
-      ),
       body: ListView(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
         children: [
@@ -465,8 +465,9 @@ class _SubtitleAppearanceScreenState extends State<SubtitleAppearanceScreen> {
           const SizedBox(height: 36),
         ],
       ),
-    );
-  }
+    ),
+  );
+}
 
   Widget _buildSizeOption(int index, String label, double fontSize) {
     final isSel = _textSizeIndex == index;
