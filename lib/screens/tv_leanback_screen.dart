@@ -31,11 +31,14 @@ class TvLeanbackScreen extends StatefulWidget {
 }
 
 class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
-  int _activeNavIndex = 1; // 0: Search, 1: Home, 2: Movies, 3: Series, 4: Live TV, 5: My List, 6: Settings, 7: Mobile UI
+  int _activeNavIndex = 1;
   bool _isNavRailFocused = false;
 
   MediaItem? _focusedItem;
   final ScrollController _mainScrollController = ScrollController();
+
+  // Explicit FocusNodes for the nav-rail items so we can arrow-key between them
+  final List<FocusNode> _navFocusNodes = List.generate(9, (_) => FocusNode());
 
   static const Map<int, String> _genreMap = {
     28: 'Action',
@@ -65,7 +68,6 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
   @override
   void initState() {
     super.initState();
-    // Enforce landscape orientation for Android TV
     if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
       SystemChrome.setPreferredOrientations([
         DeviceOrientation.landscapeLeft,
@@ -83,6 +85,9 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
 
   @override
   void dispose() {
+    for (final node in _navFocusNodes) {
+      node.dispose();
+    }
     _mainScrollController.dispose();
     super.dispose();
   }
@@ -117,7 +122,6 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
         Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SettingsScreen()));
         break;
       case 8:
-        // Switch back to Desktop / Mobile UI
         TvModeService().setTvMode(false);
         if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
           SystemChrome.setPreferredOrientations([
@@ -177,18 +181,18 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
       body: Row(
         children: [
           // ═══════════════════════════════════════════════════════════
-          // 1. LEFT EXPANDABLE NAVIGATION RAIL (TV 10-Foot Style)
+          // 1. LEFT NAVIGATION RAIL (TV D-Pad Up/Down fixed)
           // ═══════════════════════════════════════════════════════════
           _buildNavigationRail(),
 
           // ═══════════════════════════════════════════════════════════
-          // 2. MAIN 10-FOOT VIEWPORT (Dynamic Hero + Rows)
+          // 2. MAIN 10-FOOT VIEWPORT
           // ═══════════════════════════════════════════════════════════
           Expanded(
             child: Stack(
               fit: StackFit.expand,
               children: [
-                // Top Dynamic Backdrop (Transitions smoothly with D-pad item focus)
+                // Top Dynamic Backdrop
                 Positioned(
                   top: 0,
                   left: 0,
@@ -202,12 +206,10 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
                   controller: _mainScrollController,
                   padding: const EdgeInsets.only(bottom: 40),
                   children: [
-                    // Top Billboard Details (Title, Badges, Synopsis, Action Buttons)
                     _buildHeroBillboardDetails(displayHeroItem),
 
                     const SizedBox(height: 16),
 
-                    // Content Carousels
                     if (historyProvider.items.isNotEmpty)
                       _buildContinueWatchingRow(historyProvider),
 
@@ -239,17 +241,17 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
   }
 
   // ═══════════════════════════════════════════════════════════════
-  // LEFT NAVIGATION RAIL
+  // LEFT NAVIGATION RAIL — D-pad Up/Down fixed with explicit FocusNodes
   // ═══════════════════════════════════════════════════════════════
 
   Widget _buildNavigationRail() {
     final isExpanded = _isNavRailFocused;
-    final railWidth = isExpanded ? 210.0 : 68.0;
+    final railWidth = isExpanded ? 220.0 : 72.0;
 
     final navItems = [
       {'icon': Icons.search_rounded, 'label': 'Search'},
       {'icon': Icons.home_rounded, 'label': 'Home'},
-      {'icon': Icons.calendar_today_rounded, 'label': 'New & Popular'},
+      {'icon': Icons.local_fire_department_rounded, 'label': 'New & Popular'},
       {'icon': Icons.tv_rounded, 'label': 'Series'},
       {'icon': Icons.movie_outlined, 'label': 'Movies'},
       {'icon': Icons.add_rounded, 'label': 'My List'},
@@ -263,10 +265,38 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
       },
     ];
 
+    // Key handler: intercept up/down arrows and move focus within our list
+    KeyEventResult handleNavKey(FocusNode node, KeyEvent event) {
+      if (event is! KeyDownEvent) return KeyEventResult.ignored;
+      final key = event.logicalKey;
+      final currentIdx = _navFocusNodes.indexOf(node);
+      if (currentIdx < 0) return KeyEventResult.ignored;
+
+      if (key == LogicalKeyboardKey.arrowDown) {
+        final next = (currentIdx + 1).clamp(0, navItems.length - 1);
+        if (next != currentIdx) {
+          _navFocusNodes[next].requestFocus();
+          return KeyEventResult.handled;
+        }
+      } else if (key == LogicalKeyboardKey.arrowUp) {
+        final prev = (currentIdx - 1).clamp(0, navItems.length - 1);
+        if (prev != currentIdx) {
+          _navFocusNodes[prev].requestFocus();
+          return KeyEventResult.handled;
+        }
+      } else if (key == LogicalKeyboardKey.arrowRight) {
+        // Move focus to the main content area
+        FocusScope.of(context).focusInDirection(TraversalDirection.right);
+        return KeyEventResult.handled;
+      }
+      return KeyEventResult.ignored;
+    }
+
     return Focus(
       onFocusChange: (focused) {
         setState(() => _isNavRailFocused = focused);
       },
+      skipTraversal: true,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 240),
         curve: Curves.easeOutCubic,
@@ -295,8 +325,8 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
                 child: Row(
                   children: [
                     Container(
-                      width: 32,
-                      height: 32,
+                      width: 36,
+                      height: 36,
                       decoration: const BoxDecoration(
                         color: AppTheme.primaryRed,
                         borderRadius: BorderRadius.all(Radius.circular(6)),
@@ -306,7 +336,7 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
                         'V',
                         style: TextStyle(
                           color: Colors.white,
-                          fontSize: 20,
+                          fontSize: 22,
                           fontWeight: FontWeight.w900,
                         ),
                       ),
@@ -330,7 +360,7 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
               const Divider(color: Color(0xFF1E1E2C), height: 1),
               const SizedBox(height: 8),
 
-              // Navigation Links
+              // Navigation Links — explicit FocusNodes + up/down key handler
               Expanded(
                 child: ListView.builder(
                   itemCount: navItems.length,
@@ -338,55 +368,77 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
                     final item = navItems[idx];
                     final isCurrentActive = _activeNavIndex == idx;
 
-                    return TvFocusable(
-                      scaleFactor: 1.02,
-                      glowColor: AppTheme.primaryRed,
-                      borderRadius: BorderRadius.circular(10),
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      onPressed: () => _onNavItemSelected(idx),
-                      child: Container(
-                        height: 48,
-                        padding: const EdgeInsets.symmetric(horizontal: 12),
-                        decoration: BoxDecoration(
-                          color: isCurrentActive
-                              ? AppTheme.primaryRed.withValues(alpha: 0.2)
-                              : Colors.transparent,
-                          borderRadius: BorderRadius.circular(8),
-                          border: isCurrentActive
-                              ? Border.all(color: AppTheme.primaryRed.withValues(alpha: 0.4), width: 1)
-                              : null,
-                        ),
-                        child: Row(
-                          children: [
-                            Icon(
-                              item['icon'] as IconData,
-                              color: isCurrentActive ? AppTheme.primaryRed : Colors.white70,
-                              size: 22,
-                            ),
-                            if (isExpanded) ...[
-                              const SizedBox(width: 14),
-                              Expanded(
-                                child: Text(
-                                  item['label'] as String,
-                                  style: TextStyle(
-                                    color: isCurrentActive ? Colors.white : Colors.white70,
-                                    fontSize: 14,
-                                    fontWeight: isCurrentActive ? FontWeight.bold : FontWeight.w500,
-                                  ),
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
+                    return Focus(
+                      focusNode: _navFocusNodes[idx],
+                      onKeyEvent: handleNavKey,
+                      onFocusChange: (hasFocus) {
+                        if (hasFocus) setState(() => _isNavRailFocused = true);
+                      },
+                      child: Builder(
+                        builder: (ctx2) {
+                          final isFocused = Focus.of(ctx2).hasFocus;
+                          return GestureDetector(
+                            onTap: () => _onNavItemSelected(idx),
+                            child: AnimatedContainer(
+                              duration: const Duration(milliseconds: 180),
+                              margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                              padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 13),
+                              decoration: BoxDecoration(
+                                color: isFocused
+                                    ? AppTheme.primaryRed.withValues(alpha: 0.25)
+                                    : isCurrentActive
+                                        ? AppTheme.primaryRed.withValues(alpha: 0.12)
+                                        : Colors.transparent,
+                                borderRadius: BorderRadius.circular(10),
+                                border: isFocused
+                                    ? Border.all(color: AppTheme.primaryRed, width: 2)
+                                    : isCurrentActive
+                                        ? Border.all(color: AppTheme.primaryRed.withValues(alpha: 0.4), width: 1)
+                                        : Border.all(color: Colors.transparent, width: 2),
+                                boxShadow: isFocused
+                                    ? [
+                                        BoxShadow(
+                                          color: AppTheme.primaryRed.withValues(alpha: 0.4),
+                                          blurRadius: 12,
+                                          spreadRadius: 1,
+                                        ),
+                                      ]
+                                    : null,
                               ),
-                            ],
-                          ],
-                        ),
+                              child: Row(
+                                children: [
+                                  Icon(
+                                    item['icon'] as IconData,
+                                    color: isFocused || isCurrentActive ? AppTheme.primaryRed : Colors.white70,
+                                    size: 24,
+                                  ),
+                                  if (isExpanded) ...[
+                                    const SizedBox(width: 14),
+                                    Expanded(
+                                      child: Text(
+                                        item['label'] as String,
+                                        style: TextStyle(
+                                          color: isFocused || isCurrentActive ? Colors.white : Colors.white70,
+                                          fontSize: 15,
+                                          fontWeight: isFocused || isCurrentActive ? FontWeight.bold : FontWeight.w500,
+                                        ),
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                    ),
+                                  ],
+                                ],
+                              ),
+                            ),
+                          );
+                        },
                       ),
                     );
                   },
                 ),
               ),
 
-              // TV Mode indicator bottom badge
+              // TV Mode indicator
               if (isExpanded)
                 Padding(
                   padding: const EdgeInsets.all(16),
@@ -448,35 +500,26 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
         else
           Container(color: const Color(0xFF0D0D14)),
 
-        // Gradient Left-to-Right (Shields text)
+        // Left shield gradient
         Container(
           decoration: const BoxDecoration(
             gradient: LinearGradient(
               begin: Alignment.centerLeft,
               end: Alignment.centerRight,
               stops: [0.0, 0.45, 0.85, 1.0],
-              colors: [
-                Colors.black,
-                Color(0xCC000000),
-                Colors.transparent,
-                Colors.transparent,
-              ],
+              colors: [Colors.black, Color(0xCC000000), Colors.transparent, Colors.transparent],
             ),
           ),
         ),
 
-        // Gradient Bottom-to-Top (Smooth fade into the carousels)
+        // Bottom fade gradient
         Container(
           decoration: const BoxDecoration(
             gradient: LinearGradient(
               begin: Alignment.bottomCenter,
               end: Alignment.topCenter,
               stops: [0.0, 0.45, 1.0],
-              colors: [
-                Colors.black,
-                Color(0xDD000000),
-                Colors.transparent,
-              ],
+              colors: [Colors.black, Color(0xDD000000), Colors.transparent],
             ),
           ),
         ),
@@ -504,7 +547,7 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // V SERIES / V FILM badge (Screenshot 1)
+          // V SERIES / V FILM badge
           Row(
             children: [
               Container(
@@ -515,11 +558,7 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
                 ),
                 child: const Text(
                   'V',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w900,
-                  ),
+                  style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w900),
                 ),
               ),
               const SizedBox(width: 8),
@@ -536,19 +575,17 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
           ),
           const SizedBox(height: 10),
 
-          // Logo or Title
+          // Title
           ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 650),
             child: Text(
               item.title,
               style: const TextStyle(
                 color: Colors.white,
-                fontSize: 38,
+                fontSize: 42,
                 fontWeight: FontWeight.w900,
                 letterSpacing: -0.5,
-                shadows: [
-                  Shadow(color: Colors.black, blurRadius: 16, offset: Offset(0, 4)),
-                ],
+                shadows: [Shadow(color: Colors.black, blurRadius: 16, offset: Offset(0, 4))],
               ),
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
@@ -559,27 +596,13 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
           // Badges Row
           Row(
             children: [
-              // Match %
-              const Text(
-                '98% Match',
-                style: TextStyle(
-                  color: Color(0xFF46D369),
-                  fontWeight: FontWeight.bold,
-                  fontSize: 14,
-                ),
-              ),
+              const Text('98% Match',
+                  style: TextStyle(color: Color(0xFF46D369), fontWeight: FontWeight.bold, fontSize: 14)),
               const SizedBox(width: 12),
-
-              // Year
               if (year.isNotEmpty) ...[
-                Text(
-                  year,
-                  style: const TextStyle(color: Colors.white70, fontSize: 14, fontWeight: FontWeight.w500),
-                ),
+                Text(year, style: const TextStyle(color: Colors.white70, fontSize: 14, fontWeight: FontWeight.w500)),
                 const SizedBox(width: 12),
               ],
-
-              // Rating Badge
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                 decoration: BoxDecoration(
@@ -591,39 +614,27 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
                   children: [
                     const Icon(Icons.star_rounded, color: Color(0xFFFFD700), size: 14),
                     const SizedBox(width: 3),
-                    Text(
-                      rating,
-                      style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
-                    ),
+                    Text(rating, style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
                   ],
                 ),
               ),
               const SizedBox(width: 10),
-
-              // 4K Ultra HD badge
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(3),
                   border: Border.all(color: Colors.white38),
                 ),
-                child: const Text(
-                  '4K ULTRA HD',
-                  style: TextStyle(color: Colors.white70, fontSize: 10, fontWeight: FontWeight.bold),
-                ),
+                child: const Text('4K ULTRA HD',
+                    style: TextStyle(color: Colors.white70, fontSize: 10, fontWeight: FontWeight.bold)),
               ),
               const SizedBox(width: 12),
-
-              // Genres
-              Text(
-                genres,
-                style: const TextStyle(color: Colors.white54, fontSize: 13),
-              ),
+              Text(genres, style: const TextStyle(color: Colors.white54, fontSize: 13)),
             ],
           ),
           const SizedBox(height: 12),
 
-          // Overview Synopsis
+          // Overview
           ConstrainedBox(
             constraints: const BoxConstraints(maxWidth: 620),
             child: Text(
@@ -636,18 +647,16 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
                 color: Colors.white.withValues(alpha: 0.8),
                 fontSize: 14,
                 height: 1.45,
-                shadows: const [
-                  Shadow(color: Colors.black, blurRadius: 8),
-                ],
+                shadows: const [Shadow(color: Colors.black, blurRadius: 8)],
               ),
             ),
           ),
           const SizedBox(height: 22),
 
-          // Action Buttons: Play, More Info, Add to Watchlist (Screenshot 1)
+          // Action Buttons: Play, More Info, Add to Watchlist
           Row(
             children: [
-              // 1. Play Button
+              // Play
               TvFocusable(
                 autofocus: true,
                 scaleFactor: 1.06,
@@ -655,37 +664,31 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
                 borderRadius: BorderRadius.circular(8),
                 onPressed: () => _playMedia(item),
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 26, vertical: 12),
+                  padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 13),
                   decoration: BoxDecoration(
                     color: Colors.white,
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: const Row(
                     children: [
-                      Icon(Icons.play_arrow_rounded, color: Colors.black, size: 26),
+                      Icon(Icons.play_arrow_rounded, color: Colors.black, size: 28),
                       SizedBox(width: 8),
-                      Text(
-                        'Play',
-                        style: TextStyle(
-                          color: Colors.black,
-                          fontSize: 16,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
+                      Text('Play',
+                          style: TextStyle(color: Colors.black, fontSize: 17, fontWeight: FontWeight.bold)),
                     ],
                   ),
                 ),
               ),
               const SizedBox(width: 14),
 
-              // 2. More Info Button (Screenshot 1)
+              // More Info
               TvFocusable(
                 scaleFactor: 1.06,
                 glowColor: Colors.white70,
                 borderRadius: BorderRadius.circular(8),
                 onPressed: () => _openDetail(item),
                 child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 13),
                   decoration: BoxDecoration(
                     color: Colors.white.withValues(alpha: 0.22),
                     borderRadius: BorderRadius.circular(8),
@@ -695,21 +698,15 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
                     children: [
                       Icon(Icons.info_outline_rounded, color: Colors.white, size: 22),
                       SizedBox(width: 8),
-                      Text(
-                        'More Info',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 15,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
+                      Text('More Info',
+                          style: TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600)),
                     ],
                   ),
                 ),
               ),
               const SizedBox(width: 14),
 
-              // 3. Watchlist Button
+              // Watchlist
               Consumer<WatchlistProvider>(
                 builder: (context, watchlist, _) {
                   final inList = watchlist.isInWatchlist(item.id);
@@ -719,7 +716,7 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
                     borderRadius: BorderRadius.circular(8),
                     onPressed: () => watchlist.toggleWatchlist(item),
                     child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 13),
                       decoration: BoxDecoration(
                         color: Colors.white.withValues(alpha: 0.15),
                         borderRadius: BorderRadius.circular(8),
@@ -727,20 +724,10 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
                       ),
                       child: Row(
                         children: [
-                          Icon(
-                            inList ? Icons.check_rounded : Icons.add_rounded,
-                            color: Colors.white,
-                            size: 22,
-                          ),
+                          Icon(inList ? Icons.check_rounded : Icons.add_rounded, color: Colors.white, size: 22),
                           const SizedBox(width: 8),
-                          Text(
-                            inList ? 'In My List' : 'My List',
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 15,
-                              fontWeight: FontWeight.w600,
-                            ),
-                          ),
+                          Text(inList ? 'In My List' : 'My List',
+                              style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w600)),
                         ],
                       ),
                     ),
@@ -755,24 +742,25 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
   }
 
   // ═══════════════════════════════════════════════════════════════
-  // CONTENT CAROUSEL ROW
+  // CONTENT CAROUSEL ROW — Larger TV-optimised cards
   // ═══════════════════════════════════════════════════════════════
 
   Widget _buildMediaRow(String categoryTitle, List<MediaItem> items, {bool isLandscape = false}) {
-    final rowHeight = isLandscape ? 165.0 : 215.0;
-    final cardWidth = isLandscape ? 240.0 : 130.0;
-    final cardHeight = isLandscape ? 138.0 : 195.0;
+    // Bigger cards for 10-foot TV viewing
+    final rowHeight = isLandscape ? 195.0 : 255.0;
+    final cardWidth = isLandscape ? 290.0 : 155.0;
+    final cardHeight = isLandscape ? 165.0 : 230.0;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
-          padding: const EdgeInsets.fromLTRB(40, 20, 40, 10),
+          padding: const EdgeInsets.fromLTRB(40, 22, 40, 12),
           child: Text(
             categoryTitle,
             style: const TextStyle(
               color: Colors.white,
-              fontSize: 16,
+              fontSize: 17,
               fontWeight: FontWeight.w800,
               letterSpacing: 1.2,
             ),
@@ -791,10 +779,10 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
                   : ApiConstants.getImageUrl(item.posterPath, size: 'w342');
 
               return TvFocusable(
-                scaleFactor: 1.10,
+                scaleFactor: 1.08,
                 glowColor: AppTheme.primaryRed,
-                borderRadius: BorderRadius.circular(8),
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+                borderRadius: BorderRadius.circular(10),
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 8),
                 onFocusChange: (focused) {
                   if (focused && mounted) {
                     setState(() => _focusedItem = item);
@@ -805,7 +793,7 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
                   width: cardWidth,
                   height: cardHeight,
                   child: ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
+                    borderRadius: BorderRadius.circular(10),
                     child: Stack(
                       fit: StackFit.expand,
                       children: [
@@ -817,23 +805,21 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
                             errorWidget: (_, __, ___) => Container(
                               color: const Color(0xFF161622),
                               alignment: Alignment.center,
-                              child: Text(
-                                item.title,
-                                textAlign: TextAlign.center,
-                                style: const TextStyle(color: Colors.white54, fontSize: 11),
-                              ),
+                              child: Text(item.title,
+                                  textAlign: TextAlign.center,
+                                  style: const TextStyle(color: Colors.white54, fontSize: 12)),
                             ),
                           )
                         else
                           Container(
                             color: const Color(0xFF161622),
                             alignment: Alignment.center,
-                            child: Text(
-                              item.title,
-                              textAlign: TextAlign.center,
-                              style: const TextStyle(color: Colors.white54, fontSize: 11),
-                            ),
+                            child: Text(item.title,
+                                textAlign: TextAlign.center,
+                                style: const TextStyle(color: Colors.white54, fontSize: 12)),
                           ),
+
+                        // Bottom title bar for landscape cards
                         if (isLandscape)
                           Positioned(
                             left: 0,
@@ -846,7 +832,7 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
                                   begin: Alignment.bottomCenter,
                                   end: Alignment.topCenter,
                                   colors: [
-                                    Colors.black.withValues(alpha: 0.9),
+                                    Colors.black.withValues(alpha: 0.92),
                                     Colors.transparent,
                                   ],
                                 ),
@@ -854,6 +840,37 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
                               child: Text(
                                 item.title,
                                 maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
+                            ),
+                          ),
+
+                        // Bottom title for portrait cards
+                        if (!isLandscape)
+                          Positioned(
+                            left: 0,
+                            right: 0,
+                            bottom: 0,
+                            child: Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
+                              decoration: BoxDecoration(
+                                gradient: LinearGradient(
+                                  begin: Alignment.bottomCenter,
+                                  end: Alignment.topCenter,
+                                  colors: [
+                                    Colors.black.withValues(alpha: 0.9),
+                                    Colors.transparent,
+                                  ],
+                                ),
+                              ),
+                              child: Text(
+                                item.title,
+                                maxLines: 2,
                                 overflow: TextOverflow.ellipsis,
                                 style: const TextStyle(
                                   color: Colors.white,
@@ -886,19 +903,19 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const Padding(
-          padding: EdgeInsets.fromLTRB(40, 16, 40, 10),
+          padding: EdgeInsets.fromLTRB(40, 16, 40, 12),
           child: Text(
             'CONTINUE WATCHING',
             style: TextStyle(
               color: Colors.white,
-              fontSize: 16,
+              fontSize: 17,
               fontWeight: FontWeight.w800,
               letterSpacing: 1.2,
             ),
           ),
         ),
         SizedBox(
-          height: 190,
+          height: 210,
           child: ListView.builder(
             scrollDirection: Axis.horizontal,
             padding: const EdgeInsets.symmetric(horizontal: 36),
@@ -918,10 +935,10 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
               );
 
               return TvFocusable(
-                scaleFactor: 1.10,
+                scaleFactor: 1.08,
                 glowColor: AppTheme.primaryRed,
-                borderRadius: BorderRadius.circular(8),
-                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 8),
+                borderRadius: BorderRadius.circular(10),
+                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 8),
                 onFocusChange: (focused) {
                   if (focused && mounted) {
                     setState(() => _focusedItem = mediaItem);
@@ -943,14 +960,21 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
                   );
                 },
                 child: SizedBox(
-                  width: 220,
-                  height: 165,
+                  width: 260,
+                  height: 185,
                   child: ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
+                    borderRadius: BorderRadius.circular(10),
                     child: Stack(
                       fit: StackFit.expand,
                       children: [
-                        if (item.posterPath != null && item.posterPath!.isNotEmpty)
+                        if (item.backdropPath != null && item.backdropPath!.isNotEmpty)
+                          CachedNetworkImage(
+                            imageUrl: ApiConstants.getImageUrl(item.backdropPath, size: 'w500'),
+                            fit: BoxFit.cover,
+                            placeholder: (_, __) => Container(color: const Color(0xFF161622)),
+                            errorWidget: (_, __, ___) => Container(color: const Color(0xFF161622)),
+                          )
+                        else if (item.posterPath != null && item.posterPath!.isNotEmpty)
                           CachedNetworkImage(
                             imageUrl: ApiConstants.getImageUrl(item.posterPath, size: 'w500'),
                             fit: BoxFit.cover,
@@ -960,37 +984,48 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
                         else
                           Container(color: const Color(0xFF161622)),
 
-                        // Center Play Circle
-                        Center(
-                          child: Container(
-                            padding: const EdgeInsets.all(10),
-                            decoration: BoxDecoration(
-                              color: Colors.black.withValues(alpha: 0.65),
-                              shape: BoxShape.circle,
-                              border: Border.all(color: Colors.white, width: 1.5),
+                        // Dark overlay for readability
+                        Container(
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topCenter,
+                              end: Alignment.bottomCenter,
+                              colors: [Colors.transparent, Colors.black.withValues(alpha: 0.7)],
                             ),
-                            child: const Icon(Icons.play_arrow_rounded, color: Colors.white, size: 28),
                           ),
                         ),
 
-                        // Title Banner at Bottom
+                        // Center Play Circle
+                        Center(
+                          child: Container(
+                            padding: const EdgeInsets.all(12),
+                            decoration: BoxDecoration(
+                              color: Colors.black.withValues(alpha: 0.65),
+                              shape: BoxShape.circle,
+                              border: Border.all(color: Colors.white, width: 2),
+                            ),
+                            child: const Icon(Icons.play_arrow_rounded, color: Colors.white, size: 32),
+                          ),
+                        ),
+
+                        // Title at bottom
                         Positioned(
                           left: 0,
                           right: 0,
-                          bottom: 4,
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                            color: Colors.black87,
+                          bottom: 8,
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 10),
                             child: Text(
                               item.title,
-                              style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                              style: const TextStyle(
+                                  color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                             ),
                           ),
                         ),
 
-                        // Red Netflix Progress Bar at bottom
+                        // Red progress bar at very bottom
                         Positioned(
                           left: 0,
                           right: 0,

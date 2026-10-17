@@ -2767,6 +2767,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
         final pipY = displayHeight - pipHeight - 64;
 
         await windowManager.setAlwaysOnTop(true);
+        await windowManager.setMinimumSize(const Size(280, 158));
         await windowManager.setSize(const Size(pipWidth, pipHeight));
         await windowManager.setPosition(Offset(pipX > 0 ? pipX : 40, pipY > 0 ? pipY : 40));
 
@@ -2800,10 +2801,23 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
   }
 
+  Future<void> _adjustPipSize(double factor) async {
+    if (!PlatformUtils.isDesktop || !_isDesktopPip) return;
+    try {
+      final current = await windowManager.getSize();
+      final newWidth = (current.width * factor).clamp(280.0, 1280.0);
+      final newHeight = newWidth * (9.0 / 16.0);
+      await windowManager.setSize(Size(newWidth, newHeight));
+    } catch (e) {
+      debugPrint('Error adjusting PiP size: $e');
+    }
+  }
+
   Future<void> _exitDesktopPipMode() async {
     if (!PlatformUtils.isDesktop || !_isDesktopPip) return;
     try {
       await windowManager.setAlwaysOnTop(_prePipAlwaysOnTop ?? false);
+      await windowManager.setMinimumSize(const Size(800, 500));
       if (_prePipSize != null) {
         await windowManager.setSize(_prePipSize!);
       } else {
@@ -4501,11 +4515,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 Positioned.fill(
                   child: _DesktopPipOverlay(
                     isPlaying: _isPlaying,
+                    title: widget.mediaTitle,
                     onTogglePlayPause: _togglePlayPause,
                     onSeekBack: () => _seekRelative(-10),
                     onSeekForward: () => _seekRelative(10),
                     onExpand: _exitDesktopPipMode,
                     onClose: _handleSmoothBack,
+                    onIncreaseSize: () => _adjustPipSize(1.2),
+                    onDecreaseSize: () => _adjustPipSize(0.833),
                   ),
                 ),
               ],
@@ -6168,19 +6185,25 @@ class _NetflixBarButton extends StatelessWidget {
 
 class _DesktopPipOverlay extends StatefulWidget {
   final bool isPlaying;
+  final String title;
   final VoidCallback onTogglePlayPause;
   final VoidCallback onSeekBack;
   final VoidCallback onSeekForward;
   final VoidCallback onExpand;
   final VoidCallback onClose;
+  final VoidCallback onIncreaseSize;
+  final VoidCallback onDecreaseSize;
 
   const _DesktopPipOverlay({
     required this.isPlaying,
+    required this.title,
     required this.onTogglePlayPause,
     required this.onSeekBack,
     required this.onSeekForward,
     required this.onExpand,
     required this.onClose,
+    required this.onIncreaseSize,
+    required this.onDecreaseSize,
   });
 
   @override
@@ -6192,70 +6215,142 @@ class _DesktopPipOverlayState extends State<_DesktopPipOverlay> {
 
   @override
   Widget build(BuildContext context) {
-    return MouseRegion(
-      onEnter: (_) => setState(() => _isHovered = true),
-      onExit: (_) => setState(() => _isHovered = false),
-      child: AnimatedOpacity(
-        opacity: _isHovered ? 1.0 : 0.0,
-        duration: const Duration(milliseconds: 180),
-        child: Container(
-          color: Colors.black.withValues(alpha: 0.55),
-          child: Stack(
-            children: [
-              Positioned(
-                top: 8,
-                left: 8,
-                right: 8,
-                child: Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    IconButton(
-                      iconSize: 20,
-                      padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(),
-                      icon: const Icon(Icons.close_rounded, color: Colors.white70),
-                      tooltip: 'Close PiP',
-                      onPressed: widget.onClose,
-                    ),
-                    IconButton(
-                      iconSize: 20,
-                      padding: EdgeInsets.zero,
-                      constraints: const BoxConstraints(),
-                      icon: const Icon(Icons.open_in_full_rounded, color: Colors.white),
-                      tooltip: 'Expand Window',
-                      onPressed: widget.onExpand,
-                    ),
-                  ],
-                ),
-              ),
-              Center(
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    IconButton(
-                      iconSize: 28,
-                      icon: const Icon(Icons.replay_10_rounded, color: Colors.white),
-                      onPressed: widget.onSeekBack,
-                    ),
-                    const SizedBox(width: 16),
-                    IconButton(
-                      iconSize: 44,
-                      icon: Icon(
-                        widget.isPlaying ? Icons.pause_circle_filled_rounded : Icons.play_circle_fill_rounded,
-                        color: Colors.white,
+    return DragToResizeArea(
+      resizeEdgeSize: 8,
+      child: MouseRegion(
+        onEnter: (_) => setState(() => _isHovered = true),
+        onExit: (_) => setState(() => _isHovered = false),
+        child: AnimatedOpacity(
+          opacity: _isHovered ? 1.0 : 0.0,
+          duration: const Duration(milliseconds: 180),
+          child: Container(
+            color: Colors.black.withValues(alpha: 0.6),
+            child: Stack(
+              children: [
+                // Top Draggable Header (Drag & Drop window position)
+                Positioned(
+                  top: 0,
+                  left: 0,
+                  right: 0,
+                  child: DragToMoveArea(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.topCenter,
+                          end: Alignment.bottomCenter,
+                          colors: [
+                            Colors.black.withValues(alpha: 0.8),
+                            Colors.transparent,
+                          ],
+                        ),
                       ),
-                      onPressed: widget.onTogglePlayPause,
+                      child: Row(
+                        children: [
+                          IconButton(
+                            iconSize: 20,
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(),
+                            icon: const Icon(Icons.close_rounded, color: Colors.white70),
+                            tooltip: 'Close PiP',
+                            onPressed: widget.onClose,
+                          ),
+                          const SizedBox(width: 8),
+                          const Icon(Icons.drag_indicator_rounded, color: Colors.white38, size: 16),
+                          const SizedBox(width: 4),
+                          Expanded(
+                            child: Text(
+                              widget.title,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: Colors.white70,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                          // Size decrease button
+                          IconButton(
+                            iconSize: 18,
+                            padding: const EdgeInsets.symmetric(horizontal: 4),
+                            constraints: const BoxConstraints(),
+                            icon: const Icon(Icons.remove_circle_outline_rounded, color: Colors.white70),
+                            tooltip: 'Decrease PiP Size',
+                            onPressed: widget.onDecreaseSize,
+                          ),
+                          const SizedBox(width: 4),
+                          // Size increase button
+                          IconButton(
+                            iconSize: 18,
+                            padding: const EdgeInsets.symmetric(horizontal: 4),
+                            constraints: const BoxConstraints(),
+                            icon: const Icon(Icons.add_circle_outline_rounded, color: Colors.white70),
+                            tooltip: 'Increase PiP Size',
+                            onPressed: widget.onIncreaseSize,
+                          ),
+                          const SizedBox(width: 6),
+                          // Expand / Restore button
+                          IconButton(
+                            iconSize: 18,
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(),
+                            icon: const Icon(Icons.open_in_full_rounded, color: Colors.white),
+                            tooltip: 'Expand Window',
+                            onPressed: widget.onExpand,
+                          ),
+                        ],
+                      ),
                     ),
-                    const SizedBox(width: 16),
-                    IconButton(
-                      iconSize: 28,
-                      icon: const Icon(Icons.forward_10_rounded, color: Colors.white),
-                      onPressed: widget.onSeekForward,
-                    ),
-                  ],
+                  ),
                 ),
-              ),
-            ],
+
+                // Center Transport Controls
+                Center(
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      IconButton(
+                        iconSize: 28,
+                        icon: const Icon(Icons.replay_10_rounded, color: Colors.white),
+                        tooltip: 'Rewind 10s',
+                        onPressed: widget.onSeekBack,
+                      ),
+                      const SizedBox(width: 16),
+                      IconButton(
+                        iconSize: 44,
+                        icon: Icon(
+                          widget.isPlaying ? Icons.pause_circle_filled_rounded : Icons.play_circle_fill_rounded,
+                          color: Colors.white,
+                        ),
+                        tooltip: widget.isPlaying ? 'Pause' : 'Play',
+                        onPressed: widget.onTogglePlayPause,
+                      ),
+                      const SizedBox(width: 16),
+                      IconButton(
+                        iconSize: 28,
+                        icon: const Icon(Icons.forward_10_rounded, color: Colors.white),
+                        tooltip: 'Forward 10s',
+                        onPressed: widget.onSeekForward,
+                      ),
+                    ],
+                  ),
+                ),
+
+                // Bottom subtle resize hint
+                Positioned(
+                  bottom: 4,
+                  right: 6,
+                  child: IgnorePointer(
+                    child: Icon(
+                      Icons.filter_none_rounded,
+                      size: 10,
+                      color: Colors.white.withValues(alpha: 0.3),
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
       ),

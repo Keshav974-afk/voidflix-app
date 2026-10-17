@@ -18,6 +18,7 @@ import '../widgets/cast_dialog.dart';
 import '../core/services/cast_service.dart';
 import '../core/services/stream_extractor.dart';
 import '../widgets/tv_back_button.dart';
+import '../widgets/tv_focusable.dart';
 import 'downloads_screen.dart';
 import 'player_screen.dart';
 
@@ -584,39 +585,47 @@ class _DetailScreenState extends State<DetailScreen> {
                   ),
                   const SizedBox(height: 14),
 
-                  // Full-width White Button: ▶ Play (Screenshot 2 & 4)
-                  SizedBox(
-                    width: double.infinity,
-                    height: 44,
-                    child: ElevatedButton.icon(
-                      onPressed: () {
-                        final saved = context.read<HistoryProvider>().getProgress(detail.id);
-                        final s = saved?.season ?? _selectedSeason;
-                        final e = saved?.episode ?? 1;
-                        final offlineId = isTv
-                            ? DownloadProvider.generateId('tv', detail.id, season: s, episode: e)
-                            : DownloadProvider.generateId('movie', detail.id);
-                        final downloadProvider = context.read<DownloadProvider>();
-                        final offlineItem = downloadProvider.getItem(offlineId);
-                        final localFile = offlineItem?.status == 'completed' ? offlineItem?.localFilePath : null;
+                  // Full-width White Button: ▶ Play (TvFocusable for 10-foot remote support)
+                  TvFocusable(
+                    autofocus: true,
+                    scaleFactor: 1.02,
+                    glowColor: Colors.white,
+                    borderRadius: BorderRadius.circular(6),
+                    onPressed: () {
+                      final saved = context.read<HistoryProvider>().getProgress(detail.id);
+                      final s = saved?.season ?? _selectedSeason;
+                      final e = saved?.episode ?? 1;
+                      final offlineId = isTv
+                          ? DownloadProvider.generateId('tv', detail.id, season: s, episode: e)
+                          : DownloadProvider.generateId('movie', detail.id);
+                      final downloadProvider = context.read<DownloadProvider>();
+                      final offlineItem = downloadProvider.getItem(offlineId);
+                      final localFile = offlineItem?.status == 'completed' ? offlineItem?.localFilePath : null;
 
-                        _playMedia(
-                          season: s,
-                          episode: e,
-                          localFilePath: localFile,
-                          localSubtitlePath: offlineItem?.status == 'completed' ? offlineItem?.localSubtitlePath : null,
-                        );
-                      },
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.white,
-                        foregroundColor: Colors.black,
-                        elevation: 0,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                      _playMedia(
+                        season: s,
+                        episode: e,
+                        localFilePath: localFile,
+                        localSubtitlePath: offlineItem?.status == 'completed' ? offlineItem?.localSubtitlePath : null,
+                      );
+                    },
+                    child: Container(
+                      width: double.infinity,
+                      height: 44,
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(6),
                       ),
-                      icon: const Icon(Icons.play_arrow, color: Colors.black, size: 26),
-                      label: const Text(
-                        'Play',
-                        style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black),
+                      child: const Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.play_arrow, color: Colors.black, size: 26),
+                          SizedBox(width: 8),
+                          Text(
+                            'Play',
+                            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black),
+                          ),
+                        ],
                       ),
                     ),
                   ),
@@ -789,57 +798,72 @@ class _DetailScreenState extends State<DetailScreen> {
                   ),
                   const SizedBox(height: 18),
 
-                  // 4-Action Bar: [+ My List] [👍 Rate] [🔗 Share] [⤓ Download Season 1] (Screenshot 2 & 4)
+                  // 4-Action Bar: [+ My List] [👍 Rate] [🔗 Share] [⤓ Download Season 1] (TvFocusable)
                   Row(
                     mainAxisAlignment: MainAxisAlignment.spaceAround,
                     children: [
                       // My List
-                      GestureDetector(
-                        onTap: () => watchlistProvider.toggleWatchlist(detail.toMediaItem()),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(inWatchlist ? Icons.check : Icons.add, color: Colors.white, size: 24),
-                            const SizedBox(height: 5),
-                            Text(
-                              inWatchlist ? 'In List' : 'My List',
-                              style: const TextStyle(color: Colors.white70, fontSize: 11),
-                            ),
-                          ],
+                      TvFocusable(
+                        scaleFactor: 1.12,
+                        glowColor: AppTheme.primaryRed,
+                        borderRadius: BorderRadius.circular(8),
+                        onPressed: () => watchlistProvider.toggleWatchlist(detail.toMediaItem()),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(inWatchlist ? Icons.check : Icons.add, color: Colors.white, size: 24),
+                              const SizedBox(height: 5),
+                              Text(
+                                inWatchlist ? 'In List' : 'My List',
+                                style: const TextStyle(color: Colors.white70, fontSize: 11),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
 
                       // Rate
-                      GestureDetector(
-                        onTap: () {
+                      TvFocusable(
+                        scaleFactor: 1.12,
+                        glowColor: AppTheme.primaryRed,
+                        borderRadius: BorderRadius.circular(8),
+                        onPressed: () {
                           setState(() {
                             _isLiked = !_isLiked;
                           });
                         },
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              _isLiked ? Icons.thumb_up_alt_rounded : Icons.thumb_up_alt_outlined,
-                              color: _isLiked ? AppTheme.primaryRed : Colors.white,
-                              size: 24,
-                            ),
-                            const SizedBox(height: 5),
-                            Text(
-                              _isLiked ? 'Liked' : 'Rate',
-                              style: TextStyle(
-                                color: _isLiked ? AppTheme.primaryRed : Colors.white70,
-                                fontSize: 11,
-                                fontWeight: _isLiked ? FontWeight.bold : FontWeight.normal,
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                _isLiked ? Icons.thumb_up_alt_rounded : Icons.thumb_up_alt_outlined,
+                                color: _isLiked ? AppTheme.primaryRed : Colors.white,
+                                size: 24,
                               ),
-                            ),
-                          ],
+                              const SizedBox(height: 5),
+                              Text(
+                                _isLiked ? 'Liked' : 'Rate',
+                                style: TextStyle(
+                                  color: _isLiked ? AppTheme.primaryRed : Colors.white70,
+                                  fontSize: 11,
+                                  fontWeight: _isLiked ? FontWeight.bold : FontWeight.normal,
+                                ),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
 
                       // Share
-                      GestureDetector(
-                        onTap: () {
+                      TvFocusable(
+                        scaleFactor: 1.12,
+                        glowColor: AppTheme.primaryRed,
+                        borderRadius: BorderRadius.circular(8),
+                        onPressed: () {
                           SharePlus.instance.share(
                             ShareParams(
                               text: 'Check out "${detail.title}" on Voidflix!\nhttps://voidflix.org/${detail.mediaType}/${detail.id}',
@@ -847,19 +871,25 @@ class _DetailScreenState extends State<DetailScreen> {
                             ),
                           );
                         },
-                        child: const Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(Icons.share_outlined, color: Colors.white, size: 24),
-                            SizedBox(height: 5),
-                            Text('Share', style: TextStyle(color: Colors.white70, fontSize: 11)),
-                          ],
+                        child: const Padding(
+                          padding: EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.share_outlined, color: Colors.white, size: 24),
+                              SizedBox(height: 5),
+                              Text('Share', style: TextStyle(color: Colors.white70, fontSize: 11)),
+                            ],
+                          ),
                         ),
                       ),
 
                       // Download Season (Batch download like in web DetailModal.tsx)
-                      GestureDetector(
-                        onTap: () {
+                      TvFocusable(
+                        scaleFactor: 1.12,
+                        glowColor: AppTheme.primaryRed,
+                        borderRadius: BorderRadius.circular(8),
+                        onPressed: () {
                           if (!isTv) {
                             downloadProvider.startDownload(
                               mediaId: detail.id,
@@ -899,17 +929,19 @@ class _DetailScreenState extends State<DetailScreen> {
                             }
                           }
                         },
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            const Icon(Icons.file_download_outlined, color: Colors.white, size: 24),
-                            const SizedBox(height: 5),
-                            Text(
-                              isTv ? 'Download\nSeason $_selectedSeason' : 'Download',
-                              textAlign: TextAlign.center,
-                              style: const TextStyle(color: Colors.white70, fontSize: 10, height: 1.1),
-                            ),
-                          ],
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.download_rounded, color: Colors.white, size: 24),
+                              const SizedBox(height: 5),
+                              Text(
+                                isTv ? 'Download S$_selectedSeason' : 'Download',
+                                style: const TextStyle(color: Colors.white70, fontSize: 11),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                     ],
@@ -919,15 +951,18 @@ class _DetailScreenState extends State<DetailScreen> {
                   // Divider before Tabs
                   const Divider(color: Colors.white12, thickness: 1),
 
-                  // Clean Tabs with Red Indicator: [Episodes] [Trailers & More] [More Like This] (Screenshot 2 & 4)
+                  // Clean Tabs with Red Indicator: [Episodes] [Trailers & More] [More Like This] (TvFocusable)
                   Row(
                     children: List.generate(tabs.length, (idx) {
                       final isSel = idx == _activeTabIndex;
                       final label = tabs[idx];
-                      return GestureDetector(
-                        onTap: () => setState(() => _activeTabIndex = idx),
+                      return TvFocusable(
+                        scaleFactor: 1.05,
+                        glowColor: AppTheme.primaryRed,
+                        borderRadius: BorderRadius.circular(4),
+                        onPressed: () => setState(() => _activeTabIndex = idx),
                         child: Container(
-                          padding: const EdgeInsets.only(right: 22, top: 8, bottom: 8),
+                          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                           decoration: BoxDecoration(
                             border: Border(
                               top: BorderSide(
@@ -959,8 +994,11 @@ class _DetailScreenState extends State<DetailScreen> {
                       child: Row(
                         mainAxisAlignment: MainAxisAlignment.spaceBetween,
                         children: [
-                          GestureDetector(
-                            onTap: () => _openSeasonPickerSheet(detail),
+                          TvFocusable(
+                            scaleFactor: 1.05,
+                            glowColor: AppTheme.primaryRed,
+                            borderRadius: BorderRadius.circular(6),
+                            onPressed: () => _openSeasonPickerSheet(detail),
                             child: Container(
                               padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                               decoration: BoxDecoration(
@@ -984,8 +1022,11 @@ class _DetailScreenState extends State<DetailScreen> {
                               ),
                             ),
                           ),
-                          GestureDetector(
-                            onTap: () => _openSeasonPickerSheet(detail),
+                          TvFocusable(
+                            scaleFactor: 1.1,
+                            glowColor: AppTheme.primaryRed,
+                            borderRadius: BorderRadius.circular(17),
+                            onPressed: () => _openSeasonPickerSheet(detail),
                             child: Container(
                               width: 34,
                               height: 34,
@@ -1045,9 +1086,12 @@ class _DetailScreenState extends State<DetailScreen> {
                               // Top Episode Row: Thumbnail + Title/Duration + Download Icon (Screenshot 2 & 4)
                               Row(
                                 children: [
-                                  // 16:9 Thumbnail with Play Overlay & Red Progress Bar
-                                  GestureDetector(
-                                    onTap: () => _playMedia(
+                                  // 16:9 Thumbnail with Play Overlay & Red Progress Bar (TvFocusable)
+                                  TvFocusable(
+                                    scaleFactor: 1.06,
+                                    glowColor: AppTheme.primaryRed,
+                                    borderRadius: BorderRadius.circular(6),
+                                    onPressed: () => _playMedia(
                                       season: _selectedSeason,
                                       episode: ep.episodeNumber,
                                       episodeTitle: ep.name,
@@ -1342,8 +1386,11 @@ class _DetailScreenState extends State<DetailScreen> {
                           final rec = detail.recommendations[idx];
                           final recPoster = ApiConstants.getImageUrl(rec.posterPath, size: 'w342');
 
-                          return GestureDetector(
-                            onTap: () {
+                          return TvFocusable(
+                            scaleFactor: 1.07,
+                            glowColor: AppTheme.primaryRed,
+                            borderRadius: BorderRadius.circular(6),
+                            onPressed: () {
                               Navigator.of(context).push(
                                 MaterialPageRoute(
                                   builder: (_) => DetailScreen(
