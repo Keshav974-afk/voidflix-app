@@ -13,6 +13,9 @@ import '../providers/download_provider.dart';
 import '../providers/history_provider.dart';
 import '../providers/watchlist_provider.dart';
 import '../widgets/netflix_season_picker.dart';
+import '../widgets/cast_dialog.dart';
+import '../core/services/cast_service.dart';
+import '../core/services/stream_extractor.dart';
 import 'downloads_screen.dart';
 import 'player_screen.dart';
 
@@ -219,6 +222,57 @@ class _DetailScreenState extends State<DetailScreen> {
     }
   }
 
+  bool _isExtractingForCast = false;
+
+  Future<void> _handleCastButton() async {
+    final castService = CastService();
+    if (castService.isCasting) {
+      CastDialog.show(
+        context,
+        videoUrl: '',
+        title: castService.currentTitle,
+        posterUrl: castService.currentPosterUrl,
+      );
+      return;
+    }
+
+    if (_detail == null) return;
+
+    setState(() => _isExtractingForCast = true);
+    try {
+      final season = _detail!.mediaType == 'tv' ? _selectedSeason : 1;
+      const episode = 1;
+      final streams = await StreamExtractor.extractAll(
+        type: _detail!.mediaType,
+        tmdbId: _detail!.id,
+        season: season,
+        episode: episode,
+      );
+
+      if (!mounted) return;
+      setState(() => _isExtractingForCast = false);
+
+      if (streams.isNotEmpty) {
+        final stream = streams.first;
+        final title = _detail!.mediaType == 'tv'
+            ? '${_detail!.title} S${season}E$episode'
+            : _detail!.title;
+
+        CastDialog.show(
+          context,
+          videoUrl: stream.url,
+          title: title,
+          posterUrl: _detail!.posterPath,
+          headers: stream.headers,
+        );
+      } else {
+        _playMedia(season: season, episode: episode);
+      }
+    } catch (_) {
+      if (mounted) setState(() => _isExtractingForCast = false);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
@@ -286,6 +340,37 @@ class _DetailScreenState extends State<DetailScreen> {
               ),
               onPressed: () => Navigator.of(context).pop(),
             ),
+            actions: [
+              ListenableBuilder(
+                listenable: CastService(),
+                builder: (context, _) {
+                  final isCasting = CastService().isCasting;
+                  return IconButton(
+                    icon: Container(
+                      padding: const EdgeInsets.all(6),
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: Colors.black.withValues(alpha: 0.6),
+                      ),
+                      child: _isExtractingForCast
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2, color: AppTheme.primaryRed),
+                            )
+                          : Icon(
+                              isCasting ? Icons.cast_connected_rounded : Icons.cast_rounded,
+                              color: isCasting ? const Color(0xFF00D2FF) : Colors.white,
+                              size: 20,
+                            ),
+                    ),
+                    tooltip: isCasting ? 'Casting Active' : 'Cast to TV',
+                    onPressed: _handleCastButton,
+                  );
+                },
+              ),
+              const SizedBox(width: 8),
+            ],
             flexibleSpace: FlexibleSpaceBar(
               background: Stack(
                 fit: StackFit.expand,

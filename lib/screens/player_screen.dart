@@ -25,6 +25,8 @@ import '../models/watch_progress.dart';
 import '../providers/history_provider.dart';
 import '../providers/profile_provider.dart';
 import '../widgets/netflix_season_picker.dart';
+import '../widgets/cast_dialog.dart';
+import '../core/services/cast_service.dart';
 import 'package:share_plus/share_plus.dart';
 
 class PlayerScreen extends StatefulWidget {
@@ -2393,6 +2395,29 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
   }
 
+  void _openCastDialog() {
+    String? streamUrl;
+    if (widget.localFilePath != null && widget.localFilePath!.isNotEmpty) {
+      streamUrl = widget.localFilePath;
+    } else if (_directStreams.isNotEmpty && _selectedStreamIndex < _directStreams.length) {
+      streamUrl = _directStreams[_selectedStreamIndex].url;
+    }
+    if (streamUrl == null || streamUrl.isEmpty) {
+      return;
+    }
+
+    CastDialog.show(
+      context,
+      videoUrl: streamUrl,
+      title: _currentEpisodeTitle,
+      posterUrl: widget.posterPath,
+      currentPosition: _currentPosition,
+      headers: _directStreams.isNotEmpty && _selectedStreamIndex < _directStreams.length
+          ? _directStreams[_selectedStreamIndex].headers
+          : null,
+    );
+  }
+
   Widget _build2xSpeedHud() {
     return AnimatedOpacity(
       opacity: _isHolding2xSpeed ? 1.0 : 0.0,
@@ -3546,6 +3571,22 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                         ),
                                       ),
                                     ),
+                                    ListenableBuilder(
+                                      listenable: CastService(),
+                                      builder: (context, _) {
+                                        final isCasting = CastService().isCasting;
+                                        return IconButton(
+                                          icon: Icon(
+                                            isCasting ? Icons.cast_connected_rounded : Icons.cast_rounded,
+                                            color: isCasting ? const Color(0xFF00D2FF) : Colors.white,
+                                            size: 24,
+                                          ),
+                                          tooltip: isCasting ? 'Casting Active' : 'Cast to TV',
+                                          onPressed: _openCastDialog,
+                                        );
+                                      },
+                                    ),
+                                    const SizedBox(width: 4),
                                     IconButton(
                                       icon: const Icon(Icons.picture_in_picture_alt_rounded, color: Colors.white, size: 24),
                                       tooltip: 'Picture-in-Picture',

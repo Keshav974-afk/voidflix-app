@@ -28,6 +28,7 @@ class MainActivity : FlutterActivity() {
     private val SPEECH_REQUEST_CODE = 4210
     private var pendingSpeechResult: MethodChannel.Result? = null
     private var wakeLock: PowerManager.WakeLock? = null
+    private var multicastLock: android.net.wifi.WifiManager.MulticastLock? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -223,6 +224,67 @@ class MainActivity : FlutterActivity() {
                         result.success(info)
                     } catch (e: Exception) {
                         result.error("DEVICE_INFO_ERROR", e.message, null)
+                    }
+                }
+                "isTelevision" -> {
+                    try {
+                        val uiModeManager = getSystemService(Context.UI_MODE_SERVICE) as? android.app.UiModeManager
+                        val isTvUi = uiModeManager?.currentModeType == Configuration.UI_MODE_TYPE_TELEVISION
+                        val hasLeanback = packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_LEANBACK)
+                        val hasFireTv = packageManager.hasSystemFeature("amazon.hardware.fire_tv")
+                        result.success(isTvUi || hasLeanback || hasFireTv)
+                    } catch (e: Exception) {
+                        result.success(false)
+                    }
+                }
+                "acquireMulticastLock" -> {
+                    try {
+                        val wifi = applicationContext.getSystemService(Context.WIFI_SERVICE) as? android.net.wifi.WifiManager
+                        if (multicastLock == null) {
+                            multicastLock = wifi?.createMulticastLock("VoidflixMulticastLock")
+                            multicastLock?.setReferenceCounted(true)
+                        }
+                        multicastLock?.acquire()
+                        result.success(true)
+                    } catch (e: Exception) {
+                        result.success(false)
+                    }
+                }
+                "releaseMulticastLock" -> {
+                    try {
+                        if (multicastLock?.isHeld == true) {
+                            multicastLock?.release()
+                        }
+                        result.success(true)
+                    } catch (e: Exception) {
+                        result.success(false)
+                    }
+                }
+                "openExternalPlayer" -> {
+                    val videoUrl = call.argument<String>("videoUrl")
+                    val title = call.argument<String>("title") ?: "Voidflix Video"
+                    val headers = call.argument<Map<String, String>>("headers")
+                    if (!videoUrl.isNullOrEmpty()) {
+                        try {
+                            val intent = Intent(Intent.ACTION_VIEW).apply {
+                                setDataAndType(android.net.Uri.parse(videoUrl), "video/*")
+                                putExtra("title", title)
+                                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                                if (headers != null && headers.isNotEmpty()) {
+                                    val headerArray = headers.flatMap { listOf(it.key, it.value) }.toTypedArray()
+                                    putExtra("headers", headerArray)
+                                }
+                            }
+                            val chooser = Intent.createChooser(intent, "Cast / Play with External Player").apply {
+                                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                            }
+                            startActivity(chooser)
+                            result.success(true)
+                        } catch (e: Exception) {
+                            result.error("EXTERNAL_PLAYER_ERROR", e.message, null)
+                        }
+                    } else {
+                        result.error("INVALID_URL", "videoUrl is required", null)
                     }
                 }
                 else -> {

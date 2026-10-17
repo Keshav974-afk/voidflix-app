@@ -1,10 +1,13 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 import '../core/constants/theme_constants.dart';
 import '../core/services/remote_config_service.dart';
+import '../core/services/tv_mode_service.dart';
 import '../widgets/admin_modals.dart';
 import '../widgets/brand_header.dart';
 import '../widgets/floating_bottom_bar.dart';
 import 'update_required_screen.dart';
+import 'tv_leanback_screen.dart';
 import 'home_screen.dart';
 import 'movies_screen.dart';
 import 'series_screen.dart';
@@ -55,6 +58,11 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final tvMode = context.watch<TvModeService>();
+    if (tvMode.isTvMode) {
+      return const TvLeanbackScreen();
+    }
+
     Widget bodyContent;
     if (_bottomTabIndex == 1) {
       bodyContent = const ClipsScreen();

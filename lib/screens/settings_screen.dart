@@ -11,6 +11,9 @@ import '../providers/history_provider.dart';
 import '../providers/notification_provider.dart';
 import '../providers/profile_provider.dart';
 import '../providers/watchlist_provider.dart';
+import '../core/services/tv_mode_service.dart';
+import '../core/services/cast_service.dart';
+import '../widgets/cast_dialog.dart';
 import 'profile_gate_screen.dart';
 
 enum SettingsSection { appSettings, account, help }
@@ -550,6 +553,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
   Widget build(BuildContext context) {
     final notifProvider = context.watch<NotificationProvider>();
     final downloadProvider = context.watch<DownloadProvider>();
+    final tvMode = context.watch<TvModeService>();
+    final castService = context.watch<CastService>();
 
     // Calculate dynamic download storage (in MB/GB)
     final int downloadedBytes = downloadProvider.completedItems.fold<int>(
@@ -592,6 +597,41 @@ class _SettingsScreenState extends State<SettingsScreen> {
             title: 'Mobile Data Usage',
             subtitle: _cellularDataUsage,
             onTap: _showCellularUsageSheet,
+          ),
+          const Divider(height: 1, color: Color(0xFF1E1E1E)),
+
+          // ═══════════════════════════════════════════════
+          // TV & CASTING (10-Foot Leanback UI & DLNA Casting)
+          // ═══════════════════════════════════════════════
+          _buildCategoryHeader('TV & Casting'),
+          _buildSwitchTile(
+            leading: Icons.tv_rounded,
+            title: 'Android TV Leanback UI',
+            subtitle: tvMode.isTvMode
+                ? 'Active (10-Foot Remote & D-pad Layout)'
+                : 'Switch to TV 10-foot remote interface',
+            value: tvMode.isTvMode,
+            onChanged: (val) async {
+              await tvMode.setTvMode(val);
+              if (val && context.mounted) {
+                Navigator.of(context).pop();
+              }
+            },
+          ),
+          const Divider(height: 1, color: Color(0xFF1E1E1E)),
+          _buildSettingTile(
+            leading: Icons.cast_rounded,
+            title: 'Cast to TV / DLNA Devices',
+            subtitle: castService.isCasting
+                ? 'Casting to ${castService.connectedDevice?.friendlyName}'
+                : 'Discover Smart TVs, Chromecast & DLNA renderers',
+            onTap: () {
+              CastDialog.show(
+                context,
+                videoUrl: '',
+                title: 'Voidflix Cast Hub',
+              );
+            },
           ),
           const Divider(height: 1, color: Color(0xFF1E1E1E)),
 

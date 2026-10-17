@@ -10,6 +10,7 @@ class HistoryProvider extends ChangeNotifier {
   bool _isLoaded = false;
 
   List<WatchProgress> get history => _history;
+  List<WatchProgress> get items => _history;
   bool get isLoaded => _isLoaded;
   String get activeProfileId => _activeProfileId;
 
