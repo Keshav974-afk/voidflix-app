@@ -113,6 +113,13 @@ class CachedStreamEntry {
       );
 }
 
+class _HlsVariantCandidate {
+  final String url;
+  final int height;
+  final String rawLine;
+  _HlsVariantCandidate({required this.url, required this.height, required this.rawLine});
+}
+
 class StreamExtractor {
   static final Map<String, CachedStreamEntry> _cache = {};
 
@@ -366,24 +373,31 @@ class StreamExtractor {
   }
 
   static Future<String> _decryptVidrockUrl(String enc) async {
-    var b64 = enc.replaceAll('-', '+').replaceAll('_', '/');
+    final cleanEnc = enc.trim();
+    if (cleanEnc.length < 28) return '';
+    var b64 = cleanEnc.replaceAll('-', '+').replaceAll('_', '/');
     while (b64.length % 4 != 0) {
       b64 += '=';
     }
-    final data = base64Decode(b64);
-    final iv = data.sublist(0, 12);
-    final ciphertextWithTag = data.sublist(12);
-    final ciphertext =
-        ciphertextWithTag.sublist(0, ciphertextWithTag.length - 16);
-    final mac = Mac(ciphertextWithTag.sublist(ciphertextWithTag.length - 16));
+    try {
+      final data = base64Decode(b64);
+      if (data.length < 28) return '';
+      final iv = data.sublist(0, 12);
+      final ciphertextWithTag = data.sublist(12);
+      final ciphertext =
+          ciphertextWithTag.sublist(0, ciphertextWithTag.length - 16);
+      final mac = Mac(ciphertextWithTag.sublist(ciphertextWithTag.length - 16));
 
-    final secretBox = SecretBox(ciphertext, nonce: iv, mac: mac);
-    final clearBytes =
-        await _aesGcm.decrypt(secretBox, secretKey: _secretKey);
-    return utf8.decode(clearBytes);
+      final secretBox = SecretBox(ciphertext, nonce: iv, mac: mac);
+      final clearBytes =
+          await _aesGcm.decrypt(secretBox, secretKey: _secretKey);
+      return utf8.decode(clearBytes);
+    } catch (_) {
+      return '';
+    }
   }
 
-  /// Extracts direct HLS stream URLs from Vidrock (Nova, Atlas, Orion, Astra, Luna)
+  /// Extracts direct HLS stream URLs from Vidrock (Nova, Atlas, Orion, Astra, Luna, Lyra)
   static Future<List<ExtractedStream>> extractVidrock({
     required String type, // 'movie' or 'tv'
     required int tmdbId,
@@ -413,12 +427,18 @@ class StreamExtractor {
       final json = jsonDecode(res.body) as Map<String, dynamic>;
       final results = <ExtractedStream>[];
 
-      // Preferred priority order of sources (Orion is primary active 1080p cluster)
-      final order = ['Orion', 'Nova', 'Atlas', 'Astra', 'Luna'];
-      for (final name in order) {
+      // Preferred priority order of sources (Orion is primary active 1080p cluster, Luna/Lyra fallbacks)
+      final order = ['Orion', 'Nova', 'Atlas', 'Astra', 'Luna', 'Lyra'];
+      final candidateServers = <String>[
+        ...order,
+        ...json.keys.where((k) => !order.contains(k) && !['Hindi', 'Tamil', 'Telugu'].contains(k)),
+      ];
+
+      for (final name in candidateServers) {
         final src = json[name] as Map<String, dynamic>?;
         if (src != null && src['url'] != null) {
           final enc = src['url'] as String;
+          if (enc.trim().length < 28) continue;
           try {
             final streamUrl = await _decryptVidrockUrl(enc);
             if (streamUrl.isNotEmpty && streamUrl.startsWith('http')) {
@@ -721,6 +741,129 @@ class StreamExtractor {
     return null;
   }
 
+  static int? _extractResolutionHeight(String infoLine) {
+    final match = RegExp(r'RESOLUTION=\d+x(\d+)').firstMatch(infoLine);
+    if (match != null) {
+      return int.tryParse(match.group(1)!);
+    }
+    return null;
+  }
+
+  static Future<ExtractedStream?> _processCinejoyPlaylist({
+    required String playlistUrl,
+    required String serverName,
+    required bool is4k,
+  }) async {
+    final headers = {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+    };
+
+    try {
+      final res = await http.get(Uri.parse(playlistUrl), headers: headers).timeout(const Duration(milliseconds: 2500));
+      if (res.statusCode == 200 && res.body.contains('#EXTM3U')) {
+        final lines = res.body.split('\n');
+        final variants = <_HlsVariantCandidate>[];
+        String? currentInfo;
+
+        for (int i = 0; i < lines.length; i++) {
+          final line = lines[i].trim();
+          if (line.startsWith('#EXT-X-STREAM-INF:')) {
+            currentInfo = line;
+          } else if (line.isNotEmpty && !line.startsWith('#')) {
+            final variantUrl = Uri.parse(playlistUrl).resolve(line).toString();
+            final height = _extractResolutionHeight(currentInfo ?? '') ??
+                (line.toLowerCase().contains('4k')
+                    ? 2160
+                    : line.toLowerCase().contains('1080')
+                        ? 1080
+                        : line.toLowerCase().contains('720')
+                            ? 720
+                            : line.toLowerCase().contains('360')
+                                ? 360
+                                : 0);
+            variants.add(_HlsVariantCandidate(url: variantUrl, height: height, rawLine: line));
+            currentInfo = null;
+          }
+        }
+
+        if (variants.isNotEmpty) {
+          // Probe all variants concurrently with 1.5s timeout to drop dead (e.g. 502/404) streams
+          final workingVariants = <_HlsVariantCandidate>[];
+          final checks = await Future.wait(variants.map((v) async {
+            try {
+              final testRes = await http.get(Uri.parse(v.url), headers: headers).timeout(const Duration(milliseconds: 1500));
+              if (testRes.statusCode != 200) return false;
+
+              // For 4K streams, verify child segments are healthy and not returning 502/404 from CDN
+              if (v.height >= 2160 && testRes.body.contains('.html')) {
+                final segLines = testRes.body.split('\n');
+                final segmentUrls = <String>[];
+                for (final sl in segLines) {
+                  final t = sl.trim();
+                  if (t.isNotEmpty && !t.startsWith('#')) {
+                    segmentUrls.add(Uri.parse(v.url).resolve(t).toString());
+                    if (segmentUrls.length >= 2) break;
+                  }
+                }
+                final testSeg = segmentUrls.length > 1 ? segmentUrls[1] : (segmentUrls.isNotEmpty ? segmentUrls[0] : null);
+                if (testSeg != null) {
+                  final segRes = await http.head(Uri.parse(testSeg), headers: headers).timeout(const Duration(milliseconds: 1200));
+                  if (segRes.statusCode != 200) return false;
+                }
+              }
+              return true;
+            } catch (_) {
+              return false;
+            }
+          }));
+
+          for (int i = 0; i < variants.length; i++) {
+            if (checks[i]) {
+              workingVariants.add(variants[i]);
+            }
+          }
+
+          if (workingVariants.isNotEmpty) {
+            // Sort by height descending (highest working quality first)
+            workingVariants.sort((a, b) => b.height.compareTo(a.height));
+            final top = workingVariants.first;
+            final topIs4k = top.height >= 2160;
+            final topIs1080 = top.height >= 1080;
+
+            final qList = workingVariants.map((v) {
+              final label = v.height >= 2160 ? '4K' : v.height >= 1080 ? '1080p' : v.height >= 720 ? '720p' : '${v.height}p';
+              return StreamQuality(label: label, height: v.height, url: v.url);
+            }).toList();
+
+            return ExtractedStream(
+              url: top.url,
+              type: 'hls',
+              sourceName: 'Cinejoy ($serverName${topIs4k ? ' 4K' : ''})',
+              headers: headers,
+              qualityLabel: topIs4k ? '4K Ultra HD' : (topIs1080 ? '1080p Full HD' : '${top.height}p HD'),
+              qualities: qList,
+            );
+          }
+        }
+      }
+    } catch (e) {
+      debugPrint('Cinejoy playlist probe fallback: $e');
+    }
+
+    return ExtractedStream(
+      url: playlistUrl,
+      type: 'hls',
+      sourceName: 'Cinejoy ($serverName${is4k ? ' 4K' : ''})',
+      headers: headers,
+      qualityLabel: is4k ? '4K Ultra HD' : '1080p Full HD',
+      qualities: [
+        if (is4k) StreamQuality(label: '4K', height: 2160, url: playlistUrl),
+        StreamQuality(label: '1080p', height: 1080, url: playlistUrl),
+        StreamQuality(label: '720p', height: 720, url: playlistUrl),
+      ],
+    );
+  }
+
   /// Extracts high-bitrate direct HLS streams (up to 4K Ultra HD & 1080p) via Cinejoy / wing.st using enc-dec.app
   static Future<List<ExtractedStream>> extractCinejoy({
     required String type, // 'movie' or 'tv'
@@ -865,21 +1008,14 @@ class StreamExtractor {
               final playlistUrl = s['playlist'] as String;
               if (playlistUrl.isNotEmpty && playlistUrl.startsWith('http')) {
                 final is4k = srv == 'Lisbon';
-                results.add(ExtractedStream(
-                  url: playlistUrl,
-                  type: 'hls',
-                  sourceName: 'Cinejoy ($srv${is4k ? ' 4K' : ''})',
-                  headers: {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-                  },
-                  qualityLabel: is4k ? '4K Ultra HD' : '1080p Full HD',
-                  qualities: [
-                    if (is4k) StreamQuality(label: '4K', height: 2160, url: playlistUrl),
-                    StreamQuality(label: '1080p', height: 1080, url: playlistUrl),
-                    StreamQuality(label: '720p', height: 720, url: playlistUrl),
-                    StreamQuality(label: '360p', height: 360, url: playlistUrl),
-                  ],
-                ));
+                final stream = await _processCinejoyPlaylist(
+                  playlistUrl: playlistUrl,
+                  serverName: srv,
+                  is4k: is4k,
+                );
+                if (stream != null) {
+                  results.add(stream);
+                }
               }
             }
           }

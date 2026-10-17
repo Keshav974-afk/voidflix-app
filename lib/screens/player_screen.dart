@@ -1,7 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -628,11 +627,18 @@ class _PlayerScreenState extends State<PlayerScreen> {
       if (streams.isNotEmpty) {
         _directStreams = streams;
 
-        // Retrieve active profile language preferences
-        final profile = context.read<ProfileProvider>().activeProfile;
-        final preferredAudio = profile.preferredAudioLang;
-        final preferredSub = profile.preferredSubtitleLang;
-        final preferredList = profile.preferredLanguages;
+        // Retrieve active profile language preferences safely
+        String? preferredAudio;
+        String? preferredSub;
+        List<String> preferredList = [];
+        try {
+          if (mounted) {
+            final profile = context.read<ProfileProvider>().activeProfile;
+            preferredAudio = profile.preferredAudioLang;
+            preferredSub = profile.preferredSubtitleLang;
+            preferredList = profile.preferredLanguages;
+          }
+        } catch (_) {}
 
         final audioPrefs = [
           if (preferredAudio != null && preferredAudio.isNotEmpty) preferredAudio,
@@ -722,23 +728,22 @@ class _PlayerScreenState extends State<PlayerScreen> {
     });
 
     try {
-      String playableUrl = stream.url;
-      Map<String, String> playableHeaders = stream.headers;
-
-      // On Windows (video_player_win), Windows Media Foundation drops custom headers on HLS child segments,
-      // leading to 403 Forbidden. Route through our local StreamProxyService to inject headers seamlessly.
-      if (Platform.isWindows || (stream.headers.isNotEmpty && !kIsWeb)) {
-        playableUrl = await StreamProxyService.instance.getProxyUrl(stream.url, stream.headers);
-        playableHeaders = {};
+      VideoPlayerController controller;
+      try {
+        // Direct native playback first (fvp/FFmpeg on desktop and ExoPlayer on Android handle headers directly)
+        controller = VideoPlayerController.networkUrl(
+          Uri.parse(stream.url),
+          httpHeaders: stream.headers,
+        );
+        _videoPlayerController = controller;
+        await controller.initialize();
+      } catch (directErr) {
+        AppLogger.instance.log('Player', 'Direct native play failed ($directErr), attempting local StreamProxyService...');
+        final proxyUrl = await StreamProxyService.instance.getProxyUrl(stream.url, stream.headers);
+        controller = VideoPlayerController.networkUrl(Uri.parse(proxyUrl));
+        _videoPlayerController = controller;
+        await controller.initialize();
       }
-
-      final controller = VideoPlayerController.networkUrl(
-        Uri.parse(playableUrl),
-        httpHeaders: playableHeaders,
-      );
-
-      _videoPlayerController = controller;
-      await controller.initialize();
 
       if (!mounted) return;
 
@@ -797,20 +802,18 @@ class _PlayerScreenState extends State<PlayerScreen> {
           ? _directStreams[_selectedStreamIndex].headers
           : <String, String>{};
 
-      String playableUrl = url;
-      Map<String, String> playableHeaders = headers;
-
-      if (Platform.isWindows || (headers.isNotEmpty && !kIsWeb)) {
-        playableUrl = await StreamProxyService.instance.getProxyUrl(url, headers);
-        playableHeaders = {};
+      VideoPlayerController newController;
+      try {
+        newController = VideoPlayerController.networkUrl(
+          Uri.parse(url),
+          httpHeaders: headers,
+        );
+        await newController.initialize();
+      } catch (_) {
+        final proxyUrl = await StreamProxyService.instance.getProxyUrl(url, headers);
+        newController = VideoPlayerController.networkUrl(Uri.parse(proxyUrl));
+        await newController.initialize();
       }
-
-      final newController = VideoPlayerController.networkUrl(
-        Uri.parse(playableUrl),
-        httpHeaders: playableHeaders,
-      );
-
-      await newController.initialize();
       if (!mounted) {
         newController.dispose();
         return;
