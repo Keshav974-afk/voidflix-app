@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
+import 'app_logger.dart';
 
 class _ProxySession {
   final String id;
@@ -46,18 +47,18 @@ class StreamProxyService {
       // and LAN Smart TVs / DLNA renderers can reach the proxy.
       _server = await HttpServer.bind(InternetAddress.anyIPv4, 0);
       _port = _server!.port;
-      debugPrint('[StreamProxyService] Started HLS loopback proxy on port $_port');
+      AppLogger.instance.log('StreamProxy', 'Started HLS loopback proxy on port $_port');
 
       _cleanupTimer = Timer.periodic(const Duration(minutes: 15), (_) => _cleanupExpiredSessions());
 
       _server!.listen(
         _handleRequest,
         onError: (e) {
-          debugPrint('[StreamProxyService] Server error: $e');
+          AppLogger.instance.error('StreamProxy', 'Server error', e);
         },
       );
     } catch (e) {
-      debugPrint('[StreamProxyService] Failed to start server: $e');
+      AppLogger.instance.error('StreamProxy', 'Failed to start server', e);
     }
   }
 
@@ -152,14 +153,14 @@ class StreamProxyService {
 
       if (isM3u8) {
         await _handlePlaylistRequest(request, session);
-      } else if (path == '/segment' || path == '/proxy_resource' || path == '/direct') {
+      } else if (path.startsWith('/segment') || path.startsWith('/proxy_resource') || path == '/direct') {
         await _handleSegmentRequest(request, session);
       } else {
         request.response.statusCode = HttpStatus.notFound;
         await request.response.close();
       }
     } catch (e, stack) {
-      debugPrint('[StreamProxyService] Request error: $e\n$stack');
+      AppLogger.instance.error('StreamProxy', 'Request error: $path', e, stack);
       try {
         request.response.statusCode = HttpStatus.badGateway;
         request.response.write('Bad Gateway: $e');
@@ -246,9 +247,12 @@ class StreamProxyService {
               final originalUriStr = match.group(1)!;
               final resolvedUri = targetUri.resolve(originalUriStr);
               final isM3u8 = resolvedUri.path.endsWith('.m3u8') || resolvedUri.toString().contains('.m3u8');
+              final ext = resolvedUri.pathSegments.isNotEmpty && resolvedUri.pathSegments.last.contains('.')
+                  ? '.${resolvedUri.pathSegments.last.split('.').last.split('?').first}'
+                  : '';
               final proxyUrl = isM3u8
                   ? '/stream.m3u8?sid=$sid&url=${Uri.encodeComponent(resolvedUri.toString())}'
-                  : '/proxy_resource?sid=$sid&url=${Uri.encodeComponent(resolvedUri.toString())}';
+                  : '/proxy_resource$ext?sid=$sid&url=${Uri.encodeComponent(resolvedUri.toString())}';
               return 'URI="$proxyUrl"';
             },
           );
@@ -263,7 +267,10 @@ class StreamProxyService {
         if (isSubPlaylist) {
           rewritten.writeln('/stream.m3u8?sid=$sid&url=${Uri.encodeComponent(resolvedUri.toString())}');
         } else {
-          rewritten.writeln('/segment?sid=$sid&url=${Uri.encodeComponent(resolvedUri.toString())}');
+          final ext = resolvedUri.pathSegments.isNotEmpty && resolvedUri.pathSegments.last.contains('.')
+              ? '.${resolvedUri.pathSegments.last.split('.').last.split('?').first}'
+              : '.ts';
+          rewritten.writeln('/segment$ext?sid=$sid&url=${Uri.encodeComponent(resolvedUri.toString())}');
         }
       }
     }

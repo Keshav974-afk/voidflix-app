@@ -60,11 +60,11 @@ void main() {
     expect(refererReceived, isTrue);
 
     // Verify rewritten segments
-    expect(res.body.contains('/segment?sid='), isTrue);
-    expect(res.body.contains('/proxy_resource?sid='), isTrue);
+    expect(res.body.contains('/segment.ts?sid='), isTrue);
+    expect(res.body.contains('/proxy_resource.key?sid='), isTrue);
 
     // Extract one segment URL and fetch it via proxy
-    final match = RegExp(r'/segment\?sid=[^\s]+').firstMatch(res.body);
+    final match = RegExp(r'/segment\.ts\?sid=[^\s]+').firstMatch(res.body);
     expect(match, isNotNull);
     final segmentPath = match!.group(0)!;
     final fullSegmentUrl = 'http://127.0.0.1:${proxy.port}$segmentPath';

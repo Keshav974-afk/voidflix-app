@@ -48,7 +48,7 @@ dependencies:
   path_provider: ^2.1.6
   url_launcher: ^6.3.3
   wakelock_plus: ^1.8.1
-  video_player_win: ^3.3.1
+  fvp: ^0.39.1
 
 dev_dependencies:
   flutter_test:

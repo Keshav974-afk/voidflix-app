@@ -20,6 +20,7 @@ import '../core/services/clip_export_service.dart';
 import '../core/services/stream_extractor.dart';
 import '../core/services/subtitle_service.dart';
 import '../core/services/stream_proxy_service.dart';
+import '../core/services/app_logger.dart';
 import '../core/services/watch_party_service.dart';
 import '../core/utils/language_utils.dart';
 import '../core/utils/platform_utils.dart';
@@ -512,18 +513,18 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
     if (nextNativeIdx != -1) {
       final nextServer = ServerConfig.servers[nextNativeIdx];
-      debugPrint('Native server failed. Trying next native server: ${nextServer.name}');
+      AppLogger.instance.log('Player', 'Native server failed. Trying next native server: ${nextServer.name}');
       _loadServerDirect(nextNativeIdx, startPosition: resumePosition);
       return;
     }
 
     // Only if ALL native direct play servers have been tried:
-    debugPrint('All native direct servers exhausted.');
+    AppLogger.instance.log('Player', 'All native direct servers exhausted.');
     if (_isDeveloperMode) {
-      debugPrint('Developer mode enabled: falling back to web embed.');
+      AppLogger.instance.log('Player', 'Developer mode enabled: falling back to web embed.');
       _switchToEmbedFallback();
     } else {
-      debugPrint('Developer mode disabled: showing aesthetic unavailable screen.');
+      AppLogger.instance.log('Player', 'Developer mode disabled: showing aesthetic unavailable screen.');
       _handleAllNativeServersFailed();
     }
   }
@@ -691,11 +692,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
         await _initNativePlayer(streams[chosenAudioIdx], startPosition: startPosition);
       } else {
-        debugPrint('Direct extraction for ${server.name} returned 0 streams. Trying next native server.');
+        AppLogger.instance.log('Player', 'Direct extraction for ${server.name} returned 0 streams. Trying next native server.');
         _fallbackToNextNativeOrEmbed(resumePosition: startPosition);
       }
-    } catch (e) {
-      debugPrint('Direct extraction error for ${server.name}: $e');
+    } catch (e, st) {
+      AppLogger.instance.error('Player', 'Direct extraction error for ${server.name}', e, st);
       if (mounted) {
         _fallbackToNextNativeOrEmbed(resumePosition: startPosition);
       }
@@ -774,8 +775,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
         _currentPosition = controller.value.position;
       });
       _startHideControlsTimer();
-    } catch (e) {
-      debugPrint('Native player initialization failed for ${stream.sourceName}: $e');
+    } catch (e, st) {
+      AppLogger.instance.error('Player', 'Native player initialization failed for ${stream.sourceName}', e, st);
       if (_selectedStreamIndex + 1 < _directStreams.length) {
         _selectedStreamIndex++;
         await _initNativePlayer(_directStreams[_selectedStreamIndex], startPosition: startPosition, autoPlay: autoPlay);
@@ -844,7 +845,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
     final val = controller.value;
     if (val.hasError) {
-      debugPrint('Native playback error: ${val.errorDescription}');
+      AppLogger.instance.error('Player', 'Native playback error: ${val.errorDescription}');
       if (_selectedStreamIndex + 1 < _directStreams.length) {
         _selectedStreamIndex++;
         _initNativePlayer(_directStreams[_selectedStreamIndex], startPosition: _currentPosition, autoPlay: true);

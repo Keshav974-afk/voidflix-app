@@ -3,8 +3,9 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
-import 'package:video_player_win/video_player_win.dart';
+import 'package:fvp/fvp.dart' as fvp;
 import 'core/constants/theme_constants.dart';
+import 'core/services/app_logger.dart';
 import 'core/services/tv_mode_service.dart';
 import 'core/services/cast_service.dart';
 import 'providers/download_provider.dart';
@@ -27,8 +28,30 @@ class VoidflixHttpOverrides extends HttpOverrides {
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
-  if (!kIsWeb && Platform.isWindows) {
-    WindowsVideoPlayer.registerWith();
+  await AppLogger.instance.init();
+
+  FlutterError.onError = (details) {
+    AppLogger.instance.error('FlutterError', details.exceptionAsString(), details.stack);
+  };
+  PlatformDispatcher.instance.onError = (error, stack) {
+    AppLogger.instance.error('PlatformDispatcher', error.toString(), stack);
+    return true;
+  };
+
+  if (!kIsWeb && (Platform.isWindows || Platform.isLinux)) {
+    fvp.registerWith(
+      options: {
+        'platforms': ['windows', 'linux'],
+        'video.decoders': ['D3D11', 'FFmpeg'],
+        'player': {
+          'avio.reconnect': '1',
+          'avio.reconnect_delay_max': '7',
+          'avformat.allowed_extensions': 'ALL',
+        },
+        'fastSeek': true,
+      },
+    );
+    AppLogger.instance.log('Main', 'Registered fvp media engine for desktop (D3D11/FFmpeg)');
   }
   HttpOverrides.global = VoidflixHttpOverrides();
 
