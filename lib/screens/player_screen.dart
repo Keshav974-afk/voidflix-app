@@ -11,6 +11,7 @@ import 'package:webview_flutter_android/webview_flutter_android.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../core/constants/theme_constants.dart';
 import '../core/network/api_service.dart';
@@ -4167,6 +4168,51 @@ class _PlayerScreenState extends State<PlayerScreen> {
                               style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
                             ),
                             onPressed: _openServerPicker,
+                          ),
+                          ElevatedButton.icon(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFFE50914),
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 13),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(24),
+                              ),
+                              elevation: 0,
+                            ),
+                            icon: const Icon(Icons.open_in_new_rounded, size: 18),
+                            label: const Text(
+                              'Open in External Player (VLC)',
+                              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                            ),
+                            onPressed: () {
+                              final url = _directStreams.isNotEmpty
+                                  ? _directStreams.first.url
+                                  : _buildCurrentEmbedUrl();
+                              CastService.launchExternalPlayer(
+                                videoUrl: url,
+                                title: widget.mediaTitle,
+                              );
+                            },
+                          ),
+                          ElevatedButton.icon(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: Colors.white.withValues(alpha: 0.15),
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 13),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(24),
+                              ),
+                              elevation: 0,
+                            ),
+                            icon: const Icon(Icons.language_rounded, size: 18),
+                            label: const Text(
+                              'Watch in Browser',
+                              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
+                            ),
+                            onPressed: () {
+                              final webUrl = _buildCurrentEmbedUrl();
+                              launchUrl(Uri.parse(webUrl), mode: LaunchMode.externalApplication);
+                            },
                           ),
                           OutlinedButton.icon(
                             style: OutlinedButton.styleFrom(

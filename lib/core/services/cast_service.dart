@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
+import 'package:url_launcher/url_launcher.dart';
 
 enum CastPlaybackStatus {
   idle,
@@ -452,6 +453,31 @@ class CastService extends ChangeNotifier {
           'headers': headers ?? {},
         });
         return res == true;
+      } else if (Platform.isWindows) {
+        final vlcPaths = [
+          r'C:\Program Files\VideoLAN\VLC\vlc.exe',
+          r'C:\Program Files (x86)\VideoLAN\VLC\vlc.exe',
+        ];
+        for (final vp in vlcPaths) {
+          if (File(vp).existsSync()) {
+            await Process.start(vp, [videoUrl]);
+            return true;
+          }
+        }
+        final mpvPaths = [
+          r'C:\Program Files\mpv\mpv.exe',
+          r'C:\mpv\mpv.exe',
+        ];
+        for (final mp in mpvPaths) {
+          if (File(mp).existsSync()) {
+            await Process.start(mp, [videoUrl]);
+            return true;
+          }
+        }
+        return await launchUrl(
+          Uri.parse(videoUrl),
+          mode: LaunchMode.externalApplication,
+        );
       }
       return false;
     } catch (e) {

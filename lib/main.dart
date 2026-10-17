@@ -1,7 +1,9 @@
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
+import 'package:video_player_win/video_player_win.dart';
 import 'core/constants/theme_constants.dart';
 import 'core/services/tv_mode_service.dart';
 import 'core/services/cast_service.dart';
@@ -25,6 +27,9 @@ class VoidflixHttpOverrides extends HttpOverrides {
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  if (!kIsWeb && Platform.isWindows) {
+    WindowsVideoPlayer.registerWith();
+  }
   HttpOverrides.global = VoidflixHttpOverrides();
 
   // Dark system navigation bar & status bar
