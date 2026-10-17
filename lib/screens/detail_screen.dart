@@ -16,6 +16,7 @@ import '../widgets/netflix_season_picker.dart';
 import '../widgets/cast_dialog.dart';
 import '../core/services/cast_service.dart';
 import '../core/services/stream_extractor.dart';
+import '../core/utils/platform_utils.dart';
 import 'downloads_screen.dart';
 import 'player_screen.dart';
 
@@ -58,6 +59,7 @@ class _DetailScreenState extends State<DetailScreen> {
   }
 
   void _updateTrailerPlayer(String key) {
+    if (!PlatformUtils.isWebViewSupported) return;
     if (key.isEmpty || (key == _activeTrailerKey && _trailerWebController != null)) return;
     _activeTrailerKey = key;
 

@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import '../core/constants/theme_constants.dart';
+import '../core/utils/platform_utils.dart';
 import '../models/live_channel.dart';
 
 class LiveTvScreen extends StatefulWidget {
@@ -228,23 +230,27 @@ class LiveChannelPlayerScreen extends StatefulWidget {
 }
 
 class _LiveChannelPlayerScreenState extends State<LiveChannelPlayerScreen> {
-  late WebViewController _webViewController;
+  WebViewController? _webViewController;
   bool _isLoading = true;
 
   @override
   void initState() {
     super.initState();
-    _webViewController = WebViewController()
-      ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..setBackgroundColor(Colors.black)
-      ..setNavigationDelegate(
-        NavigationDelegate(
-          onPageFinished: (url) {
-            if (mounted) setState(() => _isLoading = false);
-          },
-        ),
-      )
-      ..loadRequest(Uri.parse(widget.channel.streamUrl));
+    if (PlatformUtils.isWebViewSupported) {
+      _webViewController = WebViewController()
+        ..setJavaScriptMode(JavaScriptMode.unrestricted)
+        ..setBackgroundColor(Colors.black)
+        ..setNavigationDelegate(
+          NavigationDelegate(
+            onPageFinished: (url) {
+              if (mounted) setState(() => _isLoading = false);
+            },
+          ),
+        )
+        ..loadRequest(Uri.parse(widget.channel.streamUrl));
+    } else {
+      _isLoading = false;
+    }
   }
 
   @override
@@ -257,7 +263,44 @@ class _LiveChannelPlayerScreenState extends State<LiveChannelPlayerScreen> {
       ),
       body: Stack(
         children: [
-          WebViewWidget(controller: _webViewController),
+          if (_webViewController != null)
+            WebViewWidget(controller: _webViewController!)
+          else
+            Center(
+              child: Padding(
+                padding: const EdgeInsets.all(24.0),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    const Icon(Icons.live_tv_rounded, size: 64, color: AppTheme.primaryRed),
+                    const SizedBox(height: 16),
+                    Text(
+                      widget.channel.name,
+                      style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold, color: Colors.white),
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      'Live TV desktop stream is available via default media player or browser',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: Colors.white70),
+                    ),
+                    const SizedBox(height: 24),
+                    ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: AppTheme.primaryRed,
+                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                      onPressed: () {
+                        launchUrl(Uri.parse(widget.channel.streamUrl), mode: LaunchMode.externalApplication);
+                      },
+                      icon: const Icon(Icons.open_in_new_rounded, color: Colors.white),
+                      label: const Text('Open Stream Externally', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                    ),
+                  ],
+                ),
+              ),
+            ),
           if (_isLoading)
             const Center(
               child: CircularProgressIndicator(color: AppTheme.primaryRed),

@@ -1,12 +1,14 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
 import '../core/constants/voidflix_svg_asset.dart';
 import '../core/services/remote_config_service.dart';
 import '../core/services/app_analytics_service.dart';
+import '../core/utils/platform_utils.dart';
 import 'onboarding_screen.dart';
 import 'profile_gate_screen.dart';
 import 'update_required_screen.dart';
@@ -24,7 +26,7 @@ class SplashScreen extends StatefulWidget {
 }
 
 class _SplashScreenState extends State<SplashScreen> {
-  late final WebViewController _controller;
+  WebViewController? _controller;
   Timer? _timer;
   Timer? _hapticTimer1;
   Timer? _hapticTimer2;
@@ -36,29 +38,30 @@ class _SplashScreenState extends State<SplashScreen> {
   void initState() {
     super.initState();
 
-    _controller = WebViewController()
-      ..setJavaScriptMode(JavaScriptMode.unrestricted)
-      ..setBackgroundColor(Colors.black);
+    if (PlatformUtils.isWebViewSupported) {
+      final controller = WebViewController()
+        ..setJavaScriptMode(JavaScriptMode.unrestricted)
+        ..setBackgroundColor(Colors.black);
 
-    if (_controller.platform is AndroidWebViewController) {
-      final android = _controller.platform as AndroidWebViewController;
-      android.setMediaPlaybackRequiresUserGesture(false);
-    }
+      if (controller.platform is AndroidWebViewController) {
+        final android = controller.platform as AndroidWebViewController;
+        android.setMediaPlaybackRequiresUserGesture(false);
+      }
 
-    _controller.setNavigationDelegate(
-      NavigationDelegate(
-        onPageFinished: (_) {
-          if (mounted) {
-            setState(() {
-              _ready = true;
-            });
-          }
-        },
-      ),
-    );
+      controller.setNavigationDelegate(
+        NavigationDelegate(
+          onPageFinished: (_) {
+            if (mounted) {
+              setState(() {
+                _ready = true;
+              });
+            }
+          },
+        ),
+      );
 
-    // Build self-contained HTML page containing the exact VOIDFLIX logo swoop SVG
-    final htmlContent = '''
+      // Build self-contained HTML page containing the exact VOIDFLIX logo swoop SVG
+      final htmlContent = '''
 <!DOCTYPE html>
 <html>
 <head>
@@ -93,8 +96,11 @@ $voidflixSwoopSvg
 </body>
 </html>
 ''';
-
-    _controller.loadHtmlString(htmlContent);
+      controller.loadHtmlString(htmlContent);
+      _controller = controller;
+    } else {
+      _ready = true;
+    }
 
     // Synchronized tactile haptics matching the SVG animation milestones
     // 1. Ribbon V emergence
@@ -193,14 +199,81 @@ $voidflixSwoopSvg
             // Pure black backdrop
             const ColoredBox(color: Colors.black),
 
-            // Hardware-accelerated SVG renderer
-            AnimatedOpacity(
-              opacity: _ready ? 1.0 : 0.0,
-              duration: const Duration(milliseconds: 150),
-              child: SizedBox.expand(
-                child: WebViewWidget(controller: _controller),
+            // Hardware-accelerated SVG renderer (mobile) or Native Flutter Glow Logo (desktop)
+            if (_controller != null)
+              AnimatedOpacity(
+                opacity: _ready ? 1.0 : 0.0,
+                duration: const Duration(milliseconds: 150),
+                child: SizedBox.expand(
+                  child: WebViewWidget(controller: _controller!),
+                ),
+              )
+            else
+              Center(
+                child: TweenAnimationBuilder<double>(
+                  tween: Tween<double>(begin: 0.85, end: 1.0),
+                  duration: const Duration(milliseconds: 900),
+                  curve: Curves.easeOutCubic,
+                  builder: (context, scale, child) {
+                    return Transform.scale(
+                      scale: scale,
+                      child: child,
+                    );
+                  },
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        width: 88,
+                        height: 88,
+                        decoration: BoxDecoration(
+                          shape: BoxShape.circle,
+                          color: const Color(0xFFE50914).withValues(alpha: 0.15),
+                          boxShadow: [
+                            BoxShadow(
+                              color: const Color(0xFFE50914).withValues(alpha: 0.4),
+                              blurRadius: 32,
+                              spreadRadius: 6,
+                            ),
+                          ],
+                        ),
+                        child: const Center(
+                          child: Icon(
+                            Icons.play_arrow_rounded,
+                            size: 56,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 24),
+                      Text(
+                        'VOIDFLIX',
+                        style: GoogleFonts.bebasNeue(
+                          fontSize: 48,
+                          letterSpacing: 6,
+                          color: const Color(0xFFE50914),
+                          shadows: [
+                            Shadow(
+                              color: const Color(0xFFE50914).withValues(alpha: 0.6),
+                              blurRadius: 16,
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      const Text(
+                        'ULTRA HD STREAMING',
+                        style: TextStyle(
+                          fontSize: 11,
+                          letterSpacing: 4,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.white54,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
               ),
-            ),
           ],
         ),
       ),

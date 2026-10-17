@@ -19,6 +19,7 @@ import '../core/services/stream_extractor.dart';
 import '../core/services/subtitle_service.dart';
 import '../core/services/watch_party_service.dart';
 import '../core/utils/language_utils.dart';
+import '../core/utils/platform_utils.dart';
 import '../models/media_detail.dart';
 import '../models/server_config.dart';
 import '../models/watch_progress.dart';
@@ -919,6 +920,15 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   void _initWebView() {
+    if (!PlatformUtils.isWebViewSupported) {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _isWebViewLoading = false;
+        });
+      }
+      return;
+    }
     final url = _buildCurrentEmbedUrl();
 
     // Ensure webview loading screen dismisses promptly within 4 seconds

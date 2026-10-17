@@ -7,6 +7,7 @@ import 'package:webview_flutter_android/webview_flutter_android.dart';
 import '../core/constants/theme_constants.dart';
 import '../core/network/api_service.dart';
 import '../core/services/youtube_service.dart';
+import '../core/utils/platform_utils.dart';
 import '../models/media_item.dart';
 import '../providers/media_provider.dart';
 import '../providers/watchlist_provider.dart';
@@ -134,6 +135,7 @@ class _ClipPlayerTileState extends State<ClipPlayerTile> {
   }
 
   void _initWebController(String key) {
+    if (!PlatformUtils.isWebViewSupported) return;
     if (key.isEmpty) return;
     late final WebViewController controller;
     controller = WebViewController()
