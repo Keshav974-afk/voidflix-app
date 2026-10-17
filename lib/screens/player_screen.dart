@@ -239,6 +239,16 @@ class _PlayerScreenState extends State<PlayerScreen> {
     });
   }
 
+  HistoryProvider? _historyProvider;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    try {
+      _historyProvider = context.read<HistoryProvider>();
+    } catch (_) {}
+  }
+
   @override
   void dispose() {
     const MethodChannel('org.voidflix/notifications').setMethodCallHandler(null);
@@ -1467,7 +1477,17 @@ class _PlayerScreenState extends State<PlayerScreen> {
       progress: prog,
       lastWatched: now,
     );
-    context.read<HistoryProvider>().saveProgress(progress);
+    try {
+      if (mounted) {
+        context.read<HistoryProvider>().saveProgress(progress);
+      } else {
+        _historyProvider?.saveProgress(progress);
+      }
+    } catch (_) {
+      try {
+        _historyProvider?.saveProgress(progress);
+      } catch (_) {}
+    }
   }
 
   void _goToEpisode(int episodeNum) {
