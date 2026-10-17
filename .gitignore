@@ -48,3 +48,9 @@ app.*.map.json
 
 # Widget Preview related
 .widget_preview/
+
+# Cryptography private keys
+*.pfx
+*.p12
+*.key
+*.pem

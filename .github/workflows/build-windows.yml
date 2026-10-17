@@ -31,6 +31,28 @@ jobs:
       - name: Build Windows Release
         run: flutter build windows --release
 
+      - name: Create Code Signing Certificate & Sign Binaries
+        shell: pwsh
+        run: |
+          Write-Host "Creating Code Signing Certificate using Windows Cryptography Tools..."
+          $cert = New-SelfSignedCertificate `
+            -Type CodeSigningCert `
+            -Subject "CN=Voidflix, O=Voidflix Open Source, C=US" `
+            -KeyUsage DigitalSignature `
+            -FriendlyName "Voidflix Authenticode Certificate" `
+            -CertStoreLocation "Cert:\CurrentUser\My" `
+            -NotAfter (Get-Date).AddYears(5)
+
+          # Export public cert for Inno Setup installer packaging & website trust
+          Export-Certificate -Cert $cert -FilePath "windows\Voidflix-Public.cer"
+          Write-Host "Exported public certificate to windows\Voidflix-Public.cer"
+
+          # Sign all executable binaries & dynamic libraries with SHA256 and DigiCert RFC 3161 Timestamping
+          Get-ChildItem -Path "build\windows\x64\runner\Release\*.exe", "build\windows\x64\runner\Release\*.dll" | ForEach-Object {
+            Write-Host "Signing $($_.Name)..."
+            Set-AuthenticodeSignature -FilePath $_.FullName -Certificate $cert -TimestampServer "http://timestamp.digicert.com" -HashAlgorithm SHA256
+          }
+
       - name: Install Inno Setup
         run: choco install innosetup --yes --no-progress
 
@@ -38,6 +60,15 @@ jobs:
         shell: pwsh
         run: |
           & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" windows_setup.iss
+
+      - name: Sign Inno Setup Installer
+        shell: pwsh
+        run: |
+          $cert = Get-ChildItem "Cert:\CurrentUser\My" | Where-Object { $_.Subject -like "*CN=Voidflix*" } | Select-Object -First 1
+          if ($cert -and (Test-Path "build\windows\installer\Voidflix-Setup-v1.0.1.exe")) {
+            Write-Host "Signing Voidflix-Setup-v1.0.1.exe..."
+            Set-AuthenticodeSignature -FilePath "build\windows\installer\Voidflix-Setup-v1.0.1.exe" -Certificate $cert -TimestampServer "http://timestamp.digicert.com" -HashAlgorithm SHA256
+          }
 
       - name: Package Standalone Zip
         shell: pwsh
@@ -56,6 +87,12 @@ jobs:
           name: Voidflix-Windows-Portable
           path: Voidflix-Windows-Portable.zip
 
+      - name: Upload Public Certificate
+        uses: actions/upload-artifact@v4
+        with:
+          name: Voidflix-Public-Certificate
+          path: windows/Voidflix-Public.cer
+
       - name: Upload Raw Release Folder
         uses: actions/upload-artifact@v4
         with:
@@ -67,4 +104,4 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: pwsh
         run: |
-          gh release upload v1.0.1 build/windows/installer/Voidflix-Setup-v1.0.1.exe Voidflix-Windows-Portable.zip --clobber || gh release create v1.0.1 build/windows/installer/Voidflix-Setup-v1.0.1.exe Voidflix-Windows-Portable.zip --title "Voidflix v1.0.1" --notes "Official Native Windows Flutter Release" --clobber || true
+          gh release upload v1.0.1 build/windows/installer/Voidflix-Setup-v1.0.1.exe Voidflix-Windows-Portable.zip windows/Voidflix-Public.cer --clobber || gh release create v1.0.1 build/windows/installer/Voidflix-Setup-v1.0.1.exe Voidflix-Windows-Portable.zip windows/Voidflix-Public.cer --title "Voidflix v1.0.1" --notes "Official Native Windows Flutter Release with Authenticode Code Signing" --clobber || true
