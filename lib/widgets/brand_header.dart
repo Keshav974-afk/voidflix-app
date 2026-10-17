@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import '../core/constants/theme_constants.dart';
+import '../core/services/tv_mode_service.dart';
 import '../providers/notification_provider.dart';
 import '../providers/profile_provider.dart';
 import '../screens/downloads_screen.dart';
@@ -271,6 +272,15 @@ class BrandHeader extends StatelessWidget implements PreferredSizeWidget {
                   ),
 
                   const Spacer(),
+
+                  // Switch to TV Mode button
+                  IconButton(
+                    icon: const Icon(Icons.tv_rounded, color: Colors.white, size: 22),
+                    tooltip: 'Switch to TV Leanback Mode',
+                    onPressed: () {
+                      TvModeService().setTvMode(true);
+                    },
+                  ),
 
                   // Download icon (Screenshot 2)
                   IconButton(

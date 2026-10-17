@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -18,6 +19,7 @@ import '../core/network/api_service.dart';
 import '../core/services/clip_export_service.dart';
 import '../core/services/stream_extractor.dart';
 import '../core/services/subtitle_service.dart';
+import '../core/services/stream_proxy_service.dart';
 import '../core/services/watch_party_service.dart';
 import '../core/utils/language_utils.dart';
 import '../core/utils/platform_utils.dart';
@@ -80,6 +82,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   // Playback speed system (Netflix feature)
   double _playbackSpeed = 1.0;
+
+  // Volume & Audio system (PC Desktop & TV feature)
+  double _volume = 1.0;
+  bool _isMuted = false;
+  double _volumeBeforeMute = 1.0;
+  bool _showVolumeHud = false;
+  Timer? _volumeHudTimer;
 
   // Native Video Player state
   VideoPlayerController? _videoPlayerController;
@@ -222,6 +231,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
 
     _startHideControlsTimer();
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        _playerFocusNode.requestFocus();
+      }
+    });
   }
 
   @override
@@ -238,6 +253,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _hideControlsTimer?.cancel();
     _lockPillTimer?.cancel();
     _brightnessHudTimer?.cancel();
+    _volumeHudTimer?.cancel();
     _doubleTapTimer?.cancel();
     _zoomHudTimer?.cancel();
     _autoplayTimer?.cancel();
@@ -705,9 +721,19 @@ class _PlayerScreenState extends State<PlayerScreen> {
     });
 
     try {
+      String playableUrl = stream.url;
+      Map<String, String> playableHeaders = stream.headers;
+
+      // On Windows (video_player_win), Windows Media Foundation drops custom headers on HLS child segments,
+      // leading to 403 Forbidden. Route through our local StreamProxyService to inject headers seamlessly.
+      if (Platform.isWindows || (stream.headers.isNotEmpty && !kIsWeb)) {
+        playableUrl = await StreamProxyService.instance.getProxyUrl(stream.url, stream.headers);
+        playableHeaders = {};
+      }
+
       final controller = VideoPlayerController.networkUrl(
-        Uri.parse(stream.url),
-        httpHeaders: stream.headers,
+        Uri.parse(playableUrl),
+        httpHeaders: playableHeaders,
       );
 
       _videoPlayerController = controller;
@@ -770,9 +796,17 @@ class _PlayerScreenState extends State<PlayerScreen> {
           ? _directStreams[_selectedStreamIndex].headers
           : <String, String>{};
 
+      String playableUrl = url;
+      Map<String, String> playableHeaders = headers;
+
+      if (Platform.isWindows || (headers.isNotEmpty && !kIsWeb)) {
+        playableUrl = await StreamProxyService.instance.getProxyUrl(url, headers);
+        playableHeaders = {};
+      }
+
       final newController = VideoPlayerController.networkUrl(
-        Uri.parse(url),
-        httpHeaders: headers,
+        Uri.parse(playableUrl),
+        httpHeaders: playableHeaders,
       );
 
       await newController.initialize();
@@ -3223,9 +3257,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
           onKeyEvent: _handleKeyEvent,
           child: Scaffold(
             backgroundColor: Colors.black,
-            body: Stack(
-            fit: StackFit.expand,
-            children: [
+            body: MouseRegion(
+              cursor: (_showControls || !_isPlaying) ? SystemMouseCursors.basic : SystemMouseCursors.none,
+              onHover: (_) => _revealControls(),
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
               // ---------------------------------------------------------------
               // Layer 1: The Video Player (Native ExoPlayer or Web Embed) with Smooth Zoom
               // ---------------------------------------------------------------
@@ -3463,6 +3500,19 @@ class _PlayerScreenState extends State<PlayerScreen> {
                   right: 0,
                   child: Center(
                     child: _buildZoomHud(),
+                  ),
+                ),
+
+              // ---------------------------------------------------------------
+              // Layer 7.6: Volume & Mute HUD Badge (PC Desktop & TV)
+              // ---------------------------------------------------------------
+              if (_isNativeMode && _showVolumeHud && !_isClippingMoment)
+                Positioned(
+                  top: 24,
+                  left: 0,
+                  right: 0,
+                  child: Center(
+                    child: _buildVolumeHud(),
                   ),
                 ),
 
@@ -3720,6 +3770,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                           icon: Icons.content_cut_rounded,
                                           label: 'Clip',
                                           onTap: _openClipMoment,
+                                        ),
+                                        _NetflixBarButton(
+                                          icon: _isMuted || _volume == 0
+                                              ? Icons.volume_off_rounded
+                                              : (_volume > 0.5 ? Icons.volume_up_rounded : Icons.volume_down_rounded),
+                                          label: _isMuted ? 'Mute' : '${(_volume * 100).round()}%',
+                                          onTap: _toggleMute,
                                         ),
                                         _NetflixBarButton(
                                           icon: Icons.speed_rounded,
@@ -4015,6 +4072,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                   ),
                 ),
               ],
+            ),
             ),
           ),
         ),
@@ -5421,29 +5479,163 @@ class _PlayerScreenState extends State<PlayerScreen> {
     );
   }
 
+  void _adjustVolume(double delta) {
+    _revealControls();
+    final newVol = (_volume + delta).clamp(0.0, 1.0);
+    _setVolume(newVol);
+  }
+
+  void _setVolume(double newVol) {
+    _volume = newVol;
+    _isMuted = newVol == 0.0;
+    _videoPlayerController?.setVolume(_isMuted ? 0.0 : _volume);
+
+    _volumeHudTimer?.cancel();
+    setState(() => _showVolumeHud = true);
+    _volumeHudTimer = Timer(const Duration(seconds: 2), () {
+      if (mounted) setState(() => _showVolumeHud = false);
+    });
+  }
+
+  void _toggleMute() {
+    _revealControls();
+    if (_isMuted || _volume == 0.0) {
+      _setVolume(_volumeBeforeMute > 0 ? _volumeBeforeMute : 1.0);
+    } else {
+      _volumeBeforeMute = _volume;
+      _setVolume(0.0);
+    }
+  }
+
+  void _adjustSpeed(int direction) {
+    _revealControls();
+    final speeds = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
+    int currentIdx = speeds.indexWhere((s) => (s - _playbackSpeed).abs() < 0.05);
+    if (currentIdx == -1) currentIdx = 2; // 1.0
+    final newIdx = (currentIdx + direction).clamp(0, speeds.length - 1);
+    final sp = speeds[newIdx];
+    setState(() => _playbackSpeed = sp);
+    _videoPlayerController?.setPlaybackSpeed(sp);
+    _startHideControlsTimer();
+  }
+
+  void _toggleSubtitlesShortcut() {
+    _revealControls();
+    if (_selectedSubtitle != null) {
+      _selectSubtitle(null);
+    } else if (_subtitles.isNotEmpty) {
+      _selectSubtitle(_subtitles.first);
+    }
+  }
+
+  void _toggleFullscreen() {
+    _revealControls();
+    setState(() => _isZoomedToFill = !_isZoomedToFill);
+  }
+
+  Widget _buildVolumeHud() {
+    final int pct = (_volume * 100).round();
+    final IconData icon = _isMuted || pct == 0
+        ? Icons.volume_off_rounded
+        : (pct > 50 ? Icons.volume_up_rounded : Icons.volume_down_rounded);
+
+    return AnimatedOpacity(
+      opacity: _showVolumeHud ? 1.0 : 0.0,
+      duration: const Duration(milliseconds: 180),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 10),
+        decoration: BoxDecoration(
+          color: Colors.black.withValues(alpha: 0.85),
+          borderRadius: BorderRadius.circular(24),
+          border: Border.all(color: Colors.white24, width: 0.8),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.6),
+              blurRadius: 14,
+            ),
+          ],
+        ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, color: Colors.white, size: 20),
+            const SizedBox(width: 10),
+            Text(
+              _isMuted ? 'Muted' : '$pct%',
+              style: const TextStyle(
+                color: Colors.white,
+                fontSize: 14,
+                fontWeight: FontWeight.bold,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Container(
+              width: 80,
+              height: 5,
+              decoration: BoxDecoration(
+                color: Colors.white24,
+                borderRadius: BorderRadius.circular(3),
+              ),
+              child: FractionallySizedBox(
+                alignment: Alignment.centerLeft,
+                widthFactor: _isMuted ? 0.0 : _volume,
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: AppTheme.primaryRed,
+                    borderRadius: BorderRadius.circular(3),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   void _handleKeyEvent(KeyEvent event) {
     if (event is! KeyDownEvent) return;
 
-    if (event.logicalKey == LogicalKeyboardKey.select ||
-        event.logicalKey == LogicalKeyboardKey.enter ||
-        event.logicalKey == LogicalKeyboardKey.space) {
+    final key = event.logicalKey;
+
+    if (key == LogicalKeyboardKey.select ||
+        key == LogicalKeyboardKey.enter ||
+        key == LogicalKeyboardKey.space ||
+        key == LogicalKeyboardKey.keyK) {
       _togglePlayPause();
-    } else if (event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+    } else if (key == LogicalKeyboardKey.arrowLeft || key == LogicalKeyboardKey.keyJ) {
       _seekRelative(-10);
-    } else if (event.logicalKey == LogicalKeyboardKey.arrowRight) {
+    } else if (key == LogicalKeyboardKey.arrowRight || key == LogicalKeyboardKey.keyL) {
       _seekRelative(10);
-    } else if (event.logicalKey == LogicalKeyboardKey.arrowUp ||
-        event.logicalKey == LogicalKeyboardKey.arrowDown) {
-      _revealControls();
-    } else if (event.logicalKey == LogicalKeyboardKey.mediaPlayPause) {
+    } else if (key == LogicalKeyboardKey.arrowUp) {
+      _adjustVolume(0.05);
+    } else if (key == LogicalKeyboardKey.arrowDown) {
+      _adjustVolume(-0.05);
+    } else if (key == LogicalKeyboardKey.keyM) {
+      _toggleMute();
+    } else if (key == LogicalKeyboardKey.keyF || key == LogicalKeyboardKey.f11) {
+      _toggleFullscreen();
+    } else if (key == LogicalKeyboardKey.keyC) {
+      _toggleSubtitlesShortcut();
+    } else if (key == LogicalKeyboardKey.bracketLeft) {
+      _adjustSpeed(-1);
+    } else if (key == LogicalKeyboardKey.bracketRight) {
+      _adjustSpeed(1);
+    } else if (key == LogicalKeyboardKey.escape) {
+      if (_showControls) {
+        Navigator.of(context).maybePop();
+      } else {
+        _revealControls();
+      }
+    } else if (key == LogicalKeyboardKey.mediaPlayPause) {
       _togglePlayPause();
-    } else if (event.logicalKey == LogicalKeyboardKey.mediaFastForward) {
+    } else if (key == LogicalKeyboardKey.mediaFastForward) {
       _seekRelative(10);
-    } else if (event.logicalKey == LogicalKeyboardKey.mediaRewind) {
+    } else if (key == LogicalKeyboardKey.mediaRewind) {
       _seekRelative(-10);
-    } else if (event.logicalKey == LogicalKeyboardKey.keyS && _showSkipIntro) {
+    } else if (key == LogicalKeyboardKey.keyS && _showSkipIntro) {
       _skipIntro();
-    } else if (event.logicalKey == LogicalKeyboardKey.keyN && widget.mediaType == 'tv') {
+    } else if (key == LogicalKeyboardKey.keyN && widget.mediaType == 'tv') {
       _nextEpisode();
     }
   }

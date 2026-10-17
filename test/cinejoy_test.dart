@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flowflix_app/core/constants/api_constants.dart';
+import 'package:flowflix_app/core/services/stream_proxy_service.dart';
 import 'package:http/http.dart' as http;
 
 class _RealNetworkHttpOverrides extends HttpOverrides {}
@@ -94,8 +95,37 @@ void main() {
     // Test stream playback
     final playRes = await http.get(Uri.parse(playlist));
     debugPrint('Stream playback status: ${playRes.statusCode}');
+    debugPrint('Raw playlist body:\n${playRes.body}');
     expect(playRes.statusCode, equals(200));
     expect(playRes.body.contains('#EXTM3U'), isTrue);
     debugPrint('SUCCESS! Playlist is valid HLS.');
+
+    // Test through StreamProxyService
+    final proxy = StreamProxyService.instance;
+    final proxiedUrl = await proxy.getProxyUrl(playlist, {
+      'Referer': 'https://cinejoy.pk/',
+      'Origin': 'https://cinejoy.pk',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+    });
+    debugPrint('Proxied local URL: $proxiedUrl');
+    final proxiedRes = await http.get(Uri.parse(proxiedUrl));
+    expect(proxiedRes.statusCode, equals(200));
+    expect(proxiedRes.body.contains('#EXTM3U'), isTrue);
+    debugPrint('Proxied manifest received: ${proxiedRes.body.substring(0, 120)}...');
+
+    // Test all variant subplaylists
+    final lines = proxiedRes.body.split('\n');
+    for (final l in lines) {
+      if (l.trim().isNotEmpty && !l.trim().startsWith('#')) {
+        final targetUrl = 'http://127.0.0.1:${proxy.port}${l.trim()}';
+        final subRes = await http.get(Uri.parse(targetUrl));
+        debugPrint('Variant: ${l.trim().substring(0, 50)}... -> status: ${subRes.statusCode}, bytes: ${subRes.bodyBytes.length}');
+        if (subRes.statusCode == 200) {
+          debugPrint('SUCCESS! Working variant found! Sample content: ${subRes.body.substring(0, 100)}...');
+          break;
+        }
+      }
+    }
+    await proxy.stop();
   });
 }

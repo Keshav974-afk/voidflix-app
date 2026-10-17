@@ -81,6 +81,7 @@ class _CastDialogState extends State<CastDialog> {
       title: widget.title,
       posterUrl: widget.posterUrl,
       startPosition: widget.currentPosition,
+      headers: widget.headers,
     );
 
     if (mounted) {

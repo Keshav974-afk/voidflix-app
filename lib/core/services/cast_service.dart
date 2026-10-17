@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
+import 'stream_proxy_service.dart';
 
 enum CastPlaybackStatus {
   idle,
@@ -270,6 +271,7 @@ class CastService extends ChangeNotifier {
     required String title,
     String? posterUrl,
     Duration startPosition = Duration.zero,
+    Map<String, String>? headers,
   }) async {
     _connectedDevice = device;
     _currentTitle = title;
@@ -280,6 +282,17 @@ class CastService extends ChangeNotifier {
     notifyListeners();
 
     try {
+      // If casting a protected stream, proxy through local LAN HTTP server to attach headers
+      String targetStreamUrl = videoUrl;
+      if (headers != null && headers.isNotEmpty) {
+        try {
+          targetStreamUrl = await StreamProxyService.instance.getLanProxyUrl(videoUrl, headers);
+          debugPrint('[CastService] Proxied stream for DLNA Smart TV: $targetStreamUrl');
+        } catch (e) {
+          debugPrint('[CastService] LAN proxy fallback to direct URL: $e');
+        }
+      }
+
       // 1. Stop current playback if active
       await _sendSoapAction(
         device.controlUrl,
@@ -289,12 +302,12 @@ class CastService extends ChangeNotifier {
       );
 
       // 2. Build DIDL-Lite metadata
-      final didlMetadata = _buildDidlMetadata(title, videoUrl, posterUrl);
+      final didlMetadata = _buildDidlMetadata(title, targetStreamUrl, posterUrl);
 
       // 3. SetAVTransportURI
       final setUriArgs =
           '<InstanceID>0</InstanceID>'
-          '<CurrentURI>${_escapeXml(videoUrl)}</CurrentURI>'
+          '<CurrentURI>${_escapeXml(targetStreamUrl)}</CurrentURI>'
           '<CurrentURIMetaData>${_escapeXml(didlMetadata)}</CurrentURIMetaData>';
 
       final setUriSuccess = await _sendSoapAction(

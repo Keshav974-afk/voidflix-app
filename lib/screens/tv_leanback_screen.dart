@@ -1,3 +1,5 @@
+import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -63,10 +65,12 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
   void initState() {
     super.initState();
     // Enforce landscape orientation for Android TV
-    SystemChrome.setPreferredOrientations([
-      DeviceOrientation.landscapeLeft,
-      DeviceOrientation.landscapeRight,
-    ]);
+    if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
+      SystemChrome.setPreferredOrientations([
+        DeviceOrientation.landscapeLeft,
+        DeviceOrientation.landscapeRight,
+      ]);
+    }
 
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final media = context.read<MediaProvider>();
@@ -109,14 +113,16 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
         Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SettingsScreen()));
         break;
       case 7:
-        // Switch back to Mobile/Tablet UI
+        // Switch back to Desktop / Mobile UI
         TvModeService().setTvMode(false);
-        SystemChrome.setPreferredOrientations([
-          DeviceOrientation.portraitUp,
-          DeviceOrientation.portraitDown,
-          DeviceOrientation.landscapeLeft,
-          DeviceOrientation.landscapeRight,
-        ]);
+        if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
+          SystemChrome.setPreferredOrientations([
+            DeviceOrientation.portraitUp,
+            DeviceOrientation.portraitDown,
+            DeviceOrientation.landscapeLeft,
+            DeviceOrientation.landscapeRight,
+          ]);
+        }
         break;
     }
   }
@@ -244,7 +250,12 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
       {'icon': Icons.live_tv_rounded, 'label': 'Live TV'},
       {'icon': Icons.bookmark_border_rounded, 'label': 'My List'},
       {'icon': Icons.settings_outlined, 'label': 'Settings'},
-      {'icon': Icons.stay_current_portrait_rounded, 'label': 'Mobile UI'},
+      {
+        'icon': Icons.desktop_windows_rounded,
+        'label': (!kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS))
+            ? 'Desktop UI'
+            : 'Mobile UI',
+      },
     ];
 
     return Focus(
