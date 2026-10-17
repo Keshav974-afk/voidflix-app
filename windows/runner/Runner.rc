@@ -89,13 +89,13 @@ BEGIN
     BEGIN
         BLOCK "040904e4"
         BEGIN
-            VALUE "CompanyName", "com.flowflix" "\0"
-            VALUE "FileDescription", "flowflix_app" "\0"
+            VALUE "CompanyName", "Voidflix" "\0"
+            VALUE "FileDescription", "Voidflix Desktop App" "\0"
             VALUE "FileVersion", VERSION_AS_STRING "\0"
-            VALUE "InternalName", "flowflix_app" "\0"
-            VALUE "LegalCopyright", "Copyright (C) 2026 com.flowflix. All rights reserved." "\0"
-            VALUE "OriginalFilename", "flowflix_app.exe" "\0"
-            VALUE "ProductName", "flowflix_app" "\0"
+            VALUE "InternalName", "Voidflix" "\0"
+            VALUE "LegalCopyright", "Copyright (C) 2026 Voidflix. All rights reserved." "\0"
+            VALUE "OriginalFilename", "Voidflix.exe" "\0"
+            VALUE "ProductName", "Voidflix" "\0"
             VALUE "ProductVersion", VERSION_AS_STRING "\0"
         END
     END

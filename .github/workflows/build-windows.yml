@@ -1,0 +1,70 @@
+name: Build Windows Flutter Release
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-windows:
+    name: Build Windows Desktop Release
+    runs-on: windows-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Enable Windows Desktop
+        run: flutter config --enable-windows-desktop
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build Windows Release
+        run: flutter build windows --release
+
+      - name: Install Inno Setup
+        run: choco install innosetup --yes --no-progress
+
+      - name: Compile Inno Setup Installer
+        shell: pwsh
+        run: |
+          & "C:\Program Files (x86)\Inno Setup 6\ISCC.exe" windows_setup.iss
+
+      - name: Package Standalone Zip
+        shell: pwsh
+        run: |
+          Compress-Archive -Path build\windows\x64\runner\Release\* -DestinationPath Voidflix-Windows-Portable.zip
+
+      - name: Upload Windows Installer Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Voidflix-Windows-Setup
+          path: build/windows/installer/Voidflix-Setup-v1.0.1.exe
+
+      - name: Upload Windows Portable Zip
+        uses: actions/upload-artifact@v4
+        with:
+          name: Voidflix-Windows-Portable
+          path: Voidflix-Windows-Portable.zip
+
+      - name: Upload Raw Release Folder
+        uses: actions/upload-artifact@v4
+        with:
+          name: Voidflix-Windows-Release-Binaries
+          path: build/windows/x64/runner/Release/
+
+      - name: Create or Update GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: pwsh
+        run: |
+          gh release upload v1.0.1 build/windows/installer/Voidflix-Setup-v1.0.1.exe Voidflix-Windows-Portable.zip --clobber || gh release create v1.0.1 build/windows/installer/Voidflix-Setup-v1.0.1.exe Voidflix-Windows-Portable.zip --title "Voidflix v1.0.1" --notes "Official Native Windows Flutter Release" --clobber || true
