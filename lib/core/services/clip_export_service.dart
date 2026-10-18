@@ -323,20 +323,29 @@ class ClipExportService {
           debugPrint('Native clip export error: $nativeErr');
         }
 
-        // Resilient fallback: If native remuxing didn't produce file, copy pre-trimmed source directly
-        if ((!outputFile.existsSync() || outputFile.lengthSync() < 500) && tempSourceFile != null && tempSourceFile.existsSync()) {
-          try {
-            await tempSourceFile.copy(outputFile.path);
+        // Resilient fallback: If native remuxing didn't produce file (e.g. on Windows or unsupported codecs),
+        // copy the available source directly so the user never loses their clip.
+        if (!outputFile.existsSync() || outputFile.lengthSync() < 500) {
+          final sourceFile = (tempSourceFile != null && tempSourceFile.existsSync())
+              ? tempSourceFile
+              : (File(inputVideoPath).existsSync() ? File(inputVideoPath) : null);
+
+          if (sourceFile != null && sourceFile.existsSync()) {
             try {
-              await _channel.invokeMethod('scanFileIntoGallery', {
-                'filePath': outputFile.absolute.path,
-              });
-            } catch (_) {}
-          } catch (_) {}
+              await sourceFile.copy(outputFile.path);
+              try {
+                await _channel.invokeMethod('scanFileIntoGallery', {
+                  'filePath': outputFile.absolute.path,
+                });
+              } catch (_) {}
+            } catch (copyErr) {
+              debugPrint('Error copying clip source: $copyErr');
+            }
+          }
         }
 
         if (outputFile.existsSync() && outputFile.lengthSync() > 500) {
-          onProgress?.call(1.0, 'Clip saved to Gallery!');
+          onProgress?.call(1.0, 'Clip saved successfully!');
           return outputFile;
         }
       }

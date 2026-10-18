@@ -1301,7 +1301,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
     final playingUrl = (_availableQualities.isNotEmpty && _selectedQualityIndex < _availableQualities.length)
         ? _availableQualities[_selectedQualityIndex].url
-        : activeStream?.url;
+        : (activeStream?.url ?? _videoPlayerController?.dataSource);
 
     final hasLocalSource = widget.localFilePath != null && File(widget.localFilePath!).existsSync();
     if (playingUrl == null && !hasLocalSource) {
@@ -3156,46 +3156,161 @@ class _PlayerScreenState extends State<PlayerScreen> {
           ),
         ),
 
-            // Current Playhead Time Label & Duration Badge below preview
+            // Current Playhead Time Label, Duration Badge & Nudge Controls below preview
             Padding(
-              padding: const EdgeInsets.only(bottom: 6),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+              child: Wrap(
+                alignment: WrapAlignment.center,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                spacing: 6,
+                runSpacing: 6,
                 children: [
-                  Text(
-                    _formatDuration(_currentPosition),
-                    style: const TextStyle(
-                      color: Colors.white,
-                      fontSize: 15,
-                      fontWeight: FontWeight.bold,
+                  // Start Nudge & Snap Controls
+                  OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      side: const BorderSide(color: Color(0xFF00C853)),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                    ),
+                    onPressed: () {
+                      final newStart = (_currentPosition.inSeconds.toDouble()).clamp(0.0, _clipEndSeconds - 2.0);
+                      setState(() {
+                        _clipStartSeconds = newStart;
+                      });
+                      _videoPlayerController?.seekTo(Duration(seconds: newStart.toInt()));
+                    },
+                    icon: const Icon(Icons.pin_drop_rounded, size: 14, color: Color(0xFF00C853)),
+                    label: const Text('Set Start', style: TextStyle(color: Color(0xFF00C853), fontSize: 11, fontWeight: FontWeight.bold)),
+                  ),
+                  InkWell(
+                    borderRadius: BorderRadius.circular(4),
+                    onTap: () {
+                      final minStart = (_clipEndSeconds - 300.0).clamp(0.0, totalSec);
+                      final newStart = (_clipStartSeconds - 1.0).clamp(minStart, _clipEndSeconds - 2.0);
+                      setState(() => _clipStartSeconds = newStart);
+                      _videoPlayerController?.seekTo(Duration(seconds: newStart.toInt()));
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 5),
+                      decoration: BoxDecoration(
+                        color: Colors.white12,
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: const Text('-1s', style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
                     ),
                   ),
-                  const SizedBox(width: 12),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                    decoration: BoxDecoration(
-                      color: (_clipEndSeconds - _clipStartSeconds) >= 300.0
-                          ? AppTheme.primaryRed.withValues(alpha: 0.3)
-                          : Colors.white.withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(
-                        color: (_clipEndSeconds - _clipStartSeconds) >= 300.0
-                            ? AppTheme.primaryRed
-                            : Colors.white24,
-                        width: 1,
+                  InkWell(
+                    borderRadius: BorderRadius.circular(4),
+                    onTap: () {
+                      final newStart = (_clipStartSeconds + 1.0).clamp(0.0, _clipEndSeconds - 2.0);
+                      setState(() => _clipStartSeconds = newStart);
+                      _videoPlayerController?.seekTo(Duration(seconds: newStart.toInt()));
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 5),
+                      decoration: BoxDecoration(
+                        color: Colors.white12,
+                        borderRadius: BorderRadius.circular(4),
                       ),
+                      child: const Text('+1s', style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
                     ),
-                    child: Text(
-                      '${_formatDuration(Duration(seconds: (_clipEndSeconds - _clipStartSeconds).toInt()))} / 5:00 max',
-                      style: TextStyle(
-                        color: (_clipEndSeconds - _clipStartSeconds) >= 300.0
-                            ? const Color(0xFFFF6B6B)
-                            : Colors.white70,
-                        fontSize: 11,
-                        fontWeight: FontWeight.bold,
-                        letterSpacing: 0.4,
+                  ),
+
+                  // Center Playhead & Duration Pill
+                  Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          _formatDuration(_currentPosition),
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 15,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: (_clipEndSeconds - _clipStartSeconds) >= 300.0
+                                ? AppTheme.primaryRed.withValues(alpha: 0.3)
+                                : Colors.white.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(
+                              color: (_clipEndSeconds - _clipStartSeconds) >= 300.0
+                                  ? AppTheme.primaryRed
+                                  : Colors.white24,
+                              width: 1,
+                            ),
+                          ),
+                          child: Text(
+                            '${_formatDuration(Duration(seconds: (_clipEndSeconds - _clipStartSeconds).toInt()))} / 5:00 max',
+                            style: TextStyle(
+                              color: (_clipEndSeconds - _clipStartSeconds) >= 300.0
+                                  ? const Color(0xFFFF6B6B)
+                                  : Colors.white70,
+                              fontSize: 11,
+                              fontWeight: FontWeight.bold,
+                              letterSpacing: 0.4,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+
+                  // End Nudge & Snap Controls
+                  InkWell(
+                    borderRadius: BorderRadius.circular(4),
+                    onTap: () {
+                      final newEnd = (_clipEndSeconds - 1.0).clamp(_clipStartSeconds + 2.0, totalSec);
+                      setState(() => _clipEndSeconds = newEnd);
+                      _videoPlayerController?.seekTo(Duration(seconds: newEnd.toInt()));
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 5),
+                      decoration: BoxDecoration(
+                        color: Colors.white12,
+                        borderRadius: BorderRadius.circular(4),
                       ),
+                      child: const Text('-1s', style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
                     ),
+                  ),
+                  InkWell(
+                    borderRadius: BorderRadius.circular(4),
+                    onTap: () {
+                      final maxEnd = (_clipStartSeconds + 300.0).clamp(0.0, totalSec);
+                      final newEnd = (_clipEndSeconds + 1.0).clamp(_clipStartSeconds + 2.0, maxEnd);
+                      setState(() => _clipEndSeconds = newEnd);
+                      _videoPlayerController?.seekTo(Duration(seconds: newEnd.toInt()));
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 5),
+                      decoration: BoxDecoration(
+                        color: Colors.white12,
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: const Text('+1s', style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
+                    ),
+                  ),
+                  OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                      side: const BorderSide(color: Color(0xFFE50914)),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                    ),
+                    onPressed: () {
+                      final maxEnd = (_clipStartSeconds + 300.0).clamp(0.0, totalSec);
+                      final newEnd = (_currentPosition.inSeconds.toDouble()).clamp(_clipStartSeconds + 2.0, maxEnd);
+                      setState(() {
+                        _clipEndSeconds = newEnd;
+                      });
+                      _videoPlayerController?.seekTo(Duration(seconds: newEnd.toInt()));
+                    },
+                    icon: const Icon(Icons.pin_drop_rounded, size: 14, color: Color(0xFFE50914)),
+                    label: const Text('Set End', style: TextStyle(color: Color(0xFFE50914), fontSize: 11, fontWeight: FontWeight.bold)),
                   ),
                 ],
               ),
@@ -3203,7 +3318,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
             // Bottom Filmstrip & Range Trimmer with Interactive Sliding Stick
             Padding(
-              padding: const EdgeInsets.fromLTRB(20, 0, 20, 14),
+              padding: const EdgeInsets.fromLTRB(20, 4, 20, 14),
               child: SizedBox(
                 height: 64,
                 child: LayoutBuilder(
@@ -3273,7 +3388,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                             child: IgnorePointer(
                               child: Container(
                                 decoration: BoxDecoration(
-                                  color: Colors.black.withValues(alpha: 0.6),
+                                  color: Colors.black.withValues(alpha: 0.65),
                                   borderRadius: const BorderRadius.horizontal(left: Radius.circular(6)),
                                 ),
                               ),
@@ -3288,21 +3403,41 @@ class _PlayerScreenState extends State<PlayerScreen> {
                             child: IgnorePointer(
                               child: Container(
                                 decoration: BoxDecoration(
-                                  color: Colors.black.withValues(alpha: 0.6),
+                                  color: Colors.black.withValues(alpha: 0.65),
                                   borderRadius: const BorderRadius.horizontal(right: Radius.circular(6)),
                                 ),
                               ),
                             ),
                           ),
 
-                        // Selection Window (connecting top and bottom white bars)
+                        // Selection Window (connecting top and bottom white bars with window dragging)
                         if (rightPos > leftPos + 10)
                           Positioned(
                             left: leftPos,
                             width: (rightPos - leftPos).clamp(10.0, trackWidth),
                             top: 0,
                             bottom: 0,
-                            child: IgnorePointer(
+                            child: GestureDetector(
+                              behavior: HitTestBehavior.opaque,
+                              onHorizontalDragUpdate: (details) {
+                                final deltaSec = (details.delta.dx / trackWidth) * totalSec;
+                                final duration = _clipEndSeconds - _clipStartSeconds;
+                                var newStart = _clipStartSeconds + deltaSec;
+                                var newEnd = _clipEndSeconds + deltaSec;
+                                if (newStart < 0) {
+                                  newStart = 0;
+                                  newEnd = duration;
+                                }
+                                if (newEnd > totalSec) {
+                                  newEnd = totalSec;
+                                  newStart = totalSec - duration;
+                                }
+                                setState(() {
+                                  _clipStartSeconds = newStart;
+                                  _clipEndSeconds = newEnd;
+                                });
+                                _videoPlayerController?.seekTo(Duration(seconds: newStart.toInt()));
+                              },
                               child: Container(
                                 decoration: const BoxDecoration(
                                   border: Border(
@@ -3315,7 +3450,78 @@ class _PlayerScreenState extends State<PlayerScreen> {
                           ),
 
                         // -------------------------------------------------------------
-                        // Green Start Handle (draggable, min 2s before end, max 5m range)
+                        // Interactive Playhead Scrubber Needle (Rendered under handles)
+                        // -------------------------------------------------------------
+                        Positioned(
+                          left: (playheadPos - 12).clamp(leftPos, rightPos - 2),
+                          top: -6,
+                          bottom: -6,
+                          child: GestureDetector(
+                            behavior: HitTestBehavior.opaque,
+                            onHorizontalDragUpdate: (details) {
+                              final deltaSec = (details.delta.dx / trackWidth) * totalSec;
+                              final newSec = (curSec + deltaSec).clamp(_clipStartSeconds, _clipEndSeconds);
+                              _videoPlayerController?.seekTo(Duration(seconds: newSec.toInt()));
+                              setState(() {
+                                _currentPosition = Duration(seconds: newSec.toInt());
+                              });
+                            },
+                            child: SizedBox(
+                              width: 24,
+                              child: Stack(
+                                alignment: Alignment.center,
+                                clipBehavior: Clip.none,
+                                children: [
+                                  // White vertical needle
+                                  Container(
+                                    width: 3.0,
+                                    decoration: BoxDecoration(
+                                      color: Colors.white,
+                                      borderRadius: BorderRadius.circular(1.5),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: Colors.black.withValues(alpha: 0.8),
+                                          blurRadius: 4,
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  // Top grab knob
+                                  Positioned(
+                                    top: 0,
+                                    child: Container(
+                                      width: 14,
+                                      height: 14,
+                                      decoration: BoxDecoration(
+                                        color: Colors.white,
+                                        shape: BoxShape.circle,
+                                        boxShadow: [
+                                          BoxShadow(
+                                            color: Colors.black.withValues(alpha: 0.7),
+                                            blurRadius: 4,
+                                          ),
+                                        ],
+                                      ),
+                                      child: Center(
+                                        child: Container(
+                                          width: 6,
+                                          height: 6,
+                                          decoration: const BoxDecoration(
+                                            color: Color(0xFFE50914),
+                                            shape: BoxShape.circle,
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+
+                        // -------------------------------------------------------------
+                        // Green Start Handle (Top Layer, generous touch target)
                         // -------------------------------------------------------------
                         Positioned(
                           left: leftPos.clamp(0.0, trackWidth - 36),
@@ -3339,8 +3545,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                 borderRadius: const BorderRadius.horizontal(left: Radius.circular(8)),
                                 boxShadow: [
                                   BoxShadow(
-                                    color: Colors.black.withValues(alpha: 0.4),
-                                    blurRadius: 4,
+                                    color: Colors.black.withValues(alpha: 0.5),
+                                    blurRadius: 5,
                                     offset: const Offset(-1, 0),
                                   ),
                                 ],
@@ -3374,7 +3580,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                         ),
 
                         // -------------------------------------------------------------
-                        // Red End Handle (draggable, min 2s after start, max 5m range)
+                        // Red End Handle (Top Layer, generous touch target)
                         // -------------------------------------------------------------
                         Positioned(
                           left: (rightPos - 34).clamp(leftPos + 34, trackWidth - 34),
@@ -3398,8 +3604,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                 borderRadius: const BorderRadius.horizontal(right: Radius.circular(8)),
                                 boxShadow: [
                                   BoxShadow(
-                                    color: Colors.black.withValues(alpha: 0.4),
-                                    blurRadius: 4,
+                                    color: Colors.black.withValues(alpha: 0.5),
+                                    blurRadius: 5,
                                     offset: const Offset(1, 0),
                                   ),
                                 ],
@@ -3427,79 +3633,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                     ),
                                   ],
                                 ),
-                              ),
-                            ),
-                          ),
-                        ),
-
-                        // -------------------------------------------------------------
-                        // Interactive Sliding Stick Scrubber (LAST in Stack = on TOP)
-                        // -------------------------------------------------------------
-                        Positioned(
-                          left: (playheadPos - 24).clamp(leftPos - 12, rightPos - 20),
-                          top: -8,
-                          bottom: -8,
-                          child: GestureDetector(
-                            behavior: HitTestBehavior.opaque,
-                            onHorizontalDragUpdate: (details) {
-                              final deltaSec = (details.delta.dx / trackWidth) * totalSec;
-                              final newSec = (curSec + deltaSec).clamp(_clipStartSeconds, _clipEndSeconds);
-                              _videoPlayerController?.seekTo(Duration(seconds: newSec.toInt()));
-                              setState(() {
-                                _currentPosition = Duration(seconds: newSec.toInt());
-                              });
-                            },
-                            child: SizedBox(
-                              width: 48,
-                              child: Stack(
-                                alignment: Alignment.center,
-                                clipBehavior: Clip.none,
-                                children: [
-                                  // White vertical scrubber needle
-                                  Container(
-                                    width: 3.5,
-                                    decoration: BoxDecoration(
-                                      color: Colors.white,
-                                      borderRadius: BorderRadius.circular(2),
-                                      boxShadow: [
-                                        BoxShadow(
-                                          color: Colors.black.withValues(alpha: 0.8),
-                                          blurRadius: 4,
-                                          offset: const Offset(0, 1),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                  // Top draggable circular grab knob
-                                  Positioned(
-                                    top: 0,
-                                    child: Container(
-                                      width: 18,
-                                      height: 18,
-                                      decoration: BoxDecoration(
-                                        color: Colors.white,
-                                        shape: BoxShape.circle,
-                                        boxShadow: [
-                                          BoxShadow(
-                                            color: Colors.black.withValues(alpha: 0.7),
-                                            blurRadius: 5,
-                                            offset: const Offset(0, 2),
-                                          ),
-                                        ],
-                                      ),
-                                      child: Center(
-                                        child: Container(
-                                          width: 8,
-                                          height: 8,
-                                          decoration: const BoxDecoration(
-                                            color: Color(0xFFE50914),
-                                            shape: BoxShape.circle,
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ],
                               ),
                             ),
                           ),
@@ -6220,19 +6353,19 @@ class _DesktopPipOverlayState extends State<_DesktopPipOverlay> {
       child: MouseRegion(
         onEnter: (_) => setState(() => _isHovered = true),
         onExit: (_) => setState(() => _isHovered = false),
-        child: AnimatedOpacity(
-          opacity: _isHovered ? 1.0 : 0.0,
-          duration: const Duration(milliseconds: 180),
+        child: DragToMoveArea(
           child: Container(
-            color: Colors.black.withValues(alpha: 0.6),
+            color: _isHovered ? Colors.black.withValues(alpha: 0.65) : Colors.transparent,
             child: Stack(
               children: [
-                // Top Draggable Header (Drag & Drop window position)
+                // Top Draggable Header (Always visible at 45% opacity, 100% on hover)
                 Positioned(
                   top: 0,
                   left: 0,
                   right: 0,
-                  child: DragToMoveArea(
+                  child: AnimatedOpacity(
+                    opacity: _isHovered ? 1.0 : 0.45,
+                    duration: const Duration(milliseconds: 180),
                     child: Container(
                       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
                       decoration: BoxDecoration(
@@ -6240,7 +6373,7 @@ class _DesktopPipOverlayState extends State<_DesktopPipOverlay> {
                           begin: Alignment.topCenter,
                           end: Alignment.bottomCenter,
                           colors: [
-                            Colors.black.withValues(alpha: 0.8),
+                            Colors.black.withValues(alpha: 0.85),
                             Colors.transparent,
                           ],
                         ),
@@ -6256,7 +6389,7 @@ class _DesktopPipOverlayState extends State<_DesktopPipOverlay> {
                             onPressed: widget.onClose,
                           ),
                           const SizedBox(width: 8),
-                          const Icon(Icons.drag_indicator_rounded, color: Colors.white38, size: 16),
+                          const Icon(Icons.drag_indicator_rounded, color: Colors.white70, size: 16),
                           const SizedBox(width: 4),
                           Expanded(
                             child: Text(
@@ -6264,7 +6397,7 @@ class _DesktopPipOverlayState extends State<_DesktopPipOverlay> {
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: const TextStyle(
-                                color: Colors.white70,
+                                color: Colors.white,
                                 fontSize: 12,
                                 fontWeight: FontWeight.w600,
                               ),
@@ -6305,35 +6438,39 @@ class _DesktopPipOverlayState extends State<_DesktopPipOverlay> {
                   ),
                 ),
 
-                // Center Transport Controls
+                // Center Transport Controls (Only shown on hover)
                 Center(
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      IconButton(
-                        iconSize: 28,
-                        icon: const Icon(Icons.replay_10_rounded, color: Colors.white),
-                        tooltip: 'Rewind 10s',
-                        onPressed: widget.onSeekBack,
-                      ),
-                      const SizedBox(width: 16),
-                      IconButton(
-                        iconSize: 44,
-                        icon: Icon(
-                          widget.isPlaying ? Icons.pause_circle_filled_rounded : Icons.play_circle_fill_rounded,
-                          color: Colors.white,
+                  child: AnimatedOpacity(
+                    opacity: _isHovered ? 1.0 : 0.0,
+                    duration: const Duration(milliseconds: 180),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        IconButton(
+                          iconSize: 28,
+                          icon: const Icon(Icons.replay_10_rounded, color: Colors.white),
+                          tooltip: 'Rewind 10s',
+                          onPressed: widget.onSeekBack,
                         ),
-                        tooltip: widget.isPlaying ? 'Pause' : 'Play',
-                        onPressed: widget.onTogglePlayPause,
-                      ),
-                      const SizedBox(width: 16),
-                      IconButton(
-                        iconSize: 28,
-                        icon: const Icon(Icons.forward_10_rounded, color: Colors.white),
-                        tooltip: 'Forward 10s',
-                        onPressed: widget.onSeekForward,
-                      ),
-                    ],
+                        const SizedBox(width: 16),
+                        IconButton(
+                          iconSize: 44,
+                          icon: Icon(
+                            widget.isPlaying ? Icons.pause_circle_filled_rounded : Icons.play_circle_fill_rounded,
+                            color: Colors.white,
+                          ),
+                          tooltip: widget.isPlaying ? 'Pause' : 'Play',
+                          onPressed: widget.onTogglePlayPause,
+                        ),
+                        const SizedBox(width: 16),
+                        IconButton(
+                          iconSize: 28,
+                          icon: const Icon(Icons.forward_10_rounded, color: Colors.white),
+                          tooltip: 'Forward 10s',
+                          onPressed: widget.onSeekForward,
+                        ),
+                      ],
+                    ),
                   ),
                 ),
 
