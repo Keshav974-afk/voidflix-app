@@ -106,4 +106,4 @@ jobs:
         shell: pwsh
         run: |
           $installer = (Get-ChildItem -Path "build\windows\installer\Voidflix-Setup-*.exe" | Select-Object -First 1).FullName
-          gh release upload v1.0.2 $installer Voidflix-Windows-Portable.zip windows/Voidflix-Public.cer --clobber || gh release create v1.0.2 $installer Voidflix-Windows-Portable.zip windows/Voidflix-Public.cer --title "Voidflix v1.0.2" --notes "Official Native Windows Flutter Release v1.0.2 with stylized logos, white buffer seekbar and server lock." --clobber || true
+          gh release upload v0.2 $installer Voidflix-Windows-Portable.zip windows/Voidflix-Public.cer --clobber || gh release create v0.2 $installer Voidflix-Windows-Portable.zip windows/Voidflix-Public.cer --title "Voidflix v0.2" --notes "Official Native Windows Flutter Release v0.2 with stylized logos in hero and detail modal, white buffer seekbar and direct play server lock." --clobber || true

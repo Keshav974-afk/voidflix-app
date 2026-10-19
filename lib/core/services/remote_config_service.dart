@@ -146,8 +146,8 @@ class RemoteNotificationItem {
 
 class RemoteConfigService {
   static const String configEndpoint = 'https://voidflix.org/api/public/config';
-  static const String currentAppVersion = '1.0.1';
-  static const int currentBuildNumber = 2;
+  static const String currentAppVersion = '0.2';
+  static const int currentBuildNumber = 4;
 
   static RemoteAppUpdate? cachedUpdate;
   static List<RemotePromoBanner> cachedBanners = [];
@@ -215,6 +215,10 @@ class RemoteConfigService {
   }
 
   static bool _isVersionHigher(String remote, String current) {
+    // If remote is legacy 1.x but current app has transitioned to 0.2+, ignore legacy 1.x
+    if (remote.startsWith('1.') && (current.startsWith('0.') || current == '0.2')) {
+      return false;
+    }
     try {
       final remoteParts = remote.split('.').map((e) => int.tryParse(e) ?? 0).toList();
       final currentParts = current.split('.').map((e) => int.tryParse(e) ?? 0).toList();

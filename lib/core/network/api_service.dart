@@ -275,6 +275,7 @@ class ApiService {
   Future<MediaDetail> getDetails(String type, int id) async {
     final data = await _get('/$type/$id', {
       'append_to_response': 'credits,recommendations,videos,release_dates,content_ratings,images',
+      'include_image_language': 'en,null',
     });
     return MediaDetail.fromJson(data as Map<String, dynamic>, type);
   }

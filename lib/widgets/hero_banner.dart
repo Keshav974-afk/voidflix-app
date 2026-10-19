@@ -5,6 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import '../core/constants/api_constants.dart';
 import '../core/constants/theme_constants.dart';
+import '../core/network/api_service.dart';
 import '../models/media_item.dart';
 import '../providers/watchlist_provider.dart';
 import '../screens/player_screen.dart';
@@ -47,11 +48,36 @@ class HeroBanner extends StatefulWidget {
 class _HeroBannerState extends State<HeroBanner> {
   int _currentIndex = 0;
   Timer? _timer;
+  final ApiService _apiService = ApiService();
+  static final Map<int, String?> _globalLogoCache = {};
 
   @override
   void initState() {
     super.initState();
     _startTimer();
+    _loadLogos();
+  }
+
+  @override
+  void didUpdateWidget(covariant HeroBanner oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.items != oldWidget.items) {
+      _loadLogos();
+    }
+  }
+
+  void _loadLogos() {
+    for (final item in widget.items.take(5)) {
+      if (_globalLogoCache.containsKey(item.id)) continue;
+      _apiService.getDetails(item.mediaType, item.id).then((detail) {
+        _globalLogoCache[item.id] = detail.logoPath;
+        if (mounted) {
+          setState(() {});
+        }
+      }).catchError((_) {
+        _globalLogoCache[item.id] = null;
+      });
+    }
   }
 
   void _startTimer() {
@@ -182,18 +208,54 @@ class _HeroBannerState extends State<HeroBanner> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Text(
-                    item.title,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: GoogleFonts.bebasNeue(
-                      fontSize: 54,
-                      color: Colors.white,
-                      letterSpacing: 1.5,
-                      height: 1.0,
+                  // Stylized Logo (where available) with Plain Text Fallback
+                  if (_globalLogoCache[item.id] != null && _globalLogoCache[item.id]!.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 12.0),
+                      child: CachedNetworkImage(
+                        imageUrl: ApiConstants.getImageUrl(_globalLogoCache[item.id], size: 'w500'),
+                        height: 75,
+                        fit: BoxFit.contain,
+                        alignment: Alignment.centerLeft,
+                        placeholder: (c, u) => Text(
+                          item.title,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: GoogleFonts.bebasNeue(
+                            fontSize: 54,
+                            color: Colors.white,
+                            letterSpacing: 1.5,
+                            height: 1.0,
+                          ),
+                        ),
+                        errorWidget: (c, u, e) => Text(
+                          item.title,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: GoogleFonts.bebasNeue(
+                            fontSize: 54,
+                            color: Colors.white,
+                            letterSpacing: 1.5,
+                            height: 1.0,
+                          ),
+                        ),
+                      ),
+                    )
+                  else
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 10.0),
+                      child: Text(
+                        item.title,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: GoogleFonts.bebasNeue(
+                          fontSize: 54,
+                          color: Colors.white,
+                          letterSpacing: 1.5,
+                          height: 1.0,
+                        ),
+                      ),
                     ),
-                  ),
-                  const SizedBox(height: 10),
 
                   // Rating, Year, Type
                   Row(
@@ -368,29 +430,78 @@ class _HeroBannerState extends State<HeroBanner> {
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      // Title Overlay
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 8),
-                        child: Text(
-                          item.displayTitle,
-                          maxLines: 2,
-                          textAlign: TextAlign.center,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            color: Colors.white,
-                            fontSize: 22,
-                            fontWeight: FontWeight.w900,
-                            letterSpacing: -0.5,
-                            shadows: [
-                              Shadow(
-                                color: Colors.black,
-                                blurRadius: 10,
-                                offset: Offset(0, 2),
+                      // Stylized Logo (where available) with Plain Text Fallback
+                      if (_globalLogoCache[item.id] != null && _globalLogoCache[item.id]!.isNotEmpty)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 10),
+                          child: CachedNetworkImage(
+                            imageUrl: ApiConstants.getImageUrl(_globalLogoCache[item.id], size: 'w500'),
+                            height: 55,
+                            fit: BoxFit.contain,
+                            alignment: Alignment.center,
+                            placeholder: (c, u) => Text(
+                              item.displayTitle,
+                              maxLines: 2,
+                              textAlign: TextAlign.center,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 22,
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: -0.5,
+                                shadows: [
+                                  Shadow(
+                                    color: Colors.black,
+                                    blurRadius: 10,
+                                    offset: Offset(0, 2),
+                                  ),
+                                ],
                               ),
-                            ],
+                            ),
+                            errorWidget: (c, u, e) => Text(
+                              item.displayTitle,
+                              maxLines: 2,
+                              textAlign: TextAlign.center,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 22,
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: -0.5,
+                                shadows: [
+                                  Shadow(
+                                    color: Colors.black,
+                                    blurRadius: 10,
+                                    offset: Offset(0, 2),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        )
+                      else
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: Text(
+                            item.displayTitle,
+                            maxLines: 2,
+                            textAlign: TextAlign.center,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 22,
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: -0.5,
+                              shadows: [
+                                Shadow(
+                                  color: Colors.black,
+                                  blurRadius: 10,
+                                  offset: Offset(0, 2),
+                                ),
+                              ],
+                            ),
                           ),
                         ),
-                      ),
 
                       // Genre tags with red bullet separators
                       if (genres.isNotEmpty)
