@@ -715,6 +715,121 @@ class StreamExtractor {
     }
   }
 
+  /// Extracts Telegram streams from Voidflix VPS indexer (25k channel database)
+  /// Features multi-audio (Hindi, English, Telugu, Tamil), multi-quality (4K, 1080p, 720p)
+  /// and direct HTTP 206 byte-range streaming for Native Player.
+  static Future<List<ExtractedStream>> extractTelegram({
+    required String type, // 'movie' or 'tv'
+    required int tmdbId,
+    int season = 1,
+    int episode = 1,
+  }) async {
+    final cacheKey = getCacheKey(type, tmdbId, season, episode, prefix: 'telegram');
+    final cached = await getCachedEntry(cacheKey);
+    if (cached != null && cached.streams.isNotEmpty) {
+      debugPrint('StreamExtractor: Reusing cached Telegram streams for $cacheKey (instant!)');
+      return cached.streams;
+    }
+
+    try {
+      final endpoint = type == 'tv'
+          ? 'http://103.30.211.131/api/source/tv/$tmdbId/$season/$episode'
+          : 'http://103.30.211.131/api/source/movie/$tmdbId';
+
+      final res = await http.get(
+        Uri.parse(endpoint),
+        headers: {'Accept': 'application/json'},
+      ).timeout(const Duration(seconds: 4));
+
+      if (res.statusCode != 200) return [];
+      final data = jsonDecode(res.body) as Map<String, dynamic>;
+      if (data['success'] != true || data['streams'] == null) return [];
+
+      final rawStreams = data['streams'] as List<dynamic>;
+      if (rawStreams.isEmpty) return [];
+
+      // Build quality variants
+      final qualities = <StreamQuality>[];
+      for (final s in rawStreams) {
+        if (s is Map<String, dynamic>) {
+          final q = (s['quality'] as String?) ?? '1080p';
+          final a = (s['audio'] as String?) ?? 'Audio';
+          final rawUrl = (s['raw_url'] as String?) ?? (s['stream_url'] as String?) ?? '';
+          if (rawUrl.isNotEmpty) {
+            int height = 1080;
+            if (q.contains('4K') || q.contains('2160p')) {
+              height = 2160;
+            } else if (q.contains('1080p')) {
+              height = 1080;
+            } else if (q.contains('720p')) {
+              height = 720;
+            } else if (q.contains('480p')) {
+              height = 480;
+            } else if (q.contains('360p')) {
+              height = 360;
+            }
+
+            qualities.add(StreamQuality(
+              label: '$q • $a',
+              height: height,
+              url: rawUrl,
+            ));
+          }
+        }
+      }
+
+      final results = <ExtractedStream>[];
+      for (final s in rawStreams) {
+        if (s is Map<String, dynamic>) {
+          final rawUrl = (s['raw_url'] as String?) ?? (s['stream_url'] as String?) ?? '';
+          if (rawUrl.isEmpty) continue;
+
+          final quality = (s['quality'] as String?) ?? '1080p';
+          final audio = (s['audio'] as String?) ?? 'Original Audio';
+
+          // Determine language for player audio matching
+          String lang = 'English';
+          if (audio.contains('Hindi')) {
+            lang = 'Hindi';
+          } else if (audio.contains('Telugu')) {
+            lang = 'Telugu';
+          } else if (audio.contains('Tamil')) {
+            lang = 'Tamil';
+          } else if (audio.contains('Malayalam')) {
+            lang = 'Malayalam';
+          } else if (audio.contains('Kannada')) {
+            lang = 'Kannada';
+          } else if (audio.contains('Korean')) {
+            lang = 'Korean';
+          } else if (audio.contains('Japanese')) {
+            lang = 'Japanese';
+          }
+
+          results.add(ExtractedStream(
+            url: rawUrl,
+            type: 'mp4',
+            sourceName: 'Meow [$quality • $audio]',
+            language: lang,
+            headers: {
+              'User-Agent': 'Voidflix-NativePlayer/1.0',
+            },
+            qualityLabel: quality,
+            qualities: qualities,
+            subtitles: const [],
+          ));
+        }
+      }
+
+      if (results.isNotEmpty) {
+        setCachedEntry(cacheKey, results);
+      }
+      return results;
+    } catch (e) {
+      debugPrint('Telegram extraction error: $e');
+      return [];
+    }
+  }
+
   /// Direct file resolver from Voidflix download API (Stremio/direct MP4 addon)
   static Future<String?> extractDirectFileUrl({
     required String type,
@@ -1070,6 +1185,15 @@ class StreamExtractor {
     // Parallel concurrent extraction across all direct sources
     try {
       final futures = await Future.wait([
+        extractTelegram(
+          type: type,
+          tmdbId: tmdbId,
+          season: season,
+          episode: episode,
+        ).catchError((e) {
+          debugPrint('Telegram extractor error: $e');
+          return <ExtractedStream>[];
+        }),
         extractCinejoy(
           type: type,
           tmdbId: tmdbId,
@@ -1108,10 +1232,11 @@ class StreamExtractor {
         }),
       ]);
 
-      final cinejoyStreams = futures[0] as List<ExtractedStream>;
-      final vidrockStreams = futures[1] as List<ExtractedStream>;
-      final vidlinkStream = futures[2] as ExtractedStream?;
-      final voidflixStream = futures[3] as ExtractedStream?;
+      final telegramStreams = futures[0] as List<ExtractedStream>;
+      final cinejoyStreams = futures[1] as List<ExtractedStream>;
+      final vidrockStreams = futures[2] as List<ExtractedStream>;
+      final vidlinkStream = futures[3] as ExtractedStream?;
+      final voidflixStream = futures[4] as ExtractedStream?;
 
       if (voidflixStream != null && voidflixStream.subtitles.isNotEmpty) {
         sharedSubs = voidflixStream.subtitles;
@@ -1120,7 +1245,21 @@ class StreamExtractor {
         sharedSubs = vidlinkStream.subtitles;
       }
 
-      // 1. Add Cinejoy 4K & 1080p streams first (fastest, cleanest, high-res)
+      // 1. Add Telegram streams first (Direct VPS MTProto, highest speed, uncompressed multi-audio)
+      for (final t in telegramStreams) {
+        results.add(ExtractedStream(
+          url: t.url,
+          type: t.type,
+          sourceName: t.sourceName,
+          language: t.language,
+          headers: t.headers,
+          qualityLabel: t.qualityLabel,
+          qualities: t.qualities,
+          subtitles: sharedSubs.isNotEmpty ? sharedSubs : t.subtitles,
+        ));
+      }
+
+      // 2. Add Cinejoy 4K & 1080p streams (fastest, cleanest, high-res)
       for (final c in cinejoyStreams) {
         results.add(ExtractedStream(
           url: c.url,

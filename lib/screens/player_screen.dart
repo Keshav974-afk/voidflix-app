@@ -101,11 +101,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
   bool _isExtracting = true;
   List<ExtractedStream> _directStreams = [];
   int _selectedStreamIndex = 0;
+  bool _userExplicitlySelectedServer = false;
   final Set<int> _triedNativeServerIndices = {};
   bool _isPlaying = false;
   bool _isBuffering = false;
   Duration _currentPosition = Duration.zero;
   Duration _totalDuration = Duration.zero;
+  Duration _bufferedPosition = Duration.zero;
   bool _isDraggingSeekbar = false;
   double _dragPositionSec = 0.0;
 
@@ -531,6 +533,15 @@ class _PlayerScreenState extends State<PlayerScreen> {
   void _fallbackToNextNativeOrEmbed({Duration? resumePosition}) {
     if (!mounted) return;
 
+    if (_userExplicitlySelectedServer) {
+      AppLogger.instance.log('Player', 'User explicitly selected server . Will not switch servers.');
+      setState(() {
+        _isLoading = false;
+        _isStreamUnavailable = true;
+      });
+      return;
+    }
+
     // Search for another native direct-play server that hasn't been tried yet
     int nextNativeIdx = -1;
     for (int i = 0; i < ServerConfig.servers.length; i++) {
@@ -878,7 +889,19 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
     final val = controller.value;
     if (val.hasError) {
-      AppLogger.instance.error('Player', 'Native playback error: ${val.errorDescription}');
+      AppLogger.instance.error('Player', 'Native playback error during stream: ');
+      
+      // If user explicitly selected this server OR is actively playing/seeking, NEVER switch servers!
+      if (_userExplicitlySelectedServer || (_totalDuration.inSeconds > 0 && _currentPosition.inSeconds > 0)) {
+        AppLogger.instance.log('Player', 'Recovering seek/playback error on current server without switching servers');
+        if (_directStreams.isNotEmpty && _selectedStreamIndex < _directStreams.length) {
+          _initNativePlayer(_directStreams[_selectedStreamIndex], startPosition: _currentPosition, autoPlay: true);
+        } else {
+          _loadServerDirect(_selectedServerIndex, startPosition: _currentPosition);
+        }
+        return;
+      }
+
       if (_selectedStreamIndex + 1 < _directStreams.length) {
         _selectedStreamIndex++;
         _initNativePlayer(_directStreams[_selectedStreamIndex], startPosition: _currentPosition, autoPlay: true);
@@ -889,9 +912,22 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
 
     if (!_isDraggingSeekbar) {
+      Duration maxBuffered = Duration.zero;
+      if (val.buffered.isNotEmpty) {
+        for (final range in val.buffered) {
+          if (range.start <= val.position && range.end >= val.position) {
+            maxBuffered = range.end;
+            break;
+          } else if (range.end > maxBuffered) {
+            maxBuffered = range.end;
+          }
+        }
+      }
+
       setState(() {
         _currentPosition = val.position;
         _totalDuration = val.duration;
+        _bufferedPosition = maxBuffered;
         _isPlaying = val.isPlaying;
         _isBuffering = val.isBuffering;
       });
@@ -2482,6 +2518,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                               ? null
                               : () {
                                   Navigator.pop(ctx);
+                                  _userExplicitlySelectedServer = true;
                                   _triedNativeServerIndices.clear();
                                   context.read<ProfileProvider>().setSelectedServer(idx);
                                   _loadServerDirect(idx);
@@ -4279,7 +4316,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                           child: SliderTheme(
                                             data: SliderTheme.of(context).copyWith(
                                               activeTrackColor: AppTheme.primaryRed,
-                                              inactiveTrackColor: const Color(0xFF555555),
+                                              secondaryActiveTrackColor: Colors.white.withValues(alpha: 0.75),
+                                              inactiveTrackColor: Colors.white.withValues(alpha: 0.2),
                                               thumbColor: AppTheme.primaryRed,
                                               trackHeight: 3.5,
                                               thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
@@ -4290,6 +4328,15 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                                       ? _dragPositionSec
                                                       : _currentPosition.inSeconds.toDouble())
                                                   .clamp(0.0, _totalDuration.inSeconds > 0 ? _totalDuration.inSeconds.toDouble() : 1.0),
+                                              secondaryTrackValue: _totalDuration.inSeconds > 0
+                                                  ? _bufferedPosition.inSeconds.toDouble().clamp(
+                                                      (_isDraggingSeekbar
+                                                              ? _dragPositionSec
+                                                              : _currentPosition.inSeconds.toDouble())
+                                                          .clamp(0.0, _totalDuration.inSeconds.toDouble()),
+                                                      _totalDuration.inSeconds.toDouble(),
+                                                    )
+                                                  : null,
                                               min: 0.0,
                                               max: _totalDuration.inSeconds > 0 ? _totalDuration.inSeconds.toDouble() : 1.0,
                                               onChangeStart: (val) {

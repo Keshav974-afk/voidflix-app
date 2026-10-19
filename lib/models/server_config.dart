@@ -20,6 +20,13 @@ class ServerConfig {
     // DIRECT NATIVE SERVERS (Extractable HLS • Hardware Accelerated • No Ads)
     // -------------------------------------------------------------------------
     VideoServer(
+      name: "Meow",
+      description: "Direct 4K/1080p multi-audio streams from 25k Telegram channel (Ultra Fast)",
+      movieUrl: (id) => "http://103.30.211.131/stream/movie/$id",
+      tvUrl: (id, s, e) => "http://103.30.211.131/stream/tv/$id/$s/$e",
+      isDirectPlay: true,
+    ),
+    VideoServer(
       name: "Cine4K (Lisbon)",
       description: "Direct 4K Ultra HD HDR / 1080p with multi-audio (Recommended)",
       movieUrl: (id) => "https://api.wing.st/embed/movie/$id",
