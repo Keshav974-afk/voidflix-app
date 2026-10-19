@@ -120,6 +120,7 @@ class MediaDetail {
   final List<TvSeason> seasons;
   final String? trailerKey;
   final List<MediaVideo> videos;
+  final String? logoPath;
 
   MediaDetail({
     required this.id,
@@ -138,6 +139,7 @@ class MediaDetail {
     this.seasons = const [],
     this.trailerKey,
     this.videos = const [],
+    this.logoPath,
   });
 
   factory MediaDetail.fromJson(Map<String, dynamic> json, String type) {
@@ -188,6 +190,24 @@ class MediaDetail {
       }
     }
 
+    final images = json['images'] as Map<String, dynamic>?;
+    String? logoPath;
+    if (images != null && images['logos'] != null) {
+      final logosList = images['logos'] as List<dynamic>;
+      if (logosList.isNotEmpty) {
+        final enLogo = logosList.firstWhere(
+          (l) => l['iso_639_1'] == 'en',
+          orElse: () => null,
+        );
+        final neutralLogo = logosList.firstWhere(
+          (l) => l['iso_639_1'] == null || l['iso_639_1'] == 'xx' || l['iso_639_1'] == '',
+          orElse: () => null,
+        );
+        final picked = enLogo ?? neutralLogo ?? logosList.first;
+        logoPath = picked['file_path'] as String?;
+      }
+    }
+
     return MediaDetail(
       id: json['id'] as int? ?? 0,
       title: title,
@@ -205,6 +225,7 @@ class MediaDetail {
       seasons: seasonsList,
       trailerKey: trailer,
       videos: videoResults,
+      logoPath: logoPath,
     );
   }
 

@@ -508,21 +508,76 @@ class _DetailScreenState extends State<DetailScreen> {
                   ),
                   const SizedBox(height: 6),
 
-                  // Big Title (Screenshot 2 & 4)
-                  Text(
-                    detail.title,
-                    style: const TextStyle(
-                      fontSize: 28,
-                      fontWeight: FontWeight.w900,
-                      color: Colors.white,
-                      letterSpacing: -0.5,
+                  // Stylized Logo (where available) with Plain Text Fallback
+                  if (detail.logoPath != null && detail.logoPath!.isNotEmpty)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 8.0),
+                      child: CachedNetworkImage(
+                        imageUrl: ApiConstants.getImageUrl(detail.logoPath, size: 'w500'),
+                        height: 75,
+                        fit: BoxFit.contain,
+                        alignment: Alignment.centerLeft,
+                        placeholder: (c, u) => Text(
+                          detail.title,
+                          style: const TextStyle(
+                            fontSize: 28,
+                            fontWeight: FontWeight.w900,
+                            color: Colors.white,
+                            letterSpacing: -0.5,
+                          ),
+                        ),
+                        errorWidget: (c, u, e) => Text(
+                          detail.title,
+                          style: const TextStyle(
+                            fontSize: 28,
+                            fontWeight: FontWeight.w900,
+                            color: Colors.white,
+                            letterSpacing: -0.5,
+                          ),
+                        ),
+                      ),
+                    )
+                  else
+                    Text(
+                      detail.title,
+                      style: const TextStyle(
+                        fontSize: 28,
+                        fontWeight: FontWeight.w900,
+                        color: Colors.white,
+                        letterSpacing: -0.5,
+                      ),
                     ),
-                  ),
                   const SizedBox(height: 8),
 
-                  // Metadata Row: Year • Rating • Episodes • HD • Audio (Screenshot 2 & 4)
+                  // Metadata Row: Rating • Year • Rating • Episodes • HD • Audio (Screenshot 2 & 4)
                   Row(
                     children: [
+                      if (detail.voteAverage > 0) ...[
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: Colors.amber.withValues(alpha: 0.15),
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: Colors.amber.withValues(alpha: 0.3)),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              const Icon(Icons.star, color: Colors.amber, size: 12),
+                              const SizedBox(width: 3),
+                              Text(
+                                detail.voteAverage.toStringAsFixed(1),
+                                style: const TextStyle(
+                                  color: Colors.amber,
+                                  fontWeight: FontWeight.bold,
+                                  fontSize: 11,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                      ],
                       if (detail.releaseDate != null && detail.releaseDate!.isNotEmpty) ...[
                         Text(
                           detail.releaseDate!.split('-').first,

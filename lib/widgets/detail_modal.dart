@@ -233,21 +233,76 @@ class _DetailModalState extends State<DetailModal> {
                     child: Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
-                        // Title
-                        Text(
-                          widget.item.title,
-                          style: const TextStyle(
-                            fontSize: 24,
-                            fontWeight: FontWeight.bold,
-                            color: Colors.white,
-                            letterSpacing: -0.3,
+                        // Stylized Logo (where available) with Plain Text Fallback
+                        if (_detail?.logoPath != null && _detail!.logoPath!.isNotEmpty)
+                          Padding(
+                            padding: const EdgeInsets.only(bottom: 8.0),
+                            child: CachedNetworkImage(
+                              imageUrl: ApiConstants.getImageUrl(_detail!.logoPath, size: 'w500'),
+                              height: 56,
+                              fit: BoxFit.contain,
+                              alignment: Alignment.centerLeft,
+                              placeholder: (c, u) => Text(
+                                widget.item.title,
+                                style: const TextStyle(
+                                  fontSize: 24,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.white,
+                                  letterSpacing: -0.3,
+                                ),
+                              ),
+                              errorWidget: (c, u, e) => Text(
+                                widget.item.title,
+                                style: const TextStyle(
+                                  fontSize: 24,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.white,
+                                  letterSpacing: -0.3,
+                                ),
+                              ),
+                            ),
+                          )
+                        else
+                          Text(
+                            widget.item.title,
+                            style: const TextStyle(
+                              fontSize: 24,
+                              fontWeight: FontWeight.bold,
+                              color: Colors.white,
+                              letterSpacing: -0.3,
+                            ),
                           ),
-                        ),
                         const SizedBox(height: 6),
 
-                        // Metadata Row (Match %, Year, Maturity, Duration, HD, CC)
+                        // Metadata Row (Rating, Match %, Year, Maturity, Duration, HD, CC)
                         Row(
                           children: [
+                            if (widget.item.voteAverage > 0) ...[
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: Colors.amber.withValues(alpha: 0.15),
+                                  borderRadius: BorderRadius.circular(12),
+                                  border: Border.all(color: Colors.amber.withValues(alpha: 0.3)),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    const Icon(Icons.star, color: Colors.amber, size: 12),
+                                    const SizedBox(width: 3),
+                                    Text(
+                                      widget.item.voteAverage.toStringAsFixed(1),
+                                      style: const TextStyle(
+                                        color: Colors.amber,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 11,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                            ],
                             Text(
                               '$matchPercentage% Match',
                               style: const TextStyle(
@@ -561,12 +616,27 @@ class _DetailModalState extends State<DetailModal> {
                         if (_detail?.genres != null && _detail!.genres.isNotEmpty)
                           Padding(
                             padding: const EdgeInsets.only(bottom: 12),
-                            child: Text(
-                              'Genres: ${_detail!.genres.join(", ")}',
-                              style: const TextStyle(
-                                color: AppTheme.textSecondary,
-                                fontSize: 12,
-                              ),
+                            child: Wrap(
+                              spacing: 6,
+                              runSpacing: 6,
+                              children: _detail!.genres.map((g) {
+                                return Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white.withValues(alpha: 0.08),
+                                    borderRadius: BorderRadius.circular(16),
+                                    border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
+                                  ),
+                                  child: Text(
+                                    g,
+                                    style: const TextStyle(
+                                      color: Colors.white70,
+                                      fontSize: 11,
+                                      fontWeight: FontWeight.w500,
+                                    ),
+                                  ),
+                                );
+                              }).toList(),
                             ),
                           ),
 
