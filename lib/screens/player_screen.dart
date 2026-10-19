@@ -1307,14 +1307,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
     if (totalSec <= 0) return;
 
     final curSec = controller.value.position.inSeconds.toDouble();
-    double start = curSec;
-    double end = curSec + 30.0;
-    if (end > totalSec) {
-      end = totalSec;
-      start = (end - 30.0).clamp(0.0, totalSec);
+    const maxClip = 300.0; // 5 minutes max
+    double start = (curSec - 15.0).clamp(0.0, totalSec);
+    double end = (start + 45.0).clamp(0.0, totalSec);
+    if (end - start < 10.0 && totalSec >= 10.0) {
+      start = (end - 45.0).clamp(0.0, totalSec);
     }
-    if (end - start > 300.0) {
-      end = start + 300.0;
+    if (end - start > maxClip) {
+      end = start + maxClip;
     }
 
     setState(() {
@@ -1716,7 +1716,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
     final isTv = TvModeService().isTvMode;
     final isPc = PlatformUtils.isDesktop;
 
-    if (isTv || isPc) {
+    final isLandscape = MediaQuery.of(context).orientation == Orientation.landscape;
+
+    if (isTv || isPc || isLandscape) {
       return showDialog<T>(
         context: context,
         barrierDismissible: true,
@@ -1730,7 +1732,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 constraints: BoxConstraints(maxHeight: maxHeight),
                 margin: const EdgeInsets.symmetric(horizontal: 24, vertical: 24),
                 decoration: BoxDecoration(
-                  color: const Color(0xFF181818),
+                  color: const Color(0xFF141414),
                   borderRadius: BorderRadius.circular(16),
                   border: Border.all(
                     color: isTv ? Colors.white.withValues(alpha: 0.3) : Colors.white12,
@@ -1775,232 +1777,249 @@ class _PlayerScreenState extends State<PlayerScreen> {
   void _openAudioAndSubtitlesSheet() {
     final isTv = TvModeService().isTvMode;
     final isPc = PlatformUtils.isDesktop;
+    final isLandscape = MediaQuery.of(context).orientation == Orientation.landscape;
+
+    int tempAudioIndex = _selectedStreamIndex;
+    SubtitleTrack? tempSubtitle = _selectedSubtitle;
 
     _showResponsiveModal(
       context: context,
       maxWidth: 620,
-      maxHeight: 500,
+      maxHeight: 480,
       builder: (ctx) {
         return StatefulBuilder(
           builder: (modalCtx, setSheetState) {
             return SafeArea(
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                height: isTv || isPc ? 460 : MediaQuery.of(context).size.height * 0.82,
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                decoration: const BoxDecoration(
+                  color: Color(0xFF141414),
+                ),
                 child: Column(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    if (!isTv && !isPc)
+                    if (!isTv && !isPc && !isLandscape)
                       Center(
                         child: Container(
                           width: 40,
                           height: 4,
+                          margin: const EdgeInsets.only(bottom: 12),
                           decoration: BoxDecoration(
                             color: Colors.white24,
                             borderRadius: BorderRadius.circular(2),
                           ),
                         ),
                       ),
-                    const SizedBox(height: 10),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        const Text(
-                          'Audio & Subtitles',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 16,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        IconButton(
-                          icon: const Icon(Icons.close, color: Colors.white70),
-                          onPressed: () => Navigator.pop(ctx),
-                        ),
-                      ],
-                    ),
-                    const Divider(color: Colors.white12, height: 1),
-                    const SizedBox(height: 8),
+                    // Main 2-column content: Audio on Left, Subtitles on Right
                     Expanded(
                       child: Row(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          // Left Column: AUDIO (Dubs / Streams)
+                          // Left Column: AUDIO
                           Expanded(
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 const Padding(
-                                  padding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                                  padding: EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                                   child: Text(
-                                    'AUDIO',
+                                    'Audio',
                                     style: TextStyle(
-                                      color: Colors.white54,
-                                      fontSize: 12,
+                                      color: Colors.white,
+                                      fontSize: 18,
                                       fontWeight: FontWeight.bold,
-                                      letterSpacing: 1.2,
+                                      letterSpacing: 0.2,
                                     ),
                                   ),
                                 ),
+                                const SizedBox(height: 6),
                                 Expanded(
                                   child: ListView.builder(
                                     itemCount: _directStreams.isNotEmpty ? _directStreams.length : 1,
                                     itemBuilder: (c, idx) {
-                                      final isSelected = idx == _selectedStreamIndex;
+                                      final isSelected = idx == tempAudioIndex;
                                       final stream = _directStreams.isNotEmpty ? _directStreams[idx] : null;
                                       final langRaw = stream?.language ?? 'English';
                                       final langName = LanguageUtils.cleanLanguageName(langRaw);
-                                      final sourceName = stream != null ? stream.sourceName : 'Original (Stereo)';
+                                      final extra = stream != null && stream.sourceName.isNotEmpty && !langName.contains(stream.sourceName)
+                                          ? ' - ${stream.sourceName}'
+                                          : (stream == null ? ' [Original]' : '');
+                                      final fullLabel = '$langName$extra';
 
-                                      final tile = ListTile(
-                                        dense: true,
-                                        contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
-                                        title: Text(
-                                          langName,
-                                          style: TextStyle(
-                                            color: isSelected ? Colors.white : Colors.white70,
-                                            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                                            fontSize: 14,
+                                      final item = InkWell(
+                                        borderRadius: BorderRadius.circular(8),
+                                        onTap: () {
+                                          setSheetState(() {
+                                            tempAudioIndex = idx;
+                                          });
+                                        },
+                                        child: Padding(
+                                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+                                          child: Row(
+                                            children: [
+                                              if (isSelected)
+                                                const Icon(Icons.check, color: Colors.white, size: 18)
+                                              else
+                                                const SizedBox(width: 18),
+                                              const SizedBox(width: 10),
+                                              Expanded(
+                                                child: Text(
+                                                  fullLabel,
+                                                  style: TextStyle(
+                                                    color: isSelected ? Colors.white : Colors.white60,
+                                                    fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                                                    fontSize: 15,
+                                                  ),
+                                                  overflow: TextOverflow.ellipsis,
+                                                ),
+                                              ),
+                                            ],
                                           ),
                                         ),
-                                        subtitle: Text(
-                                          sourceName,
-                                          style: const TextStyle(fontSize: 11, color: Colors.white38),
-                                        ),
-                                        trailing: isSelected
-                                            ? const Icon(Icons.check, color: AppTheme.primaryRed, size: 20)
-                                            : null,
-                                        onTap: isTv
-                                            ? null
-                                            : () {
-                                                setSheetState(() {});
-                                                _selectAudioSource(idx);
-                                                Navigator.pop(ctx);
-                                              },
                                       );
 
                                       if (isTv) {
                                         return TvFocusable(
                                           autofocus: isSelected,
                                           onPressed: () {
-                                            setSheetState(() {});
-                                            _selectAudioSource(idx);
-                                            Navigator.pop(ctx);
+                                            setSheetState(() {
+                                              tempAudioIndex = idx;
+                                            });
                                           },
-                                          child: tile,
+                                          child: item,
                                         );
                                       }
-                                      return tile;
+                                      return item;
                                     },
                                   ),
                                 ),
                               ],
                             ),
                           ),
-                          Container(width: 1, color: Colors.white12),
-                          const SizedBox(width: 12),
+                          Container(width: 1, margin: const EdgeInsets.symmetric(horizontal: 10), color: Colors.white12),
                           // Right Column: SUBTITLES
                           Expanded(
                             child: Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 const Padding(
-                                  padding: EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+                                  padding: EdgeInsets.symmetric(horizontal: 8, vertical: 6),
                                   child: Text(
-                                    'SUBTITLES',
+                                    'Subtitles',
                                     style: TextStyle(
-                                      color: Colors.white54,
-                                      fontSize: 12,
+                                      color: Colors.white,
+                                      fontSize: 18,
                                       fontWeight: FontWeight.bold,
-                                      letterSpacing: 1.2,
+                                      letterSpacing: 0.2,
                                     ),
                                   ),
                                 ),
+                                const SizedBox(height: 6),
                                 Expanded(
                                   child: ListView(
                                     children: [
-                                      // Off Option
+                                      // Off option
                                       Builder(builder: (context) {
-                                        final isOffSelected = _selectedSubtitle == null;
-                                        final offTile = ListTile(
-                                          dense: true,
-                                          contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
-                                          title: Text(
-                                            'Off',
-                                            style: TextStyle(
-                                              color: isOffSelected ? Colors.white : Colors.white70,
-                                              fontWeight: isOffSelected ? FontWeight.bold : FontWeight.normal,
-                                              fontSize: 14,
+                                        final isOffSelected = tempSubtitle == null;
+                                        final offItem = InkWell(
+                                          borderRadius: BorderRadius.circular(8),
+                                          onTap: () {
+                                            setSheetState(() {
+                                              tempSubtitle = null;
+                                            });
+                                          },
+                                          child: Padding(
+                                            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+                                            child: Row(
+                                              children: [
+                                                if (isOffSelected)
+                                                  const Icon(Icons.check, color: Colors.white, size: 18)
+                                                else
+                                                  const SizedBox(width: 18),
+                                                const SizedBox(width: 10),
+                                                Text(
+                                                  'Off',
+                                                  style: TextStyle(
+                                                    color: isOffSelected ? Colors.white : Colors.white60,
+                                                    fontWeight: isOffSelected ? FontWeight.bold : FontWeight.normal,
+                                                    fontSize: 15,
+                                                  ),
+                                                ),
+                                              ],
                                             ),
                                           ),
-                                          trailing: isOffSelected
-                                              ? const Icon(Icons.check, color: AppTheme.primaryRed, size: 20)
-                                              : null,
-                                          onTap: isTv
-                                              ? null
-                                              : () {
-                                                  _selectSubtitle(null);
-                                                  Navigator.pop(ctx);
-                                                },
                                         );
                                         if (isTv) {
                                           return TvFocusable(
                                             autofocus: isOffSelected,
                                             onPressed: () {
-                                              _selectSubtitle(null);
-                                              Navigator.pop(ctx);
+                                              setSheetState(() {
+                                                tempSubtitle = null;
+                                              });
                                             },
-                                            child: offTile,
+                                            child: offItem,
                                           );
                                         }
-                                        return offTile;
+                                        return offItem;
                                       }),
                                       if (_subtitles.isNotEmpty)
                                         ..._subtitles.map((track) {
-                                          final isSelected = _selectedSubtitle?.url == track.url;
+                                          final isSelected = tempSubtitle?.url == track.url;
                                           final label = LanguageUtils.cleanLanguageName(
                                             track.label.isNotEmpty ? track.label : track.language,
                                           );
 
-                                          final tile = ListTile(
-                                            dense: true,
-                                            contentPadding: const EdgeInsets.symmetric(horizontal: 8, vertical: 0),
-                                            title: Text(
-                                              label,
-                                              style: TextStyle(
-                                                color: isSelected ? Colors.white : Colors.white70,
-                                                fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                                                fontSize: 14,
+                                          final item = InkWell(
+                                            borderRadius: BorderRadius.circular(8),
+                                            onTap: () {
+                                              setSheetState(() {
+                                                tempSubtitle = track;
+                                              });
+                                            },
+                                            child: Padding(
+                                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+                                              child: Row(
+                                                children: [
+                                                  if (isSelected)
+                                                    const Icon(Icons.check, color: Colors.white, size: 18)
+                                                  else
+                                                    const SizedBox(width: 18),
+                                                  const SizedBox(width: 10),
+                                                  Expanded(
+                                                    child: Text(
+                                                      label,
+                                                      style: TextStyle(
+                                                        color: isSelected ? Colors.white : Colors.white60,
+                                                        fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                                                        fontSize: 15,
+                                                      ),
+                                                      overflow: TextOverflow.ellipsis,
+                                                    ),
+                                                  ),
+                                                ],
                                               ),
                                             ),
-                                            trailing: isSelected
-                                                ? const Icon(Icons.check, color: AppTheme.primaryRed, size: 20)
-                                                : null,
-                                            onTap: isTv
-                                                ? null
-                                                : () {
-                                                    _selectSubtitle(track);
-                                                    Navigator.pop(ctx);
-                                                  },
                                           );
 
                                           if (isTv) {
                                             return TvFocusable(
                                               autofocus: isSelected,
                                               onPressed: () {
-                                                _selectSubtitle(track);
-                                                Navigator.pop(ctx);
+                                                setSheetState(() {
+                                                  tempSubtitle = track;
+                                                });
                                               },
-                                              child: tile,
+                                              child: item,
                                             );
                                           }
-                                          return tile;
+                                          return item;
                                         })
                                       else
                                         const Padding(
                                           padding: EdgeInsets.only(top: 16, left: 8, right: 8),
                                           child: Text(
-                                            'No external subtitles found for this stream',
-                                            style: TextStyle(color: Colors.white38, fontSize: 12),
+                                            'No external subtitles found',
+                                            style: TextStyle(color: Colors.white38, fontSize: 13),
                                           ),
                                         ),
                                     ],
@@ -2011,6 +2030,65 @@ class _PlayerScreenState extends State<PlayerScreen> {
                           ),
                         ],
                       ),
+                    ),
+                    const SizedBox(height: 12),
+                    const Divider(color: Colors.white12, height: 1),
+                    const SizedBox(height: 12),
+                    // Bottom actions: Cancel & Apply pills
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.end,
+                      children: [
+                        // Cancel pill button
+                        InkWell(
+                          borderRadius: BorderRadius.circular(24),
+                          onTap: () => Navigator.pop(ctx),
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 10),
+                            decoration: BoxDecoration(
+                              color: const Color(0xFF262626),
+                              borderRadius: BorderRadius.circular(24),
+                              border: Border.all(color: Colors.white24, width: 0.8),
+                            ),
+                            child: const Text(
+                              'Cancel',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w600,
+                                fontSize: 14,
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        // Apply pill button
+                        InkWell(
+                          borderRadius: BorderRadius.circular(24),
+                          onTap: () {
+                            if (tempAudioIndex != _selectedStreamIndex) {
+                              _selectAudioSource(tempAudioIndex);
+                            }
+                            if (tempSubtitle != _selectedSubtitle) {
+                              _selectSubtitle(tempSubtitle);
+                            }
+                            Navigator.pop(ctx);
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 26, vertical: 10),
+                            decoration: BoxDecoration(
+                              color: Colors.white,
+                              borderRadius: BorderRadius.circular(24),
+                            ),
+                            child: const Text(
+                              'Apply',
+                              style: TextStyle(
+                                color: Colors.black,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 14,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                   ],
                 ),
@@ -2023,99 +2101,240 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   void _openSpeedSheet() {
-    const speeds = [0.5, 0.75, 1.0, 1.25, 1.5, 2.0];
+    const speeds = [0.5, 0.75, 1.0, 1.25, 1.5];
     final isTv = TvModeService().isTvMode;
     final isPc = PlatformUtils.isDesktop;
+    final isLandscape = MediaQuery.of(context).orientation == Orientation.landscape;
+
+    int currentIdx = speeds.indexWhere((s) => (_playbackSpeed - s).abs() < 0.05);
+    if (currentIdx == -1) {
+      int best = 2; // Default to 1.0x
+      double minDiff = 999.0;
+      for (int i = 0; i < speeds.length; i++) {
+        final diff = (_playbackSpeed - speeds[i]).abs();
+        if (diff < minDiff) {
+          minDiff = diff;
+          best = i;
+        }
+      }
+      currentIdx = best;
+    }
 
     _showResponsiveModal(
       context: context,
-      maxWidth: 420,
-      maxHeight: 400,
+      maxWidth: 480,
+      maxHeight: 280,
       builder: (ctx) {
-        return SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                if (!isTv && !isPc)
-                  Center(
-                    child: Container(
-                      width: 40,
-                      height: 4,
-                      decoration: BoxDecoration(
-                        color: Colors.white24,
-                        borderRadius: BorderRadius.circular(2),
-                      ),
-                    ),
-                  ),
-                const SizedBox(height: 12),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        return StatefulBuilder(
+          builder: (modalCtx, setSheetState) {
+            void selectSpeedIdx(int idx) {
+              final newSpeed = speeds[idx];
+              setSheetState(() {
+                currentIdx = idx;
+              });
+              setState(() {
+                _playbackSpeed = newSpeed;
+              });
+              _videoPlayerController?.setPlaybackSpeed(newSpeed);
+            }
+
+            return SafeArea(
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
+                decoration: const BoxDecoration(
+                  color: Color(0xFF141414),
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
                   children: [
-                    const Padding(
-                      padding: EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      child: Text(
-                        'PLAYBACK SPEED',
-                        style: TextStyle(
-                          color: Colors.white54,
-                          fontSize: 12,
-                          fontWeight: FontWeight.bold,
-                          letterSpacing: 1.2,
+                    if (!isTv && !isPc && !isLandscape)
+                      Center(
+                        child: Container(
+                          width: 40,
+                          height: 4,
+                          margin: const EdgeInsets.only(bottom: 16),
+                          decoration: BoxDecoration(
+                            color: Colors.white24,
+                            borderRadius: BorderRadius.circular(2),
+                          ),
                         ),
                       ),
+                    const SizedBox(height: 10),
+                    // Netflix Speed Slider
+                    LayoutBuilder(
+                      builder: (context, constraints) {
+                        final totalWidth = constraints.maxWidth;
+                        final activeFraction = currentIdx / (speeds.length - 1);
+
+                        return GestureDetector(
+                          behavior: HitTestBehavior.opaque,
+                          onPanUpdate: (details) {
+                            final localX = details.localPosition.dx.clamp(0.0, totalWidth);
+                            final frac = (localX / totalWidth).clamp(0.0, 1.0);
+                            final nearestIdx = (frac * (speeds.length - 1)).round().clamp(0, speeds.length - 1);
+                            if (nearestIdx != currentIdx) {
+                              selectSpeedIdx(nearestIdx);
+                            }
+                          },
+                          onTapDown: (details) {
+                            final localX = details.localPosition.dx.clamp(0.0, totalWidth);
+                            final frac = (localX / totalWidth).clamp(0.0, 1.0);
+                            final nearestIdx = (frac * (speeds.length - 1)).round().clamp(0, speeds.length - 1);
+                            selectSpeedIdx(nearestIdx);
+                          },
+                          child: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              // Speed labels row
+                              Padding(
+                                padding: const EdgeInsets.only(bottom: 16),
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                  children: List.generate(speeds.length, (i) {
+                                    final sp = speeds[i];
+                                    final isSelected = i == currentIdx;
+                                    final labelWidget = GestureDetector(
+                                      onTap: () => selectSpeedIdx(i),
+                                      child: Container(
+                                        color: Colors.transparent,
+                                        child: Column(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Text(
+                                              '${sp}x',
+                                              style: TextStyle(
+                                                color: isSelected ? Colors.white : Colors.white60,
+                                                fontSize: isSelected ? 15 : 13,
+                                                fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                                              ),
+                                            ),
+                                            if (sp == 1.0)
+                                              Text(
+                                                'Normal',
+                                                style: TextStyle(
+                                                  color: isSelected ? Colors.white : Colors.white38,
+                                                  fontSize: 10,
+                                                  fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                                                ),
+                                              )
+                                            else
+                                              const SizedBox(height: 14),
+                                          ],
+                                        ),
+                                      ),
+                                    );
+
+                                    if (isTv) {
+                                      return TvFocusable(
+                                        autofocus: isSelected,
+                                        onPressed: () => selectSpeedIdx(i),
+                                        child: labelWidget,
+                                      );
+                                    }
+                                    return labelWidget;
+                                  }),
+                                ),
+                              ),
+                              // Slider Track and Thumb
+                              SizedBox(
+                                height: 32,
+                                child: Stack(
+                                  alignment: Alignment.centerLeft,
+                                  children: [
+                                    // Inactive background track
+                                    Container(
+                                      height: 7,
+                                      width: totalWidth,
+                                      decoration: BoxDecoration(
+                                        color: Colors.white24,
+                                        borderRadius: BorderRadius.circular(4),
+                                      ),
+                                    ),
+                                    // Active filled track (solid white)
+                                    Container(
+                                      height: 7,
+                                      width: (totalWidth * activeFraction).clamp(4.0, totalWidth),
+                                      decoration: BoxDecoration(
+                                        color: Colors.white,
+                                        borderRadius: BorderRadius.circular(4),
+                                      ),
+                                    ),
+                                    // Tick indicators along the track
+                                    ...List.generate(speeds.length, (i) {
+                                      final tickFrac = i / (speeds.length - 1);
+                                      return Positioned(
+                                        left: (totalWidth * tickFrac - 1.5).clamp(0.0, totalWidth - 3),
+                                        child: Container(
+                                          width: 3,
+                                          height: 12,
+                                          decoration: BoxDecoration(
+                                            color: i <= currentIdx ? Colors.white : Colors.white38,
+                                            borderRadius: BorderRadius.circular(1.5),
+                                          ),
+                                        ),
+                                      );
+                                    }),
+                                    // Thumb indicator
+                                    Positioned(
+                                      left: (totalWidth * activeFraction - 5).clamp(0.0, totalWidth - 10),
+                                      child: Container(
+                                        width: 10,
+                                        height: 28,
+                                        decoration: BoxDecoration(
+                                          color: Colors.white,
+                                          borderRadius: BorderRadius.circular(5),
+                                          boxShadow: [
+                                            BoxShadow(
+                                              color: Colors.black.withValues(alpha: 0.5),
+                                              blurRadius: 6,
+                                              offset: const Offset(0, 2),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                        );
+                      },
                     ),
-                    if (isTv || isPc)
-                      IconButton(
-                        icon: const Icon(Icons.close, color: Colors.white70, size: 20),
-                        onPressed: () => Navigator.pop(ctx),
-                      ),
+                    const SizedBox(height: 24),
+                    // Circular Close Button matching Netflix screenshot
+                    Center(
+                      child: isTv
+                          ? TvFocusable(
+                              onPressed: () => Navigator.pop(ctx),
+                              child: Container(
+                                width: 44,
+                                height: 44,
+                                decoration: const BoxDecoration(
+                                  color: Color(0xFF2B2B2B),
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Icon(Icons.close, color: Colors.white, size: 22),
+                              ),
+                            )
+                          : GestureDetector(
+                              onTap: () => Navigator.pop(ctx),
+                              child: Container(
+                                width: 44,
+                                height: 44,
+                                decoration: const BoxDecoration(
+                                  color: Color(0xFF2B2B2B),
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Icon(Icons.close, color: Colors.white, size: 22),
+                              ),
+                            ),
+                    ),
                   ],
                 ),
-                ...speeds.map((sp) {
-                  final isSelected = (_playbackSpeed - sp).abs() < 0.05;
-                  final label = sp == 1.0 ? '1x (Normal)' : '${sp}x';
-                  final tile = ListTile(
-                    dense: true,
-                    title: Text(
-                      label,
-                      style: TextStyle(
-                        color: isSelected ? Colors.white : Colors.white70,
-                        fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                        fontSize: 15,
-                      ),
-                    ),
-                    trailing: isSelected
-                        ? const Icon(Icons.check, color: AppTheme.primaryRed, size: 20)
-                        : null,
-                    onTap: isTv
-                        ? null
-                        : () {
-                            setState(() => _playbackSpeed = sp);
-                            _videoPlayerController?.setPlaybackSpeed(sp);
-                            Navigator.pop(ctx);
-                            _startHideControlsTimer();
-                          },
-                  );
-
-                  if (isTv) {
-                    return TvFocusable(
-                      autofocus: isSelected,
-                      onPressed: () {
-                        setState(() => _playbackSpeed = sp);
-                        _videoPlayerController?.setPlaybackSpeed(sp);
-                        Navigator.pop(ctx);
-                        _startHideControlsTimer();
-                      },
-                      child: tile,
-                    );
-                  }
-                  return tile;
-                }),
-              ],
-            ),
-          ),
+              ),
+            );
+          },
         );
       },
     );
@@ -3361,9 +3580,25 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 child: LayoutBuilder(
                   builder: (context, constraints) {
                     final trackWidth = constraints.maxWidth;
-                    final startFraction = (_clipStartSeconds / totalSec).clamp(0.0, 1.0);
-                    final endFraction = (_clipEndSeconds / totalSec).clamp(0.0, 1.0);
-                    final curFraction = (curSec / totalSec).clamp(0.0, 1.0);
+                    // Localized 5-minute viewport window so small clips look wide and spacious
+                    const viewportDuration = 300.0;
+                    double windowStart;
+                    double windowEnd;
+                    if (totalSec <= viewportDuration) {
+                      windowStart = 0.0;
+                      windowEnd = totalSec;
+                    } else {
+                      final clipCenter = (_clipStartSeconds + _clipEndSeconds) / 2;
+                      windowStart = (clipCenter - viewportDuration / 2).clamp(0.0, totalSec - viewportDuration);
+                      windowEnd = windowStart + viewportDuration;
+                      if (_clipStartSeconds < windowStart) windowStart = _clipStartSeconds.clamp(0.0, totalSec);
+                      if (_clipEndSeconds > windowEnd) windowEnd = _clipEndSeconds.clamp(0.0, totalSec);
+                    }
+                    final windowSpan = (windowEnd - windowStart).clamp(10.0, totalSec);
+
+                    final startFraction = ((_clipStartSeconds - windowStart) / windowSpan).clamp(0.0, 1.0);
+                    final endFraction = ((_clipEndSeconds - windowStart) / windowSpan).clamp(0.0, 1.0);
+                    final curFraction = ((curSec - windowStart) / windowSpan).clamp(0.0, 1.0);
 
                     final leftPos = startFraction * trackWidth;
                     final rightPos = endFraction * trackWidth;
@@ -3378,7 +3613,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                             behavior: HitTestBehavior.opaque,
                             onTapDown: (details) {
                               final tapFraction = (details.localPosition.dx / trackWidth).clamp(0.0, 1.0);
-                              final tapSec = (tapFraction * totalSec).clamp(_clipStartSeconds, _clipEndSeconds);
+                              final tapSec = (windowStart + (tapFraction * windowSpan)).clamp(_clipStartSeconds, _clipEndSeconds);
                               _videoPlayerController?.seekTo(Duration(seconds: tapSec.toInt()));
                               setState(() {
                                 _currentPosition = Duration(seconds: tapSec.toInt());
@@ -3457,7 +3692,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                             child: GestureDetector(
                               behavior: HitTestBehavior.opaque,
                               onHorizontalDragUpdate: (details) {
-                                final deltaSec = (details.delta.dx / trackWidth) * totalSec;
+                                final deltaSec = (details.delta.dx / trackWidth) * windowSpan;
                                 final duration = _clipEndSeconds - _clipStartSeconds;
                                 var newStart = _clipStartSeconds + deltaSec;
                                 var newEnd = _clipEndSeconds + deltaSec;
@@ -3482,6 +3717,23 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                     bottom: BorderSide(color: Colors.white, width: 2.5),
                                   ),
                                 ),
+                                child: Center(
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                    decoration: BoxDecoration(
+                                      color: Colors.black.withValues(alpha: 0.75),
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: Text(
+                                      _formatDuration(Duration(seconds: (_clipEndSeconds - _clipStartSeconds).toInt())),
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ),
+                                ),
                               ),
                             ),
                           ),
@@ -3496,7 +3748,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                           child: GestureDetector(
                             behavior: HitTestBehavior.opaque,
                             onHorizontalDragUpdate: (details) {
-                              final deltaSec = (details.delta.dx / trackWidth) * totalSec;
+                              final deltaSec = (details.delta.dx / trackWidth) * windowSpan;
                               final newSec = (curSec + deltaSec).clamp(_clipStartSeconds, _clipEndSeconds);
                               _videoPlayerController?.seekTo(Duration(seconds: newSec.toInt()));
                               setState(() {
@@ -3567,7 +3819,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                           child: GestureDetector(
                             behavior: HitTestBehavior.opaque,
                             onHorizontalDragUpdate: (details) {
-                              final deltaSec = (details.delta.dx / trackWidth) * totalSec;
+                              final deltaSec = (details.delta.dx / trackWidth) * windowSpan;
                               final minStart = (_clipEndSeconds - 300.0).clamp(0.0, totalSec);
                               final maxStart = _clipEndSeconds - 2.0;
                               setState(() {
@@ -3626,7 +3878,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                           child: GestureDetector(
                             behavior: HitTestBehavior.opaque,
                             onHorizontalDragUpdate: (details) {
-                              final deltaSec = (details.delta.dx / trackWidth) * totalSec;
+                              final deltaSec = (details.delta.dx / trackWidth) * windowSpan;
                               final minEnd = _clipStartSeconds + 2.0;
                               final maxEnd = (_clipStartSeconds + 300.0).clamp(0.0, totalSec);
                               setState(() {

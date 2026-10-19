@@ -5,6 +5,7 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../core/constants/theme_constants.dart';
+import '../core/constants/api_constants.dart';
 import '../core/network/api_service.dart';
 import '../core/services/tv_mode_service.dart';
 import '../models/media_item.dart';
@@ -35,6 +36,8 @@ class ProfileGateScreen extends StatefulWidget {
 class _ProfileGateScreenState extends State<ProfileGateScreen> {
   late bool _isManaging;
   List<MediaItem> _trendingPosters = [];
+  String? _featuredLogoPath;
+  String? _featuredSubtitle;
 
   @override
   void initState() {
@@ -49,6 +52,31 @@ class _ProfileGateScreenState extends State<ProfileGateScreen> {
       if (mounted) {
         setState(() {
           _trendingPosters = items.where((m) => m.posterPath != null).take(18).toList();
+        });
+        if (_trendingPosters.isNotEmpty) {
+          _fetchFeaturedLogo(_trendingPosters.first);
+        }
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _fetchFeaturedLogo(MediaItem item) async {
+    try {
+      final detail = await ApiService().getDetails(item.mediaType, item.id);
+      if (mounted) {
+        String subtitle;
+        if (detail.tagline != null && detail.tagline!.trim().isNotEmpty) {
+          subtitle = detail.tagline!.trim();
+        } else if (item.mediaType == 'tv') {
+          final count = detail.seasons.length;
+          subtitle = count > 1 ? 'Watch all $count seasons' : (count == 1 ? 'Watch Season 1' : 'Watch series now');
+        } else {
+          subtitle = 'Watch movie now';
+        }
+
+        setState(() {
+          _featuredLogoPath = detail.logoPath;
+          _featuredSubtitle = subtitle;
         });
       }
     } catch (_) {}
@@ -572,7 +600,7 @@ class _ProfileGateScreenState extends State<ProfileGateScreen> {
                     ),
                   ),
 
-                // Featured Announcement & Title Badge at bottom of hero artwork (Screenshot 3)
+                // Featured Announcement & Title Badge at bottom of hero artwork (Screenshot 1)
                 Positioned(
                   left: 20,
                   right: 20,
@@ -580,35 +608,55 @@ class _ProfileGateScreenState extends State<ProfileGateScreen> {
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
-                      // Featured show title emblem / badge
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
-                        decoration: BoxDecoration(
-                          color: Colors.black.withValues(alpha: 0.65),
-                          borderRadius: BorderRadius.circular(6),
-                          border: Border.all(color: Colors.amber.withValues(alpha: 0.6), width: 1.2),
-                        ),
-                        child: Text(
-                          (featuredItem?.title ?? 'ROADIES REBIRTH').toUpperCase(),
+                      // Stylized Logo (TMDB) with fallback to clean Title
+                      if (_featuredLogoPath != null && _featuredLogoPath!.isNotEmpty)
+                        CachedNetworkImage(
+                          imageUrl: ApiConstants.getImageUrl(_featuredLogoPath, size: 'w500'),
+                          height: 64,
+                          fit: BoxFit.contain,
+                          alignment: Alignment.center,
+                          errorWidget: (c, u, e) => Text(
+                            (featuredItem?.title ?? 'VOIDFLIX').toUpperCase(),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: GoogleFonts.bebasNeue(
+                              color: Colors.white,
+                              fontSize: 36,
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: 2.0,
+                              shadows: const [
+                                Shadow(color: Colors.black, blurRadius: 10, offset: Offset(0, 2)),
+                              ],
+                            ),
+                          ),
+                        )
+                      else
+                        Text(
+                          (featuredItem?.title ?? 'VOIDFLIX').toUpperCase(),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: GoogleFonts.cinzel(
-                            color: Colors.amber,
-                            fontSize: 14,
+                          style: GoogleFonts.bebasNeue(
+                            color: Colors.white,
+                            fontSize: 36,
                             fontWeight: FontWeight.w900,
                             letterSpacing: 2.0,
+                            shadows: const [
+                              Shadow(color: Colors.black, blurRadius: 10, offset: Offset(0, 2)),
+                            ],
                           ),
                         ),
-                      ),
                       const SizedBox(height: 8),
 
-                      // "New Episode coming on 16 October" / "Now Streaming" (Screenshot 3)
+                      // Dynamic subtitle or tagline
                       Text(
-                        'New Episode coming on 16 October',
+                        _featuredSubtitle ?? (featuredItem?.mediaType == 'tv' ? 'Watch series now' : 'Watch movie now'),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.center,
                         style: GoogleFonts.inter(
                           color: Colors.white.withValues(alpha: 0.9),
                           fontSize: 13,
-                          fontWeight: FontWeight.w600,
+                          fontWeight: FontWeight.w500,
                           shadows: const [
                             Shadow(color: Colors.black, blurRadius: 8, offset: Offset(0, 1)),
                           ],
@@ -621,7 +669,7 @@ class _ProfileGateScreenState extends State<ProfileGateScreen> {
             ),
           ),
 
-          // Bottom ~49%: Curved "Choose your profile" section (Screenshot 3)
+          // Bottom ~49%: Curved "Elige tu perfil" section (Screenshot 1)
           Positioned(
             left: 0,
             right: 0,
@@ -642,7 +690,7 @@ class _ProfileGateScreenState extends State<ProfileGateScreen> {
               child: SafeArea(
                 top: false,
                 child: Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 14),
+                  padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
                   child: Column(
                     children: [
                       // Handle bar
@@ -656,18 +704,18 @@ class _ProfileGateScreenState extends State<ProfileGateScreen> {
                       ),
                       const SizedBox(height: 12),
 
-                      // Title: "Choose your profile" (Screenshot 3)
+                      // Title: "Choose your profile"
                       Text(
                         'Choose your profile',
                         style: GoogleFonts.inter(
                           color: Colors.white.withValues(alpha: 0.85),
-                          fontSize: 16,
+                          fontSize: 15,
                           fontWeight: FontWeight.w500,
                         ),
                       ),
                       const SizedBox(height: 16),
 
-                      // 2x2 Grid of Profile tiles + Add + Edit (Screenshot 3)
+                      // 3-Column Grid of Profile tiles + Edit
                       Expanded(
                         child: Center(
                           child: profiles.isEmpty
@@ -707,42 +755,29 @@ class _ProfileGateScreenState extends State<ProfileGateScreen> {
                                   ],
                                 )
                               : ConstrainedBox(
-                                  constraints: const BoxConstraints(maxWidth: 320),
+                                  constraints: const BoxConstraints(maxWidth: 360),
                                   child: GridView.count(
                                     shrinkWrap: true,
-                                    physics: const NeverScrollableScrollPhysics(),
-                                    crossAxisCount: 2,
+                                    physics: const BouncingScrollPhysics(),
+                                    crossAxisCount: 3,
                                     mainAxisSpacing: 16,
-                                    crossAxisSpacing: 28,
-                                    childAspectRatio: 0.95,
+                                    crossAxisSpacing: 14,
+                                    childAspectRatio: 0.82,
                                     children: [
-                                      // Profile 1
-                                      if (profiles.isNotEmpty)
-                                        _buildProfileTile(profiles[0]),
+                                      // All User profiles (up to 5)
+                                      ...profiles.take(5).map((p) => _buildProfileTile(p)),
 
-                                      // Profile 2
-                                      if (profiles.length > 1)
-                                        _buildProfileTile(profiles[1])
-                                      else
+                                      // Optional Add tile if user has fewer than 5 profiles and not managing
+                                      if (profiles.length < 5 && !_isManaging)
                                         _buildActionTile(
-                                          icon: Icons.add,
+                                          icon: Icons.add_rounded,
                                           label: 'Add',
                                           onTap: _showAddProfileModal,
                                         ),
 
-                                      // Tile 3: Add (or 3rd profile if user has > 2)
-                                      if (profiles.length > 2)
-                                        _buildProfileTile(profiles[2])
-                                      else
-                                        _buildActionTile(
-                                          icon: Icons.add,
-                                          label: 'Add',
-                                          onTap: _showAddProfileModal,
-                                        ),
-
-                                      // Tile 4: Edit toggle
+                                      // Edit tile with pencil icon
                                       _buildActionTile(
-                                        icon: _isManaging ? Icons.check_circle : Icons.edit_outlined,
+                                        icon: _isManaging ? Icons.check_rounded : Icons.edit_outlined,
                                         label: _isManaging ? 'Done' : 'Edit',
                                         isHighlight: _isManaging,
                                         onTap: () {
@@ -1005,15 +1040,32 @@ class _ProfileGateScreenState extends State<ProfileGateScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text(
-                      featuredItem.title.toUpperCase(),
-                      style: GoogleFonts.inter(
-                        fontSize: 14,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.white,
-                        letterSpacing: 1.2,
+                    if (_featuredLogoPath != null && _featuredLogoPath!.isNotEmpty)
+                      CachedNetworkImage(
+                        imageUrl: ApiConstants.getImageUrl(_featuredLogoPath, size: 'w500'),
+                        height: 48,
+                        fit: BoxFit.contain,
+                        alignment: Alignment.centerLeft,
+                        errorWidget: (c, u, e) => Text(
+                          featuredItem.title.toUpperCase(),
+                          style: GoogleFonts.inter(
+                            fontSize: 14,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.white,
+                            letterSpacing: 1.2,
+                          ),
+                        ),
+                      )
+                    else
+                      Text(
+                        featuredItem.title.toUpperCase(),
+                        style: GoogleFonts.inter(
+                          fontSize: 14,
+                          fontWeight: FontWeight.bold,
+                          color: Colors.white,
+                          letterSpacing: 1.2,
+                        ),
                       ),
-                    ),
                     const SizedBox(height: 4),
                     Text(
                       'Watch the Limited Series now',
@@ -1076,10 +1128,11 @@ class _ProfileGateScreenState extends State<ProfileGateScreen> {
             profile.name,
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.center,
             style: GoogleFonts.inter(
               color: Colors.white,
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
+              fontSize: 13,
+              fontWeight: FontWeight.w500,
             ),
           ),
         ],
@@ -1102,8 +1155,8 @@ class _ProfileGateScreenState extends State<ProfileGateScreen> {
             width: 76,
             height: 76,
             decoration: BoxDecoration(
-              color: isHighlight ? AppTheme.primaryRed : const Color(0xFF382E2B),
-              borderRadius: BorderRadius.circular(14),
+              color: isHighlight ? AppTheme.primaryRed : const Color(0xFF383842),
+              borderRadius: BorderRadius.circular(16),
               boxShadow: [
                 BoxShadow(
                   color: Colors.black.withValues(alpha: 0.4),
@@ -1113,16 +1166,19 @@ class _ProfileGateScreenState extends State<ProfileGateScreen> {
               ],
             ),
             child: Center(
-              child: Icon(icon, color: Colors.white, size: 30),
+              child: Icon(icon, color: Colors.white, size: 28),
             ),
           ),
           const SizedBox(height: 8),
           Text(
             label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            textAlign: TextAlign.center,
             style: GoogleFonts.inter(
-              color: Colors.white.withValues(alpha: 0.85),
-              fontSize: 14,
-              fontWeight: FontWeight.w600,
+              color: Colors.white,
+              fontSize: 13,
+              fontWeight: FontWeight.w500,
             ),
           ),
         ],

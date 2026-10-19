@@ -7,6 +7,7 @@ import 'package:url_launcher/url_launcher.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
 import '../core/constants/theme_constants.dart';
+import '../core/constants/api_constants.dart';
 import '../core/network/api_service.dart';
 import '../core/services/youtube_service.dart';
 import '../core/services/tv_mode_service.dart';
@@ -125,6 +126,7 @@ class ClipPlayerTile extends StatefulWidget {
 class _ClipPlayerTileState extends State<ClipPlayerTile> {
   final ApiService _apiService = ApiService();
   String? _trailerKey;
+  String? _logoPath;
   WebViewController? _webController;
   VideoPlayerController? _videoPlayerController;
   bool _isLiked = false;
@@ -170,6 +172,10 @@ class _ClipPlayerTileState extends State<ClipPlayerTile> {
     try {
       final detail = await _apiService.getDetails(widget.item.mediaType, widget.item.id);
       if (!mounted) return;
+
+      if (detail.logoPath != null && detail.logoPath!.isNotEmpty) {
+        _logoPath = detail.logoPath;
+      }
 
       final trailer = detail.videos.where((v) =>
           v.site.toLowerCase() == 'youtube' &&
@@ -457,19 +463,43 @@ class _ClipPlayerTileState extends State<ClipPlayerTile> {
             crossAxisAlignment: CrossAxisAlignment.start,
             mainAxisSize: MainAxisSize.min,
             children: [
-              Text(
-                widget.item.title,
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 22,
-                  fontWeight: FontWeight.bold,
-                  shadows: [
-                    Shadow(color: Colors.black, blurRadius: 10, offset: Offset(0, 2)),
-                  ],
+              if (_logoPath != null && _logoPath!.isNotEmpty)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8.0),
+                  child: CachedNetworkImage(
+                    imageUrl: ApiConstants.getImageUrl(_logoPath, size: 'w500'),
+                    height: 52,
+                    fit: BoxFit.contain,
+                    alignment: Alignment.centerLeft,
+                    errorWidget: (c, u, e) => Text(
+                      widget.item.title,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontSize: 22,
+                        fontWeight: FontWeight.bold,
+                        shadows: [
+                          Shadow(color: Colors.black, blurRadius: 10, offset: Offset(0, 2)),
+                        ],
+                      ),
+                    ),
+                  ),
+                )
+              else
+                Text(
+                  widget.item.title,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 22,
+                    fontWeight: FontWeight.bold,
+                    shadows: [
+                      Shadow(color: Colors.black, blurRadius: 10, offset: Offset(0, 2)),
+                    ],
+                  ),
                 ),
-              ),
               const SizedBox(height: 6),
               if (widget.item.overview.isNotEmpty)
                 Text(
