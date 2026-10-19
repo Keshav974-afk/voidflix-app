@@ -65,9 +65,10 @@ jobs:
         shell: pwsh
         run: |
           $cert = Get-ChildItem "Cert:\CurrentUser\My" | Where-Object { $_.Subject -like "*CN=Voidflix*" } | Select-Object -First 1
-          if ($cert -and (Test-Path "build\windows\installer\Voidflix-Setup-v1.0.1.exe")) {
-            Write-Host "Signing Voidflix-Setup-v1.0.1.exe..."
-            Set-AuthenticodeSignature -FilePath "build\windows\installer\Voidflix-Setup-v1.0.1.exe" -Certificate $cert -TimestampServer "http://timestamp.digicert.com" -HashAlgorithm SHA256
+          $installer = Get-ChildItem -Path "build\windows\installer\Voidflix-Setup-*.exe" | Select-Object -First 1
+          if ($cert -and $installer) {
+            Write-Host "Signing $($installer.FullName)..."
+            Set-AuthenticodeSignature -FilePath $installer.FullName -Certificate $cert -TimestampServer "http://timestamp.digicert.com" -HashAlgorithm SHA256
           }
 
       - name: Package Standalone Zip
@@ -79,7 +80,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Voidflix-Windows-Setup
-          path: build/windows/installer/Voidflix-Setup-v1.0.1.exe
+          path: build/windows/installer/Voidflix-Setup-*.exe
 
       - name: Upload Windows Portable Zip
         uses: actions/upload-artifact@v4
@@ -104,4 +105,5 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: pwsh
         run: |
-          gh release upload v1.0.1 build/windows/installer/Voidflix-Setup-v1.0.1.exe Voidflix-Windows-Portable.zip windows/Voidflix-Public.cer --clobber || gh release create v1.0.1 build/windows/installer/Voidflix-Setup-v1.0.1.exe Voidflix-Windows-Portable.zip windows/Voidflix-Public.cer --title "Voidflix v1.0.1" --notes "Official Native Windows Flutter Release with Authenticode Code Signing" --clobber || true
+          $installer = (Get-ChildItem -Path "build\windows\installer\Voidflix-Setup-*.exe" | Select-Object -First 1).FullName
+          gh release upload v1.0.2 $installer Voidflix-Windows-Portable.zip windows/Voidflix-Public.cer --clobber || gh release create v1.0.2 $installer Voidflix-Windows-Portable.zip windows/Voidflix-Public.cer --title "Voidflix v1.0.2" --notes "Official Native Windows Flutter Release v1.0.2 with stylized logos, white buffer seekbar and server lock." --clobber || true
