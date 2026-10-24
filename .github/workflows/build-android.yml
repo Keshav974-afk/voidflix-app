@@ -1,0 +1,50 @@
+name: Build Android APK Release
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-apk:
+    name: Build Android APKs
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build Split APKs
+        run: flutter build apk --split-per-abi --release
+
+      - name: Build Universal APK
+        run: flutter build apk --release
+
+      - name: Upload Split APKs
+        uses: actions/upload-artifact@v4
+        with:
+          name: Voidflix-Android-Split-APKs
+          path: build/app/outputs/flutter-apk/app-*-release.apk
+
+      - name: Upload Universal APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: Voidflix-Android-Universal-APK
+          path: build/app/outputs/flutter-apk/app-release.apk
