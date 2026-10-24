@@ -37,10 +37,10 @@ class TvModeService extends ChangeNotifier {
       if (_isHardwareTv) {
         // Genuine Android TV / Google TV / Fire TV hardware -> ALWAYS auto-enable TV UI
         _isTvMode = true;
-      } else if (prefs.containsKey(_prefKey)) {
-        _isTvMode = prefs.getBool(_prefKey) ?? false;
       } else {
+        // Mobile phones & tablets -> strictly disable TV mode
         _isTvMode = false;
+        await prefs.remove(_prefKey);
       }
     } catch (_) {
       _isTvMode = _isHardwareTv;
@@ -51,6 +51,12 @@ class TvModeService extends ChangeNotifier {
   }
 
   Future<void> setTvMode(bool enabled) async {
+    // Strictly disallow TV Mode on mobile devices
+    if (!_isHardwareTv) {
+      _isTvMode = false;
+      notifyListeners();
+      return;
+    }
     if (_isTvMode == enabled) return;
     _isTvMode = enabled;
     notifyListeners();

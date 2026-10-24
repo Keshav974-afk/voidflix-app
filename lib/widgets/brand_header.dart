@@ -311,15 +311,6 @@ class BrandHeader extends StatelessWidget implements PreferredSizeWidget {
                     },
                   ),
 
-                  // Switch to TV Mode button
-                  IconButton(
-                    icon: const Icon(Icons.tv_rounded, color: Colors.white, size: 22),
-                    tooltip: 'Switch to TV Leanback Mode',
-                    onPressed: () {
-                      TvModeService().setTvMode(true);
-                    },
-                  ),
-
                   // Download icon (Screenshot 2)
                   IconButton(
                     icon: const Icon(Icons.file_download_outlined, color: Colors.white, size: 23),

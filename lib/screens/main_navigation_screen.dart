@@ -228,32 +228,6 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
               ),
             ),
 
-            // TV Mode 10-Foot Button
-            InkWell(
-              onTap: () => TvModeService().setTvMode(true),
-              borderRadius: BorderRadius.circular(20),
-              child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                decoration: BoxDecoration(
-                  color: Colors.white.withValues(alpha: 0.1),
-                  borderRadius: BorderRadius.circular(20),
-                  border: Border.all(color: const Color(0xFF00D2FF).withValues(alpha: 0.5), width: 1),
-                ),
-                child: const Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(Icons.tv_rounded, color: Color(0xFF00D2FF), size: 18),
-                    SizedBox(width: 6),
-                    Text(
-                      'TV Mode',
-                      style: TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(width: 8),
-
             // Search Button
             IconButton(
               icon: const Icon(Icons.search_rounded, color: Colors.white, size: 22),

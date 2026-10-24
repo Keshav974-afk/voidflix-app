@@ -604,21 +604,23 @@ class _SettingsScreenState extends State<SettingsScreen> {
           // TV & CASTING (10-Foot Leanback UI & DLNA Casting)
           // ═══════════════════════════════════════════════
           _buildCategoryHeader('TV & Casting'),
-          _buildSwitchTile(
-            leading: Icons.tv_rounded,
-            title: 'Android TV Leanback UI',
-            subtitle: tvMode.isTvMode
-                ? 'Active (10-Foot Remote & D-pad Layout)'
-                : 'Switch to TV 10-foot remote interface',
-            value: tvMode.isTvMode,
-            onChanged: (val) async {
-              await tvMode.setTvMode(val);
-              if (val && context.mounted) {
-                Navigator.of(context).pop();
-              }
-            },
-          ),
-          const Divider(height: 1, color: Color(0xFF1E1E1E)),
+          if (tvMode.isHardwareTv) ...[
+            _buildSwitchTile(
+              leading: Icons.tv_rounded,
+              title: 'Android TV Leanback UI',
+              subtitle: tvMode.isTvMode
+                  ? 'Active (10-Foot Remote & D-pad Layout)'
+                  : 'Switch to TV 10-foot remote interface',
+              value: tvMode.isTvMode,
+              onChanged: (val) async {
+                await tvMode.setTvMode(val);
+                if (val && context.mounted) {
+                  Navigator.of(context).pop();
+                }
+              },
+            ),
+            const Divider(height: 1, color: Color(0xFF1E1E1E)),
+          ],
           _buildSettingTile(
             leading: Icons.cast_rounded,
             title: 'Cast to TV / DLNA Devices',
