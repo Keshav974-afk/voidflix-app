@@ -16,6 +16,8 @@ import '../providers/watchlist_provider.dart';
 import '../widgets/netflix_season_picker.dart';
 import '../widgets/cast_dialog.dart';
 import '../core/services/cast_service.dart';
+import '../core/services/voidcast_service.dart';
+import '../widgets/voidcast_remote_sheet.dart';
 import '../core/services/stream_extractor.dart';
 import '../widgets/tv_back_button.dart';
 import '../widgets/tv_focusable.dart';
@@ -639,6 +641,64 @@ class _DetailScreenState extends State<DetailScreen> {
                     ),
                   ),
                   const SizedBox(height: 14),
+
+                  // VoidCast: Play on Connected TV
+                  Consumer<VoidCastService>(
+                    builder: (castCtx, voidCast, _) {
+                      if (!voidCast.isConnected) return const SizedBox.shrink();
+                      return Padding(
+                        padding: const EdgeInsets.only(bottom: 10),
+                        child: TvFocusable(
+                          scaleFactor: 1.02,
+                          glowColor: const Color(0xFF00B4D8),
+                          borderRadius: BorderRadius.circular(6),
+                          onPressed: () {
+                            final saved = context.read<HistoryProvider>().getProgress(detail.id);
+                            final s = saved?.season ?? _selectedSeason;
+                            final e = saved?.episode ?? 1;
+                            voidCast.playOnTv(
+                              tmdbId: detail.id.toString(),
+                              type: widget.mediaType,
+                              title: isTv ? '${detail.title} (S${s}E$e)' : detail.title,
+                              poster: detail.posterPath,
+                              season: s,
+                              episode: e,
+                              position: 0.0,
+                            );
+                            VoidCastRemoteSheet.show(context);
+                          },
+                          child: Container(
+                            width: double.infinity,
+                            height: 44,
+                            decoration: BoxDecoration(
+                              gradient: const LinearGradient(
+                                colors: [Color(0xFF00B4D8), Color(0xFF0077B6)],
+                              ),
+                              borderRadius: BorderRadius.circular(6),
+                              boxShadow: [
+                                BoxShadow(
+                                  color: const Color(0xFF00B4D8).withValues(alpha: 0.35),
+                                  blurRadius: 10,
+                                  offset: const Offset(0, 2),
+                                ),
+                              ],
+                            ),
+                            child: Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                const Icon(Icons.cast_connected_rounded, color: Colors.white, size: 22),
+                                const SizedBox(width: 8),
+                                Text(
+                                  'Play on ${voidCast.connectedTvName}',
+                                  style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.white),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      );
+                    },
+                  ),
 
                   // Full-width White Button: ▶ Play (TvFocusable for 10-foot remote support)
                   TvFocusable(

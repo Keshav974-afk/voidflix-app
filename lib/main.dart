@@ -9,6 +9,7 @@ import 'core/constants/theme_constants.dart';
 import 'core/services/app_logger.dart';
 import 'core/services/tv_mode_service.dart';
 import 'core/services/cast_service.dart';
+import 'core/services/voidcast_service.dart';
 import 'providers/download_provider.dart';
 import 'providers/history_provider.dart';
 import 'providers/media_provider.dart';
@@ -133,6 +134,7 @@ class FlowflixApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => DownloadProvider()..loadDownloads()),
         ChangeNotifierProvider(create: (_) => TvModeService()..initialize()),
         ChangeNotifierProvider(create: (_) => CastService()),
+        ChangeNotifierProvider(create: (_) => VoidCastService()..initialize()),
       ],
       child: MaterialApp(
         title: 'Voidflix',

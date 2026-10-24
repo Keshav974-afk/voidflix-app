@@ -44,9 +44,6 @@ class MediaCard extends StatelessWidget {
     final posterUrl = isLandscape
         ? ApiConstants.getImageUrl(item.backdropPath ?? item.posterPath, size: 'w780')
         : ApiConstants.getImageUrl(item.posterPath, size: 'w500');
-    final match = item.voteAverage > 0
-        ? (item.voteAverage * 10).round().clamp(75, 99)
-        : null;
 
     Widget cardContent = Container(
       width: width,
@@ -129,17 +126,6 @@ class MediaCard extends StatelessWidget {
                       fontWeight: FontWeight.bold,
                     ),
                   ),
-                  if (match != null) ...[
-                    const SizedBox(height: 1),
-                    Text(
-                      '$match% Match',
-                      style: const TextStyle(
-                        color: AppTheme.matchGreen,
-                        fontSize: 9,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ],
                 ],
               ),
             ),

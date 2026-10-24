@@ -131,6 +131,66 @@ class _ChooseIconScreenState extends State<ChooseIconScreen> {
   }
 
   Widget _buildSectionHeader(String title) {
+    final logoUrl = _avatarService.getCategoryLogo(title);
+    if (logoUrl != null && logoUrl.isNotEmpty) {
+      final seasonMatch = RegExp(r'(S\d+(\s*\(.*?\))?|\(Upside Down\))').firstMatch(title);
+      final seasonTag = seasonMatch?.group(0);
+
+      return Padding(
+        padding: const EdgeInsets.only(left: 16, right: 16, top: 24, bottom: 12),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 34, maxWidth: 200),
+              child: CachedNetworkImage(
+                imageUrl: logoUrl,
+                fit: BoxFit.contain,
+                alignment: Alignment.centerLeft,
+                placeholder: (_, __) => Text(
+                  title.toUpperCase(),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 0.8,
+                  ),
+                ),
+                errorWidget: (_, __, ___) => Text(
+                  title.toUpperCase(),
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 16,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 0.8,
+                  ),
+                ),
+              ),
+            ),
+            if (seasonTag != null) ...[
+              const SizedBox(width: 8),
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  color: Colors.white12,
+                  borderRadius: BorderRadius.circular(4),
+                ),
+                child: Text(
+                  seasonTag.toUpperCase(),
+                  style: const TextStyle(
+                    color: Colors.white70,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.5,
+                  ),
+                ),
+              ),
+            ],
+          ],
+        ),
+      );
+    }
+
     return Padding(
       padding: const EdgeInsets.only(left: 16, right: 16, top: 22, bottom: 12),
       child: Text(

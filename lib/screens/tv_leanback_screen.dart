@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -8,6 +9,8 @@ import 'package:cached_network_image/cached_network_image.dart';
 import '../core/constants/api_constants.dart';
 import '../core/constants/theme_constants.dart';
 import '../core/services/tv_mode_service.dart';
+import '../core/services/voidcast_service.dart';
+import '../widgets/tv_cast_dialog.dart';
 import '../models/media_item.dart';
 import '../providers/history_provider.dart';
 import '../providers/media_provider.dart';
@@ -38,7 +41,8 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
   final ScrollController _mainScrollController = ScrollController();
 
   // Explicit FocusNodes for the nav-rail items so we can arrow-key between them
-  final List<FocusNode> _navFocusNodes = List.generate(9, (_) => FocusNode());
+  final List<FocusNode> _navFocusNodes = List.generate(10, (_) => FocusNode());
+  StreamSubscription? _voidCastSub;
 
   static const Map<int, String> _genreMap = {
     28: 'Action',
@@ -81,10 +85,56 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
         media.fetchHomeData();
       }
     });
+
+    // Initialize VoidCast TV Receiver
+    VoidCastService().startHosting(deviceName: 'Voidflix Android TV');
+    _voidCastSub = VoidCastService().onCommand.listen((cmd) {
+      final action = cmd['action'] as String? ?? '';
+      final payload = cmd['payload'] as Map<String, dynamic>? ?? {};
+
+      if (action == 'play') {
+        final tmdbId = int.tryParse(payload['tmdbId']?.toString() ?? '') ?? 0;
+        if (tmdbId > 0 && mounted) {
+          final title = payload['title']?.toString() ?? 'Movie';
+          final type = payload['type']?.toString() ?? 'movie';
+          final poster = payload['poster']?.toString();
+          final season = int.tryParse(payload['season']?.toString() ?? '1') ?? 1;
+          final episode = int.tryParse(payload['episode']?.toString() ?? '1') ?? 1;
+
+          Navigator.of(context).push(
+            MaterialPageRoute(
+              builder: (_) => PlayerScreen(
+                mediaId: tmdbId,
+                mediaTitle: title,
+                mediaType: type,
+                season: season,
+                episode: episode,
+                posterPath: poster,
+              ),
+            ),
+          );
+        }
+      } else if (action == 'search') {
+        final q = payload['query']?.toString() ?? '';
+        if (q.isNotEmpty && mounted) {
+          Navigator.of(context).push(
+            MaterialPageRoute(builder: (_) => const SearchScreen()),
+          );
+        }
+      } else if (action == 'key') {
+        final k = payload['key']?.toString() ?? '';
+        if (k == 'back' && mounted) {
+          Navigator.of(context).maybePop();
+        } else if (k == 'home' && mounted) {
+          _onNavItemSelected(1);
+        }
+      }
+    });
   }
 
   @override
   void dispose() {
+    _voidCastSub?.cancel();
     for (final node in _navFocusNodes) {
       node.dispose();
     }
@@ -119,9 +169,12 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
         Navigator.of(context).push(MaterialPageRoute(builder: (_) => const LiveTvScreen()));
         break;
       case 7:
-        Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SettingsScreen()));
+        TvCastDialog.show(context);
         break;
       case 8:
+        Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SettingsScreen()));
+        break;
+      case 9:
         TvModeService().setTvMode(false);
         if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
           SystemChrome.setPreferredOrientations([
@@ -256,6 +309,7 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
       {'icon': Icons.movie_outlined, 'label': 'Movies'},
       {'icon': Icons.add_rounded, 'label': 'My List'},
       {'icon': Icons.live_tv_rounded, 'label': 'Live TV'},
+      {'icon': Icons.cast_connected_rounded, 'label': 'Link Phone'},
       {'icon': Icons.settings_outlined, 'label': 'Settings'},
       {
         'icon': Icons.desktop_windows_rounded,

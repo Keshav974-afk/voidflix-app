@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 class NetflixAvatar {
@@ -30,12 +31,26 @@ class AvatarService {
   AvatarService._internal();
 
   Map<String, List<NetflixAvatar>> _categories = {};
+  Map<String, String> _categoryLogos = {};
   List<NetflixAvatar> _allAvatars = [];
   bool _isLoaded = false;
 
   bool get isLoaded => _isLoaded;
   Map<String, List<NetflixAvatar>> get categories => _categories;
+  Map<String, String> get categoryLogos => _categoryLogos;
   List<NetflixAvatar> get allAvatars => _allAvatars;
+
+  String? getCategoryLogo(String category) {
+    if (_categoryLogos.containsKey(category)) {
+      return _categoryLogos[category];
+    }
+    // Also try without season number or parentheses
+    final clean = category.replaceAll(RegExp(r'\s+S\d+(\s*\(.*?\))?'), '').replaceAll(RegExp(r'\(.*?\)'), '').trim();
+    if (_categoryLogos.containsKey(clean)) {
+      return _categoryLogos[clean];
+    }
+    return null;
+  }
 
   /// Default curated top avatars available immediately before async load finishes
   static const List<NetflixAvatar> defaultFeatured = [
@@ -114,6 +129,15 @@ class AvatarService {
 
       _categories = parsedCats;
       _allAvatars = all;
+
+      try {
+        final logoString = await rootBundle.loadString('assets/data/category_logos.json');
+        final Map<String, dynamic> logoData = jsonDecode(logoString);
+        _categoryLogos = logoData.map((k, v) => MapEntry(k, v.toString()));
+      } catch (e) {
+        debugPrint('AvatarService: Could not load category_logos: $e');
+      }
+
       _isLoaded = true;
     } catch (_) {
       // Fallback

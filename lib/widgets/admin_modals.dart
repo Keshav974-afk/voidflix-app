@@ -4,6 +4,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:url_launcher/url_launcher.dart';
 import '../core/constants/theme_constants.dart';
 import '../core/services/remote_config_service.dart';
+import 'app_update_download_dialog.dart';
 
 class AdminModals {
   static bool _hasCheckedThisSession = false;
@@ -181,7 +182,12 @@ class AdminModals {
                         label: const Text('Update Now', style: TextStyle(fontWeight: FontWeight.bold)),
                         onPressed: () {
                           final apkUrl = RemoteConfigService.resolvedApkUrl;
-                          launchUrl(Uri.parse(apkUrl), mode: LaunchMode.externalApplication);
+                          if (!isForced) Navigator.of(context).pop();
+                          AppUpdateDownloadDialog.show(
+                            context,
+                            downloadUrl: apkUrl,
+                            targetVersion: update.version,
+                          );
                         },
                       ),
                     ),

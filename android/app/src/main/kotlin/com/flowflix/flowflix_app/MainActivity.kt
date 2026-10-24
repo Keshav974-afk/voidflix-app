@@ -287,6 +287,38 @@ class MainActivity : FlutterActivity() {
                         result.error("INVALID_URL", "videoUrl is required", null)
                     }
                 }
+                "installApk" -> {
+                    val filePath = call.argument<String>("filePath")
+                    if (filePath != null) {
+                        val file = File(filePath)
+                        if (file.exists()) {
+                            try {
+                                val intent = Intent(Intent.ACTION_VIEW).apply {
+                                    val uri = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                                        androidx.core.content.FileProvider.getUriForFile(
+                                            applicationContext,
+                                            "${applicationContext.packageName}.fileprovider",
+                                            file
+                                        )
+                                    } else {
+                                        android.net.Uri.fromFile(file)
+                                    }
+                                    setDataAndType(uri, "application/vnd.android.package-archive")
+                                    flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION
+                                }
+                                startActivity(intent)
+                                result.success(true)
+                            } catch (e: Exception) {
+                                android.util.Log.e("Voidflix", "Error launching APK install: ${e.message}", e)
+                                result.error("INSTALL_ERROR", e.message, null)
+                            }
+                        } else {
+                            result.error("FILE_NOT_FOUND", "APK file does not exist at $filePath", null)
+                        }
+                    } else {
+                        result.error("ARG_ERROR", "filePath is required", null)
+                    }
+                }
                 else -> {
                     result.notImplemented()
                 }

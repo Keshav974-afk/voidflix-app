@@ -25,6 +25,7 @@ class _SearchScreenState extends State<SearchScreen> {
   Timer? _debounce;
   List<MediaItem> _results = [];
   List<MediaItem> _recommendations = [];
+  SmartSearchResult? _smartResult;
   bool _isLoading = false;
 
   @override
@@ -42,7 +43,7 @@ class _SearchScreenState extends State<SearchScreen> {
 
   void _onSearchChanged(String query) {
     if (_debounce?.isActive ?? false) _debounce!.cancel();
-    _debounce = Timer(const Duration(milliseconds: 400), () {
+    _debounce = Timer(const Duration(milliseconds: 350), () {
       _performSearch(query);
     });
   }
@@ -51,6 +52,7 @@ class _SearchScreenState extends State<SearchScreen> {
     if (query.trim().isEmpty) {
       setState(() {
         _results = [];
+        _smartResult = null;
         _isLoading = false;
       });
       return;
@@ -58,10 +60,11 @@ class _SearchScreenState extends State<SearchScreen> {
 
     setState(() => _isLoading = true);
     try {
-      final items = await _apiService.search(query);
+      final smart = await _apiService.smartSearch(query);
       if (mounted) {
         setState(() {
-          _results = items;
+          _smartResult = smart;
+          _results = smart.results;
           _isLoading = false;
         });
       }
@@ -193,21 +196,107 @@ class _SearchScreenState extends State<SearchScreen> {
       body: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          // Section Title (Screenshot 5: "Recommended Shows & Movies")
+          // Section Title
           Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            child: Text(
-              isSearching ? 'Search Results' : 'Recommended Shows & Movies',
-              style: const TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-                letterSpacing: 0.2,
-                color: Colors.white,
-              ),
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Text(
+                    isSearching ? 'Search Results' : 'Recommended Shows & Movies',
+                    style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 0.2,
+                      color: Colors.white,
+                    ),
+                  ),
+                ),
+                if (isSearching && _smartResult?.detectedYear != null)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: AppTheme.primaryRed.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(4),
+                      border: Border.all(color: AppTheme.primaryRed.withValues(alpha: 0.4)),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.calendar_today_rounded, color: AppTheme.primaryRed, size: 11),
+                        const SizedBox(width: 4),
+                        Text(
+                          'Year: ${_smartResult!.detectedYear}',
+                          style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+                        ),
+                      ],
+                    ),
+                  ),
+                if (isSearching && _smartResult?.detectedCategory != null) ...[
+                  const SizedBox(width: 6),
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: Colors.green.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(4),
+                      border: Border.all(color: Colors.green.withValues(alpha: 0.4)),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        const Icon(Icons.local_movies_rounded, color: Colors.greenAccent, size: 11),
+                        const SizedBox(width: 4),
+                        Text(
+                          _smartResult!.detectedCategory!,
+                          style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ],
             ),
           ),
 
-          // List of Items (Screenshot 5)
+          // Auto-correction suggestion banner
+          if (isSearching && _smartResult?.wasAutoCorrected == true && _smartResult?.correctedQuery != null)
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF1E1E28),
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: Colors.white12),
+                ),
+                child: Row(
+                  children: [
+                    const Icon(Icons.auto_fix_high_rounded, color: AppTheme.primaryRed, size: 16),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text.rich(
+                        TextSpan(
+                          style: const TextStyle(fontSize: 12, color: Colors.white70),
+                          children: [
+                            const TextSpan(text: 'Showing results for: '),
+                            TextSpan(
+                              text: _smartResult!.correctedQuery!,
+                              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                            ),
+                            TextSpan(
+                              text: ' (searched: "${_smartResult!.originalQuery}")',
+                              style: const TextStyle(color: Colors.white38, fontSize: 11),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+          // List of Items
           Expanded(
             child: _isLoading
                 ? const Center(
@@ -239,7 +328,7 @@ class _SearchScreenState extends State<SearchScreen> {
                               color: Colors.transparent,
                               child: Row(
                                 children: [
-                                  // Landscape Thumbnail (Screenshot 5)
+                                  // Landscape Thumbnail
                                   Container(
                                     width: 140,
                                     height: 80,
@@ -260,7 +349,7 @@ class _SearchScreenState extends State<SearchScreen> {
                                               )
                                             : Container(color: AppTheme.surfaceVariant),
 
-                                        // Badge overlay (Recently added / New Episode) (Screenshot 5)
+                                        // Badge overlay
                                         if (badgeText != null)
                                           Positioned(
                                             left: 6,
@@ -286,21 +375,92 @@ class _SearchScreenState extends State<SearchScreen> {
                                   ),
                                   const SizedBox(width: 14),
 
-                                  // Title (Screenshot 5)
+                                  // Title, Type, Year & Rating
                                   Expanded(
-                                    child: Text(
-                                      item.title,
-                                      maxLines: 2,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 15,
-                                        fontWeight: FontWeight.w600,
-                                      ),
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      mainAxisAlignment: MainAxisAlignment.center,
+                                      children: [
+                                        Text(
+                                          item.title,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 15,
+                                            fontWeight: FontWeight.w600,
+                                          ),
+                                        ),
+                                        const SizedBox(height: 5),
+                                        Row(
+                                          children: [
+                                            Container(
+                                              padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                              decoration: BoxDecoration(
+                                                color: item.mediaType == 'tv'
+                                                    ? Colors.blueAccent.withValues(alpha: 0.2)
+                                                    : Colors.redAccent.withValues(alpha: 0.2),
+                                                borderRadius: BorderRadius.circular(4),
+                                                border: Border.all(
+                                                  color: item.mediaType == 'tv'
+                                                      ? Colors.blueAccent.withValues(alpha: 0.4)
+                                                      : Colors.redAccent.withValues(alpha: 0.4),
+                                                  width: 0.8,
+                                                ),
+                                              ),
+                                              child: Text(
+                                                item.mediaType == 'tv' ? 'SERIES' : 'MOVIE',
+                                                style: TextStyle(
+                                                  color: item.mediaType == 'tv' ? Colors.blueAccent : Colors.redAccent,
+                                                  fontSize: 9,
+                                                  fontWeight: FontWeight.bold,
+                                                  letterSpacing: 0.5,
+                                                ),
+                                              ),
+                                            ),
+                                            if (item.year.isNotEmpty) ...[
+                                              const SizedBox(width: 8),
+                                              Container(
+                                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                                decoration: BoxDecoration(
+                                                  color: Colors.white.withValues(alpha: 0.08),
+                                                  borderRadius: BorderRadius.circular(4),
+                                                ),
+                                                child: Text(
+                                                  item.year,
+                                                  style: const TextStyle(
+                                                    color: Colors.white70,
+                                                    fontSize: 11,
+                                                    fontWeight: FontWeight.w600,
+                                                  ),
+                                                ),
+                                              ),
+                                            ],
+                                            if (item.voteAverage > 0) ...[
+                                              const SizedBox(width: 8),
+                                              Row(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  const Icon(Icons.star_rounded, color: Colors.amber, size: 14),
+                                                  const SizedBox(width: 2),
+                                                  Text(
+                                                    item.voteAverage.toStringAsFixed(1),
+                                                    style: const TextStyle(
+                                                      color: Colors.white70,
+                                                      fontSize: 11,
+                                                      fontWeight: FontWeight.w600,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ],
+                                          ],
+                                        ),
+                                      ],
                                     ),
                                   ),
 
-                                  // Circular Play Outline Button (Screenshot 5)
+                                  // Circular Play Outline Button
                                   IconButton(
                                     icon: const Icon(
                                       Icons.play_circle_outline,

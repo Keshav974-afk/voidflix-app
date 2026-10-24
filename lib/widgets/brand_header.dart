@@ -3,6 +3,8 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import '../core/constants/theme_constants.dart';
 import '../core/services/tv_mode_service.dart';
+import '../core/services/voidcast_service.dart';
+import 'voidcast_remote_sheet.dart';
 import '../providers/notification_provider.dart';
 import '../providers/profile_provider.dart';
 import '../screens/downloads_screen.dart';
@@ -272,6 +274,42 @@ class BrandHeader extends StatelessWidget implements PreferredSizeWidget {
                   ),
 
                   const Spacer(),
+
+                  // VoidCast: TV Connect & Remote Control (YouTube-style)
+                  Consumer<VoidCastService>(
+                    builder: (castCtx, voidCast, _) {
+                      final isConnected = voidCast.isConnected;
+                      return IconButton(
+                        icon: Stack(
+                          clipBehavior: Clip.none,
+                          children: [
+                            Icon(
+                              isConnected ? Icons.cast_connected_rounded : Icons.cast_rounded,
+                              color: isConnected ? const Color(0xFF00B4D8) : Colors.white,
+                              size: 22,
+                            ),
+                            if (isConnected)
+                              Positioned(
+                                top: -1,
+                                right: -1,
+                                child: Container(
+                                  width: 7,
+                                  height: 7,
+                                  decoration: const BoxDecoration(
+                                    color: Colors.greenAccent,
+                                    shape: BoxShape.circle,
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
+                        tooltip: isConnected
+                            ? 'Connected to ${voidCast.connectedTvName} (Tap for Remote)'
+                            : 'Connect to TV (VoidCast)',
+                        onPressed: () => VoidCastRemoteSheet.show(context),
+                      );
+                    },
+                  ),
 
                   // Switch to TV Mode button
                   IconButton(

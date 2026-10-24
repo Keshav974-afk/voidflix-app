@@ -31,6 +31,7 @@ import '../providers/profile_provider.dart';
 import '../widgets/netflix_season_picker.dart';
 import '../widgets/cast_dialog.dart';
 import '../core/services/cast_service.dart';
+import '../core/services/voidcast_service.dart';
 import '../core/services/tv_mode_service.dart';
 import '../widgets/tv_focusable.dart';
 import 'package:flutter/foundation.dart';
@@ -106,6 +107,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
   bool _isPlaying = false;
   bool _isBuffering = false;
   Duration _currentPosition = Duration.zero;
+  StreamSubscription? _voidCastPlayerSub;
+  int _lastVoidCastBroadcastTime = 0;
   Duration _totalDuration = Duration.zero;
   Duration _bufferedPosition = Duration.zero;
   bool _isDraggingSeekbar = false;
@@ -221,6 +224,37 @@ class _PlayerScreenState extends State<PlayerScreen> {
     // Keep screen awake while watching video
     WakelockPlus.enable();
 
+    // VoidCast Remote Control Listener
+    _voidCastPlayerSub = VoidCastService().onCommand.listen((cmd) {
+      final action = cmd['action'] as String? ?? '';
+      final payload = cmd['payload'] as Map<String, dynamic>? ?? {};
+
+      if (action == 'pause') {
+        final controller = _videoPlayerController;
+        if (controller != null && controller.value.isPlaying) {
+          controller.pause();
+          setState(() => _isPlaying = false);
+        }
+      } else if (action == 'resume') {
+        final controller = _videoPlayerController;
+        if (controller != null && !controller.value.isPlaying) {
+          controller.play();
+          setState(() => _isPlaying = true);
+        }
+      } else if (action == 'seek') {
+        final pos = (payload['position'] as num?)?.toDouble() ?? 0;
+        final controller = _videoPlayerController;
+        if (controller != null) {
+          controller.seekTo(Duration(seconds: pos.toInt()));
+        }
+      } else if (action == 'skip') {
+        final offset = (payload['offset'] as num?)?.toInt() ?? 10;
+        _seekRelative(offset);
+      } else if (action == 'exit') {
+        if (mounted) Navigator.of(context).maybePop();
+      }
+    });
+
     // Listen for Picture-in-Picture mode transitions from Android OS
     const MethodChannel('org.voidflix/notifications').setMethodCallHandler((call) async {
       if (call.method == 'onPipModeChanged') {
@@ -263,6 +297,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   @override
   void dispose() {
+    _voidCastPlayerSub?.cancel();
     const MethodChannel('org.voidflix/notifications').setMethodCallHandler(null);
     _partySyncTimer?.cancel();
     _floatingMsgTimer?.cancel();
@@ -931,6 +966,25 @@ class _PlayerScreenState extends State<PlayerScreen> {
         _isPlaying = val.isPlaying;
         _isBuffering = val.isBuffering;
       });
+
+      // Broadcast TV live playback progress to VoidCast phone remotes
+      if (VoidCastService().isHostingTv) {
+        final now = DateTime.now().millisecondsSinceEpoch;
+        if (now - _lastVoidCastBroadcastTime > 1000) {
+          _lastVoidCastBroadcastTime = now;
+          VoidCastService().broadcastTvPlaybackState(
+            isPlaying: val.isPlaying,
+            currentTime: val.position.inSeconds.toDouble(),
+            duration: val.duration.inSeconds.toDouble(),
+            title: widget.mediaTitle,
+            tmdbId: widget.mediaId.toString(),
+            mediaType: widget.mediaType,
+            poster: widget.posterPath,
+            season: _currentSeason,
+            episode: _currentEpisode,
+          );
+        }
+      }
 
       // Synchronize live subtitle cue text
       if (_currentCues.isNotEmpty) {

@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart';
 import '../core/services/remote_config_service.dart';
+import '../widgets/app_update_download_dialog.dart';
 
 /// Full-Screen Mandatory App Update Gate
 ///
@@ -19,14 +19,14 @@ class _UpdateRequiredScreenState extends State<UpdateRequiredScreen> {
 
   Future<void> _launchUpdateUrl() async {
     final apkUrl = RemoteConfigService.resolvedApkUrl;
-    try {
-      final uri = Uri.parse(apkUrl);
-      if (await canLaunchUrl(uri)) {
-        await launchUrl(uri, mode: LaunchMode.externalApplication);
-      }
-    } catch (e) {
-      debugPrint('Error launching update URL: $e');
-    }
+    final update = RemoteConfigService.cachedUpdate;
+    final targetVersion = update?.version ?? '0.3.0';
+
+    AppUpdateDownloadDialog.show(
+      context,
+      downloadUrl: apkUrl,
+      targetVersion: targetVersion,
+    );
   }
 
   Future<void> _recheckVersion() async {

@@ -286,17 +286,297 @@ class ApiService {
     return episodes.map((e) => TvEpisode.fromJson(e as Map<String, dynamic>)).toList();
   }
 
+  static const Map<String, String> _languageMap = {
+    'hindi': 'hi',
+    'bollywood': 'hi',
+    'nepali': 'ne',
+    'tamil': 'ta',
+    'kollywood': 'ta',
+    'telugu': 'te',
+    'tollywood': 'te',
+    'punjabi': 'pa',
+    'malayalam': 'ml',
+    'korean': 'ko',
+    'k-drama': 'ko',
+    'kdrama': 'ko',
+    'japanese': 'ja',
+    'anime': 'ja',
+    'english': 'en',
+    'hollywood': 'en',
+    'spanish': 'es',
+    'french': 'fr',
+    'chinese': 'zh',
+  };
+
+  static const Map<String, int> _genreMap = {
+    'comedy': 35,
+    'funny': 35,
+    'hilarious': 35,
+    'sad': 18,
+    'emotional': 18,
+    'drama': 18,
+    'tearjerker': 18,
+    'heartbreak': 18,
+    'crying': 18,
+    'horror': 27,
+    'scary': 27,
+    'spooky': 27,
+    'ghost': 27,
+    'action': 28,
+    'fighting': 28,
+    'fight': 28,
+    'romance': 10749,
+    'romantic': 10749,
+    'love': 10749,
+    'sci-fi': 878,
+    'scifi': 878,
+    'space': 878,
+    'thriller': 53,
+    'suspense': 53,
+    'mystery': 9648,
+    'animation': 16,
+    'animated': 16,
+    'cartoon': 16,
+    'crime': 80,
+    'gangster': 80,
+    'mafia': 80,
+    'adventure': 12,
+    'fantasy': 14,
+  };
+
   Future<List<MediaItem>> search(String query, {int page = 1}) async {
-    if (query.trim().isEmpty) return [];
-    final data = await _get('/search/multi', {
-      'query': query,
-      'page': '$page',
-    });
-    final results = data['results'] as List<dynamic>? ?? [];
-    return results
-        .where((e) => e['media_type'] == 'movie' || e['media_type'] == 'tv')
-        .map((e) => MediaItem.fromJson(e as Map<String, dynamic>))
-        .toList();
+    final smart = await smartSearch(query, page: page);
+    return smart.results;
+  }
+
+  Future<SmartSearchResult> smartSearch(String rawQuery, {int page = 1}) async {
+    final q = rawQuery.trim();
+    if (q.isEmpty) return const SmartSearchResult(results: []);
+
+    // 1. Detect concatenated year: e.g. 'genius2018' -> 'genius 2018'
+    String normalized = q;
+    final concatMatch = RegExp(r'^([a-zA-Z\s]+?)(\d{4})$').firstMatch(normalized);
+    if (concatMatch != null) {
+      normalized = '${concatMatch.group(1)} ${concatMatch.group(2)}';
+    }
+
+    // 2. Extract 4-digit year (1900-2099)
+    final yearMatch = RegExp(r'\b(19\d\d|20\d\d)\b').firstMatch(normalized);
+    final detectedYear = yearMatch?.group(1);
+
+    String cleanTitle = normalized
+        .replaceAll(RegExp(r'[\(\[\{]?(19\d\d|20\d\d)[\)\]\}]?'), '')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+
+    // 3. Semantic Intent & Category Parsing (e.g. 'hindi movie', 'hindi comedy', 'nepali', 'sad movie')
+    final lower = normalized.toLowerCase();
+    final tokens = RegExp(r'\b[a-zA-Z\-]+\b').allMatches(lower).map((m) => m.group(0)!).toList();
+
+    String? detectedLang;
+    String? detectedLangName;
+    final detectedGenres = <int>[];
+    final detectedGenreNames = <String>[];
+    String? detectedType;
+    final consumedTokens = <String>{};
+
+    for (final t in tokens) {
+      if (t == 'movie' || t == 'movies' || t == 'film' || t == 'films' || t == 'cinema') {
+        detectedType = 'movie';
+        consumedTokens.add(t);
+      } else if (t == 'series' || t == 'show' || t == 'shows' || t == 'tv' || t == 'drama' || t == 'dramas' || t == 'kdrama' || t == 'k-drama') {
+        if (t == 'kdrama' || t == 'k-drama') {
+          detectedLang = 'ko';
+          detectedLangName = 'Korean';
+        }
+        detectedType = detectedType ?? 'tv';
+        consumedTokens.add(t);
+      } else if (_languageMap.containsKey(t)) {
+        detectedLang = _languageMap[t];
+        detectedLangName = t[0].toUpperCase() + t.substring(1);
+        consumedTokens.add(t);
+      } else if (_genreMap.containsKey(t)) {
+        final gId = _genreMap[t]!;
+        if (!detectedGenres.contains(gId)) {
+          detectedGenres.add(gId);
+          detectedGenreNames.add(t[0].toUpperCase() + t.substring(1));
+        }
+        consumedTokens.add(t);
+      }
+    }
+
+    final remainderTokens = tokens.where((t) => !consumedTokens.contains(t)).toList();
+    final isPureCategory = remainderTokens.isEmpty && (detectedLang != null || detectedGenres.isNotEmpty);
+    String? categoryLabel;
+    if (detectedLangName != null || detectedGenreNames.isNotEmpty) {
+      final parts = <String>[];
+      if (detectedLangName != null) parts.add(detectedLangName);
+      if (detectedGenreNames.isNotEmpty) parts.add(detectedGenreNames.join(' & '));
+      if (detectedType != null) parts.add(detectedType == 'tv' ? 'Shows' : 'Movies');
+      categoryLabel = parts.join(' ');
+    }
+
+    final queryTerm = cleanTitle.isNotEmpty ? cleanTitle : q;
+    final seenKeys = <String>{};
+    final combinedResults = <MediaItem>[];
+
+    void addItems(List<MediaItem> items) {
+      for (final item in items) {
+        final key = '${item.mediaType}_${item.id}';
+        if (seenKeys.add(key)) {
+          combinedResults.add(item);
+        }
+      }
+    }
+
+    Future<List<MediaItem>> fetchItems(String endpoint, Map<String, String> params) async {
+      try {
+        final data = await _get(endpoint, params);
+        final list = data['results'] as List<dynamic>? ?? [];
+        final defaultType = endpoint.contains('/tv') ? 'tv' : 'movie';
+        return list
+            .where((e) => e['media_type'] == 'movie' || e['media_type'] == 'tv' || !endpoint.contains('/multi'))
+            .map((e) => MediaItem.fromJson(e as Map<String, dynamic>, defaultType: defaultType))
+            .toList();
+      } catch (_) {
+        return [];
+      }
+    }
+
+    // Branch A: Pure Category Search (e.g. 'hindi movie', 'hindi comedy', 'nepali', 'sad movie')
+    if (isPureCategory) {
+      final discoverParams = <String, String>{
+        'sort_by': 'popularity.desc',
+        'page': '$page',
+      };
+      if (detectedLang != null) discoverParams['with_original_language'] = detectedLang;
+      if (detectedGenres.isNotEmpty) discoverParams['with_genres'] = detectedGenres.join(',');
+
+      if (detectedType == 'tv') {
+        final tvs = await fetchItems('/discover/tv', discoverParams);
+        addItems(tvs);
+      } else if (detectedType == 'movie') {
+        final movies = await fetchItems('/discover/movie', discoverParams);
+        addItems(movies);
+      } else {
+        final disco = await Future.wait([
+          fetchItems('/discover/movie', discoverParams),
+          fetchItems('/discover/tv', discoverParams),
+        ]);
+        addItems(disco[0]);
+        addItems(disco[1]);
+        combinedResults.sort((a, b) => b.popularity.compareTo(a.popularity));
+      }
+
+      return SmartSearchResult(
+        results: combinedResults,
+        originalQuery: q,
+        detectedCategory: categoryLabel,
+      );
+    }
+
+    // Branch B: Title / Specific Movie Search (with optional year and category boosting)
+    if (detectedYear != null && cleanTitle.isNotEmpty) {
+      final yearResults = await Future.wait([
+        fetchItems('/search/movie', {
+          'query': cleanTitle,
+          'primary_release_year': detectedYear,
+        }),
+        fetchItems('/search/tv', {
+          'query': cleanTitle,
+          'first_air_date_year': detectedYear,
+        }),
+      ]);
+      addItems(yearResults[0]);
+      addItems(yearResults[1]);
+    }
+
+    // Multi-search on clean title (fetch page 1 and page 2 for high recall)
+    final multiResults = await Future.wait([
+      fetchItems('/search/multi', {'query': queryTerm, 'page': '$page'}),
+      if (page == 1) fetchItems('/search/multi', {'query': queryTerm, 'page': '2'}),
+    ]);
+    for (final list in multiResults) {
+      addItems(list);
+    }
+
+    // If year was specified, sort exact year match to the top
+    if (detectedYear != null && combinedResults.isNotEmpty) {
+      combinedResults.sort((a, b) {
+        final aMatch = a.year == detectedYear ? 1 : 0;
+        final bMatch = b.year == detectedYear ? 1 : 0;
+        if (aMatch != bMatch) return bMatch.compareTo(aMatch);
+        return b.popularity.compareTo(a.popularity);
+      });
+    }
+
+    // Typo / Spelling Correction fallback if 0 results
+    String? correctedQuery;
+    bool wasAutoCorrected = false;
+
+    if (combinedResults.isEmpty) {
+      final suggestion = await _getSpellingSuggestion(queryTerm);
+      if (suggestion != null && suggestion.toLowerCase() != queryTerm.toLowerCase()) {
+        correctedQuery = suggestion;
+        wasAutoCorrected = true;
+
+        if (detectedYear != null) {
+          final yearMovies = await fetchItems('/search/movie', {
+            'query': correctedQuery,
+            'primary_release_year': detectedYear,
+          });
+          addItems(yearMovies);
+        }
+
+        final corrMulti = await Future.wait([
+          fetchItems('/search/multi', {'query': correctedQuery, 'page': '$page'}),
+          if (page == 1) fetchItems('/search/multi', {'query': correctedQuery, 'page': '2'}),
+        ]);
+        for (final list in corrMulti) {
+          addItems(list);
+        }
+      }
+    }
+
+    return SmartSearchResult(
+      results: combinedResults,
+      originalQuery: q,
+      detectedYear: detectedYear,
+      correctedQuery: correctedQuery,
+      detectedCategory: categoryLabel,
+      wasAutoCorrected: wasAutoCorrected,
+    );
+  }
+
+  Future<String?> _getSpellingSuggestion(String query) async {
+    try {
+      final uri = Uri.parse('https://suggestqueries.google.com/complete/search?client=firefox&q=${Uri.encodeComponent(query)}');
+      final response = await _client.get(uri).timeout(const Duration(seconds: 3));
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body);
+        if (data is List && data.length > 1 && data[1] is List) {
+          final list = data[1] as List;
+          if (list.isNotEmpty) {
+            String first = list.first.toString().trim();
+            first = first.replaceAll(RegExp(r'\b(movie|film|cast|meaning|trailer|full movie|download)\b', caseSensitive: false), '').trim();
+            if (first.isNotEmpty) return first;
+          }
+        }
+      }
+    } catch (_) {}
+
+    try {
+      final kwData = await _get('/search/keyword', {'query': query});
+      final kwList = kwData['results'] as List<dynamic>? ?? [];
+      if (kwList.isNotEmpty) {
+        final name = kwList.first['name'] as String?;
+        if (name != null && name.trim().isNotEmpty) {
+          return name.trim();
+        }
+      }
+    } catch (_) {}
+
+    return null;
   }
 
   Future<List<Map<String, dynamic>>> getGenres(String type) async {
@@ -304,4 +584,22 @@ class ApiService {
     final genres = data['genres'] as List<dynamic>? ?? [];
     return genres.map((e) => {'id': e['id'] as int, 'name': e['name'] as String}).toList();
   }
+}
+
+class SmartSearchResult {
+  final List<MediaItem> results;
+  final String? originalQuery;
+  final String? detectedYear;
+  final String? correctedQuery;
+  final String? detectedCategory;
+  final bool wasAutoCorrected;
+
+  const SmartSearchResult({
+    required this.results,
+    this.originalQuery,
+    this.detectedYear,
+    this.correctedQuery,
+    this.detectedCategory,
+    this.wasAutoCorrected = false,
+  });
 }
