@@ -1,5 +1,6 @@
 class DownloadedItem {
   final String id; // 'movie_123' or 'tv_123_s1_e1'
+  final String? profileId;
   final int mediaId;
   final String title;
   final String mediaType; // 'movie' or 'tv'
@@ -24,6 +25,7 @@ class DownloadedItem {
 
   const DownloadedItem({
     required this.id,
+    this.profileId,
     required this.mediaId,
     required this.title,
     required this.mediaType,
@@ -48,6 +50,7 @@ class DownloadedItem {
   });
 
   DownloadedItem copyWith({
+    String? profileId,
     String? title,
     String? status,
     double? progress,
@@ -64,6 +67,7 @@ class DownloadedItem {
   }) {
     return DownloadedItem(
       id: id,
+      profileId: profileId ?? this.profileId,
       mediaId: mediaId,
       title: title ?? this.title,
       mediaType: mediaType,
@@ -90,6 +94,7 @@ class DownloadedItem {
 
   Map<String, dynamic> toJson() => {
         'id': id,
+        'profileId': profileId,
         'mediaId': mediaId,
         'title': title,
         'mediaType': mediaType,
@@ -115,6 +120,7 @@ class DownloadedItem {
 
   factory DownloadedItem.fromJson(Map<String, dynamic> json) => DownloadedItem(
         id: json['id'] as String,
+        profileId: json['profileId'] as String?,
         mediaId: json['mediaId'] as int,
         title: json['title'] as String,
         mediaType: json['mediaType'] as String,

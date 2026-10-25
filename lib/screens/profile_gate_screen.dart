@@ -1,3 +1,4 @@
+import '../providers/download_provider.dart';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
@@ -83,15 +84,15 @@ class _ProfileGateScreenState extends State<ProfileGateScreen> {
   }
 
   void _onProfileTapped(UserProfile profile) {
+    if (profile.pin != null && profile.pin!.isNotEmpty) {
+      _showPinDialog(profile, isEditing: _isManaging);
+      return;
+    }
+
     if (_isManaging) {
       Navigator.of(context).push(
         MaterialPageRoute(builder: (_) => EditProfileScreen(profile: profile)),
       );
-      return;
-    }
-
-    if (profile.pin != null && profile.pin!.isNotEmpty) {
-      _showPinDialog(profile);
       return;
     }
 
@@ -101,6 +102,7 @@ class _ProfileGateScreenState extends State<ProfileGateScreen> {
   void _selectProfileAndProceed(UserProfile profile) {
     final provider = context.read<ProfileProvider>();
     provider.setActiveProfile(profile);
+    context.read<DownloadProvider>().setActiveProfileId(profile.id);
 
     context.read<MediaProvider>().fetchPersonalizedForProfile(profile, force: true);
 
@@ -118,7 +120,7 @@ class _ProfileGateScreenState extends State<ProfileGateScreen> {
     }
   }
 
-  void _showPinDialog(UserProfile profile) {
+  void _showPinDialog(UserProfile profile, {bool isEditing = false}) {
     final pinController = TextEditingController();
     String? errorText;
 
@@ -128,6 +130,24 @@ class _ProfileGateScreenState extends State<ProfileGateScreen> {
       builder: (dialogCtx) {
         return StatefulBuilder(
           builder: (ctx, setDialogState) {
+            void handleUnlock() {
+              if (pinController.text == profile.pin) {
+                Navigator.of(dialogCtx).pop();
+                if (isEditing) {
+                  Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => EditProfileScreen(profile: profile)),
+                  );
+                } else {
+                  _selectProfileAndProceed(profile);
+                }
+              } else {
+                setDialogState(() {
+                  errorText = 'Incorrect PIN. Try again.';
+                  pinController.clear();
+                });
+              }
+            }
+
             return Dialog(
               backgroundColor: AppTheme.surfaceVariant,
               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
@@ -198,15 +218,7 @@ class _ProfileGateScreenState extends State<ProfileGateScreen> {
                           setDialogState(() => errorText = null);
                         }
                         if (val.length == 4) {
-                          if (val == profile.pin) {
-                            Navigator.of(dialogCtx).pop();
-                            _selectProfileAndProceed(profile);
-                          } else {
-                            setDialogState(() {
-                              errorText = 'Incorrect PIN. Try again.';
-                              pinController.clear();
-                            });
-                          }
+                          handleUnlock();
                         }
                       },
                     ),
@@ -226,21 +238,25 @@ class _ProfileGateScreenState extends State<ProfileGateScreen> {
                               backgroundColor: AppTheme.primaryRed,
                               shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
                             ),
-                            onPressed: () {
-                              if (pinController.text == profile.pin) {
-                                Navigator.of(dialogCtx).pop();
-                                _selectProfileAndProceed(profile);
-                              } else {
-                                setDialogState(() {
-                                  errorText = 'Incorrect PIN. Try again.';
-                                  pinController.clear();
-                                });
-                              }
-                            },
+                            onPressed: handleUnlock,
                             child: const Text('Unlock', style: TextStyle(color: Colors.white)),
                           ),
                         ),
                       ],
+                    ),
+                    const SizedBox(height: 12),
+                    TextButton(
+                      onPressed: () {
+                        _showForgotPinDeleteDialog(profile, dialogCtx);
+                      },
+                      child: const Text(
+                        'Forgot PIN? Delete Profile',
+                        style: TextStyle(
+                          color: Colors.redAccent,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
                     ),
                   ],
                 ),
@@ -249,6 +265,47 @@ class _ProfileGateScreenState extends State<ProfileGateScreen> {
           },
         );
       },
+    );
+  }
+
+  void _showForgotPinDeleteDialog(UserProfile profile, BuildContext pinDialogCtx) {
+    showDialog(
+      context: context,
+      builder: (confirmCtx) => AlertDialog(
+        backgroundColor: const Color(0xFF141414),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: const BorderSide(color: Colors.white12),
+        ),
+        title: const Text('Delete Profile?', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        content: Text(
+          'Because this profile is locked with a PIN and you do not know the PIN, deleting the profile is the only option. All data, watch history, and watchlist for "${profile.name}" will be permanently removed. Are you sure?',
+          style: const TextStyle(color: Colors.white70, fontSize: 14),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(confirmCtx).pop(),
+            child: const Text('Cancel', style: TextStyle(color: Colors.white60)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFE50914)),
+            onPressed: () async {
+              Navigator.of(confirmCtx).pop();
+              Navigator.of(pinDialogCtx).pop();
+              await context.read<ProfileProvider>().deleteProfile(profile.id);
+              if (mounted) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    backgroundColor: const Color(0xFF1F1F1F),
+                    content: Text('Profile "${profile.name}" deleted.', style: const TextStyle(color: Colors.white)),
+                  ),
+                );
+              }
+            },
+            child: const Text('Delete Profile', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
     );
   }
 

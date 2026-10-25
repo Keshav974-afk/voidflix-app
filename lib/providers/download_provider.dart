@@ -69,11 +69,28 @@ class DownloadProvider extends ChangeNotifier {
 
   final List<DownloadedItem> _items = [];
   final Map<String, http.Client> _activeClients = {};
+  String? _activeProfileId;
 
-  List<DownloadedItem> get items => List.unmodifiable(_items);
+  void setActiveProfileId(String? id) {
+    if (_activeProfileId != id) {
+      _activeProfileId = id;
+      notifyListeners();
+    }
+  }
+
+  String? get activeProfileId => _activeProfileId;
+
+  List<DownloadedItem> get items {
+    if (_activeProfileId == null || _activeProfileId!.isEmpty) {
+      return List.unmodifiable(_items);
+    }
+    return List.unmodifiable(
+      _items.where((i) => i.profileId == null || i.profileId == _activeProfileId).toList(),
+    );
+  }
 
   List<DownloadedItem> get completedItems =>
-      _items.where((i) => i.status == 'completed').toList();
+      items.where((i) => i.status == 'completed').toList();
 
   /// Sanitizes title by removing any attached season/episode tags (e.g. ": S1E2 ...")
   static String sanitizeTitle(String rawTitle) {
@@ -214,15 +231,15 @@ class DownloadProvider extends ChangeNotifier {
   }
 
   bool isDownloaded(String id) {
-    return _items.any((i) => i.id == id && i.status == 'completed');
+    return items.any((i) => i.id == id && i.status == 'completed');
   }
 
   bool isDownloading(String id) {
-    return _items.any((i) => i.id == id && i.status == 'downloading');
+    return items.any((i) => i.id == id && i.status == 'downloading');
   }
 
   bool isPaused(String id) {
-    return _items.any((i) => i.id == id && (i.status == 'paused' || i.status == 'failed'));
+    return items.any((i) => i.id == id && (i.status == 'paused' || i.status == 'failed'));
   }
 
   double getProgress(String id) {
@@ -231,7 +248,7 @@ class DownloadProvider extends ChangeNotifier {
   }
 
   DownloadedItem? getItem(String id) {
-    return _items.where((i) => i.id == id).firstOrNull;
+    return items.where((i) => i.id == id).firstOrNull;
   }
 
   DownloadedItem? getItemByPath(String path) {
@@ -336,10 +353,10 @@ class DownloadProvider extends ChangeNotifier {
   Future<int> _getPreferredQualityHeight() async {
     try {
       final prefs = await SharedPreferences.getInstance();
-      final q = prefs.getString('voidflix_download_quality') ?? 'High';
+      final q = prefs.getString('voidflix_preferred_quality') ?? prefs.getString('voidflix_download_quality') ?? 'High';
       if (q.contains('4K') || q.contains('2160')) return 2160;
-      if (q.contains('1080') || q == 'High') return 1080;
-      if (q.contains('720') || q == 'Standard') return 720;
+      if (q.contains('1080') || q == 'High' || q.contains('Full HD')) return 1080;
+      if (q.contains('720') || q == 'Standard' || q.contains('HD')) return 720;
       if (q.contains('480') || q.contains('Data Saver')) return 480;
     } catch (_) {}
     return 1080;
@@ -589,6 +606,7 @@ class DownloadProvider extends ChangeNotifier {
 
     var item = DownloadedItem(
       id: id,
+      profileId: _activeProfileId,
       mediaId: mediaId,
       title: cleanTitle,
       mediaType: mediaType,
@@ -662,45 +680,7 @@ class DownloadProvider extends ChangeNotifier {
                       : 480)
           : await _getPreferredQualityHeight();
 
-      // Priority 1: Meow (Telegram VPS 25k Channel Database with multi-audio & multi-quality direct MP4)
-      try {
-        final telegramStreams = await StreamExtractor.extractTelegram(
-          type: mediaType,
-          tmdbId: mediaId,
-          season: season,
-          episode: episode,
-        ).timeout(const Duration(seconds: 4));
-
-        for (final s in telegramStreams) {
-          if (s.subtitles.isNotEmpty) availableSubs.addAll(s.subtitles);
-          for (final q in s.qualities) {
-            candidates.add(_DownloadCandidate(
-              url: q.url,
-              headers: s.headers,
-              isHls: false, // Direct progressive MP4 stream with byte-range 206!
-              qualityLabel: q.label,
-              serverName: 'Meow',
-              audioLanguage: s.language,
-              height: q.height > 0 ? q.height : 1080,
-            ));
-          }
-          if (s.qualities.isEmpty && s.url.isNotEmpty) {
-            candidates.add(_DownloadCandidate(
-              url: s.url,
-              headers: s.headers,
-              isHls: s.type == 'hls' || s.url.contains('.m3u8'),
-              qualityLabel: s.qualityLabel ?? '1080p',
-              serverName: 'Meow',
-              audioLanguage: s.language,
-              height: 1080,
-            ));
-          }
-        }
-      } catch (e) {
-        debugPrint('Download: Meow Telegram candidate error: $e');
-      }
-
-      // Priority 1.5: NetMirror (Direct High-Speed MP4 CDN with Multi-Quality 1080p/720p/480p and Range 206)
+      // Priority 1: NetMirror (Direct High-Speed MP4 CDN with Multi-Quality 1080p/720p/480p, Range 206 & Preferred Dub)
       try {
         final netMirrorStreams = await StreamExtractor.extractNetMirror(
           type: mediaType,
@@ -737,6 +717,44 @@ class DownloadProvider extends ChangeNotifier {
         }
       } catch (e) {
         debugPrint('Download: NetMirror candidate error: $e');
+      }
+
+      // Priority 2: Meow (Telegram VPS 25k Channel Database with multi-audio & multi-quality direct MP4)
+      try {
+        final telegramStreams = await StreamExtractor.extractTelegram(
+          type: mediaType,
+          tmdbId: mediaId,
+          season: season,
+          episode: episode,
+        ).timeout(const Duration(seconds: 4));
+
+        for (final s in telegramStreams) {
+          if (s.subtitles.isNotEmpty) availableSubs.addAll(s.subtitles);
+          for (final q in s.qualities) {
+            candidates.add(_DownloadCandidate(
+              url: q.url,
+              headers: s.headers,
+              isHls: false, // Direct progressive MP4 stream with byte-range 206!
+              qualityLabel: q.label,
+              serverName: 'Meow',
+              audioLanguage: s.language,
+              height: q.height > 0 ? q.height : 1080,
+            ));
+          }
+          if (s.qualities.isEmpty && s.url.isNotEmpty) {
+            candidates.add(_DownloadCandidate(
+              url: s.url,
+              headers: s.headers,
+              isHls: s.type == 'hls' || s.url.contains('.m3u8'),
+              qualityLabel: s.qualityLabel ?? '1080p',
+              serverName: 'Meow',
+              audioLanguage: s.language,
+              height: 1080,
+            ));
+          }
+        }
+      } catch (e) {
+        debugPrint('Download: Meow Telegram candidate error: $e');
       }
 
       // Priority 2: NebulaHD & Cine4K (Direct High-Speed CDN with Full Muxed Audio)
@@ -891,10 +909,10 @@ class DownloadProvider extends ChangeNotifier {
         }
 
         // 3. Best Server Weight
-        if (c.serverName == 'Meow') {
-          score += 1200; // Slot #1: Direct MP4 from 25k Telegram channel, fastest progressive download
-        } else if (c.serverName == 'NetMirror') {
-          score += 1150; // Direct High-Speed MP4 CDN with Multi-Quality 1080p/720p/480p and Range 206
+        if (c.serverName == 'NetMirror') {
+          score += 3500; // Slot #1: NetMirror first priority with preferred dub & qualities
+        } else if (c.serverName == 'Meow') {
+          score += 1200; // Slot #2: Direct MP4 from 25k Telegram channel
         } else if (c.serverName.contains('NebulaHD')) {
           score += 900; // Slot #2: Full muxed AAC stereo audio HLS
         } else if (c.serverName.contains('Cine4K')) {

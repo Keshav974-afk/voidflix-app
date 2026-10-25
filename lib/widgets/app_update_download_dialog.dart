@@ -110,16 +110,9 @@ class _AppUpdateDownloadDialogState extends State<AppUpdateDownloadDialog> {
       child: Container(
         padding: const EdgeInsets.all(24),
         decoration: BoxDecoration(
-          color: const Color(0xFF16161D),
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: const Color(0x33E50914), width: 1.5),
-          boxShadow: const [
-            BoxShadow(
-              color: Colors.black87,
-              blurRadius: 30,
-              spreadRadius: 10,
-            ),
-          ],
+          color: const Color(0xFF141414),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: Colors.white12, width: 1.0),
         ),
         child: Column(
           mainAxisSize: MainAxisSize.min,
@@ -129,19 +122,8 @@ class _AppUpdateDownloadDialogState extends State<AppUpdateDownloadDialog> {
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                color: isDone
-                    ? const Color(0x2646D369)
-                    : isError
-                        ? const Color(0x26FF5252)
-                        : const Color(0x26E50914),
-                border: Border.all(
-                  color: isDone
-                      ? const Color(0xFF46D369)
-                      : isError
-                          ? const Color(0xFFFF5252)
-                          : const Color(0xFFE50914),
-                  width: 2,
-                ),
+                color: const Color(0xFF1E1E1E),
+                border: Border.all(color: Colors.white12, width: 1.0),
               ),
               child: Icon(
                 isDone
@@ -195,7 +177,7 @@ class _AppUpdateDownloadDialogState extends State<AppUpdateDownloadDialog> {
                   height: 10,
                   child: LinearProgressIndicator(
                     value: _progress > 0 ? _progress : null,
-                    backgroundColor: const Color(0xFF2B2B36),
+                    backgroundColor: const Color(0xFF242424),
                     valueColor: AlwaysStoppedAnimation<Color>(
                       isDone ? const Color(0xFF46D369) : const Color(0xFFE50914),
                     ),

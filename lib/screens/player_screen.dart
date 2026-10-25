@@ -121,6 +121,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
   List<SubtitleCue> _currentCues = [];
   String? _activeCueText;
 
+  // Subtitle customizable appearance
+  double _subFontSize = 16.0;
+  Color _subTextColor = Colors.white;
+  List<Shadow> _subEdgeShadows = const [Shadow(color: Colors.black, blurRadius: 6)];
+  Color _subBgColor = const Color(0xC7000000);
+  Color _subWindowColor = Colors.transparent;
+
   // Qualities system (Netflix feature)
   List<StreamQuality> _availableQualities = [];
   int _selectedQualityIndex = 0;
@@ -208,9 +215,105 @@ class _PlayerScreenState extends State<PlayerScreen> {
   // Android TV / Remote Control support
   final FocusNode _playerFocusNode = FocusNode();
 
+  Future<void> _loadSubtitleAppearance() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final sizeIdx = prefs.getInt('sub_text_size_index') ?? 1;
+      final textColStr = prefs.getString('sub_text_color') ?? 'White';
+      final edgeStyleStr = prefs.getString('sub_edge_style') ?? 'Drop Shadow';
+      final edgeColStr = prefs.getString('sub_edge_color') ?? 'Black';
+      final bgColStr = prefs.getString('sub_bg_color') ?? 'None';
+      final bgTrans = prefs.getBool('sub_bg_transparent') ?? true;
+      final winColStr = prefs.getString('sub_window_color') ?? 'None';
+      final winTrans = prefs.getBool('sub_window_transparent') ?? true;
+
+      Color resolveColor(String name) {
+        switch (name) {
+          case 'Yellow': return Colors.yellowAccent;
+          case 'Cyan': return Colors.cyanAccent;
+          case 'Green': return Colors.greenAccent;
+          case 'Magenta': return Colors.pinkAccent;
+          case 'Red': return Colors.redAccent;
+          case 'Black': return Colors.black;
+          case 'White':
+          default: return Colors.white;
+        }
+      }
+
+      final isTv = TvModeService().isTvMode;
+      double fontSize = 16.0;
+      if (sizeIdx == 0) {
+        fontSize = isTv ? 18.0 : 13.0;
+      } else if (sizeIdx == 2) {
+        fontSize = isTv ? 28.0 : 22.0;
+      } else {
+        fontSize = isTv ? 22.0 : 17.0;
+      }
+
+      final textCol = resolveColor(textColStr);
+      final edgeCol = resolveColor(edgeColStr);
+
+      List<Shadow> shadows = [];
+      switch (edgeStyleStr) {
+        case 'Drop Shadow':
+          shadows = [Shadow(color: edgeCol.withValues(alpha: 0.9), offset: const Offset(2, 2), blurRadius: 4)];
+          break;
+        case 'Raised':
+          shadows = [
+            const Shadow(color: Colors.white70, offset: Offset(-1, -1), blurRadius: 1),
+            Shadow(color: edgeCol, offset: const Offset(1, 1), blurRadius: 2),
+          ];
+          break;
+        case 'Depressed':
+          shadows = [
+            Shadow(color: edgeCol, offset: const Offset(-1, -1), blurRadius: 1),
+            const Shadow(color: Colors.white70, offset: Offset(1, 1), blurRadius: 2),
+          ];
+          break;
+        case 'Uniform (Outline)':
+          shadows = [
+            Shadow(color: edgeCol, offset: const Offset(-1.5, -1.5), blurRadius: 1),
+            Shadow(color: edgeCol, offset: const Offset(1.5, -1.5), blurRadius: 1),
+            Shadow(color: edgeCol, offset: const Offset(-1.5, 1.5), blurRadius: 1),
+            Shadow(color: edgeCol, offset: const Offset(1.5, 1.5), blurRadius: 1),
+          ];
+          break;
+        case 'None':
+        default:
+          shadows = [];
+          break;
+      }
+
+      Color bgColor;
+      if (bgTrans || bgColStr == 'None') {
+        bgColor = Colors.black.withValues(alpha: 0.78);
+      } else {
+        bgColor = resolveColor(bgColStr).withValues(alpha: 0.85);
+      }
+
+      Color winColor;
+      if (winTrans || winColStr == 'None') {
+        winColor = Colors.transparent;
+      } else {
+        winColor = resolveColor(winColStr).withValues(alpha: 0.6);
+      }
+
+      if (mounted) {
+        setState(() {
+          _subFontSize = fontSize;
+          _subTextColor = textCol;
+          _subEdgeShadows = shadows;
+          _subBgColor = bgColor;
+          _subWindowColor = winColor;
+        });
+      }
+    } catch (_) {}
+  }
+
   @override
   void initState() {
     super.initState();
+    _loadSubtitleAppearance();
     _currentSeason = widget.season;
     _currentEpisode = widget.episode;
     final savedServer = context.read<ProfileProvider>().selectedServerIndex;
@@ -2169,65 +2272,79 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                   ),
                                 ),
                                 const SizedBox(height: 6),
-                                Expanded(
-                                  child: ListView.builder(
-                                    itemCount: _directStreams.isNotEmpty ? _directStreams.length : 1,
-                                    itemBuilder: (c, idx) {
-                                      final isSelected = idx == tempAudioIndex;
-                                      final stream = _directStreams.isNotEmpty ? _directStreams[idx] : null;
-                                      final langRaw = stream?.language ?? 'English';
-                                      final langName = LanguageUtils.cleanLanguageName(langRaw);
-                                      final extra = stream != null && stream.sourceName.isNotEmpty && !langName.contains(stream.sourceName)
-                                          ? ' - ${stream.sourceName}'
-                                          : (stream == null ? ' [Original]' : '');
-                                      final fullLabel = '$langName$extra';
-
-                                      final item = InkWell(
-                                        borderRadius: BorderRadius.circular(8),
-                                        onTap: () {
-                                          setSheetState(() {
-                                            tempAudioIndex = idx;
-                                          });
-                                        },
-                                        child: Padding(
-                                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
-                                          child: Row(
-                                            children: [
-                                              if (isSelected)
-                                                const Icon(Icons.check, color: Colors.white, size: 18)
-                                              else
-                                                const SizedBox(width: 18),
-                                              const SizedBox(width: 10),
-                                              Expanded(
-                                                child: Text(
-                                                  fullLabel,
-                                                  style: TextStyle(
-                                                    color: isSelected ? Colors.white : Colors.white60,
-                                                    fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-                                                    fontSize: 15,
-                                                  ),
-                                                  overflow: TextOverflow.ellipsis,
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                      );
-
-                                      if (isTv) {
-                                        return TvFocusable(
-                                          autofocus: isSelected,
-                                          onPressed: () {
-                                            setSheetState(() {
-                                              tempAudioIndex = idx;
-                                            });
-                                          },
-                                          child: item,
-                                        );
+                                Builder(
+                                  builder: (context) {
+                                    final audioOptions = <({String label, int streamIndex})>[];
+                                    final seenAudioLangs = <String>{};
+                                    for (int i = 0; i < _directStreams.length; i++) {
+                                      final s = _directStreams[i];
+                                      final clean = LanguageUtils.cleanLanguageName(s.language);
+                                      if (!seenAudioLangs.contains(clean.toLowerCase())) {
+                                        seenAudioLangs.add(clean.toLowerCase());
+                                        audioOptions.add((label: clean, streamIndex: i));
                                       }
-                                      return item;
-                                    },
-                                  ),
+                                    }
+                                    if (audioOptions.isEmpty) {
+                                      audioOptions.add((label: 'English', streamIndex: 0));
+                                    }
+
+                                    return Expanded(
+                                      child: ListView.builder(
+                                        itemCount: audioOptions.length,
+                                        itemBuilder: (c, idx) {
+                                          final opt = audioOptions[idx];
+                                          final isSelected = opt.streamIndex == tempAudioIndex ||
+                                              (tempAudioIndex < _directStreams.length &&
+                                                  LanguageUtils.cleanLanguageName(_directStreams[tempAudioIndex].language).toLowerCase() == opt.label.toLowerCase());
+
+                                          final item = InkWell(
+                                            borderRadius: BorderRadius.circular(8),
+                                            onTap: () {
+                                              setSheetState(() {
+                                                tempAudioIndex = opt.streamIndex;
+                                              });
+                                            },
+                                            child: Padding(
+                                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+                                              child: Row(
+                                                children: [
+                                                  if (isSelected)
+                                                    const Icon(Icons.check, color: Colors.white, size: 18)
+                                                  else
+                                                    const SizedBox(width: 18),
+                                                  const SizedBox(width: 10),
+                                                  Expanded(
+                                                    child: Text(
+                                                      opt.label,
+                                                      style: TextStyle(
+                                                        color: isSelected ? Colors.white : Colors.white60,
+                                                        fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                                                        fontSize: 15,
+                                                      ),
+                                                      overflow: TextOverflow.ellipsis,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                          );
+
+                                          if (isTv) {
+                                            return TvFocusable(
+                                              autofocus: isSelected,
+                                              onPressed: () {
+                                                setSheetState(() {
+                                                  tempAudioIndex = opt.streamIndex;
+                                                });
+                                              },
+                                              child: item,
+                                            );
+                                          }
+                                          return item;
+                                        },
+                                      ),
+                                    );
+                                  },
                                 ),
                               ],
                             ),
@@ -4566,7 +4683,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 ),
 
               // ---------------------------------------------------------------
-              // Layer 5: Live Subtitles Display (Netflix Typography)
+              // Layer 5: Live Subtitles Display (Customizable Appearance)
               // ---------------------------------------------------------------
               if (_isNativeMode && _activeCueText != null && _activeCueText!.isNotEmpty && !_isClippingMoment)
                 Positioned(
@@ -4578,32 +4695,37 @@ class _PlayerScreenState extends State<PlayerScreen> {
                       child: Container(
                         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
                         decoration: BoxDecoration(
-                          color: Colors.black.withValues(alpha: 0.78),
+                          color: _subWindowColor != Colors.transparent ? _subWindowColor : _subBgColor,
                           borderRadius: BorderRadius.circular(6),
                         ),
-                        child: Directionality(
-                          textDirection: RegExp(r'[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF\u0590-\u05FF]').hasMatch(_activeCueText!)
-                              ? TextDirection.rtl
-                              : TextDirection.ltr,
-                          child: Text(
-                            _activeCueText!,
-                            textAlign: TextAlign.center,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 16,
-                              fontWeight: FontWeight.w600,
-                              fontFamilyFallback: [
-                                'Noto Sans Devanagari',
-                                'Noto Nastaliq Urdu',
-                                'Noto Sans Arabic',
-                                'Mangal',
-                                'Kokila',
-                                'Arial',
-                                'sans-serif',
-                              ],
-                              shadows: [
-                                Shadow(color: Colors.black, blurRadius: 6),
-                              ],
+                        child: Container(
+                          padding: _subWindowColor != Colors.transparent ? const EdgeInsets.symmetric(horizontal: 8, vertical: 4) : EdgeInsets.zero,
+                          decoration: BoxDecoration(
+                            color: _subWindowColor != Colors.transparent ? _subBgColor : Colors.transparent,
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: Directionality(
+                            textDirection: RegExp(r'[\u0600-\u06FF\u0750-\u077F\u08A0-\u08FF\uFB50-\uFDFF\uFE70-\uFEFF\u0590-\u05FF]').hasMatch(_activeCueText!)
+                                ? TextDirection.rtl
+                                : TextDirection.ltr,
+                            child: Text(
+                              _activeCueText!,
+                              textAlign: TextAlign.center,
+                              style: TextStyle(
+                                color: _subTextColor,
+                                fontSize: _subFontSize,
+                                fontWeight: FontWeight.w600,
+                                fontFamilyFallback: const [
+                                  'Noto Sans Devanagari',
+                                  'Noto Nastaliq Urdu',
+                                  'Noto Sans Arabic',
+                                  'Mangal',
+                                  'Kokila',
+                                  'Arial',
+                                  'sans-serif',
+                                ],
+                                shadows: _subEdgeShadows,
+                              ),
                             ),
                           ),
                         ),
@@ -4611,7 +4733,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
                     ),
                   ),
                 ),
-
               // ---------------------------------------------------------------
               // Layer 6: Double Tap Seek Feedback Ripple
               // ---------------------------------------------------------------
@@ -5230,9 +5351,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
               // ---------------------------------------------------------------
               // Layer 14.5: Watch Party Live Emoji Reactions Dock (Right / Bottom)
               // ---------------------------------------------------------------
-              if (_isNativeMode && _isInParty && !_isClippingMoment && !isTv)
+              if (_isNativeMode && _isInParty && !_isClippingMoment && !isTv && _showControls)
                 Positioned(
-                  bottom: _showControls ? 100 : 26,
+                  bottom: 90,
                   right: 20,
                   child: _buildPartyLiveReactionsDock(),
                 ),
@@ -5892,7 +6013,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
     showModalBottomSheet(
       context: context,
-      backgroundColor: const Color(0xFF0F0F14),
+      backgroundColor: const Color(0xFF141414),
       isScrollControlled: true,
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
@@ -6001,7 +6122,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                             decoration: BoxDecoration(
                               gradient: const LinearGradient(
-                                colors: [Color(0xFF171722), Color(0xFF111118)],
+                                colors: [Color(0xFF1E1E1E), Color(0xFF181818)],
                                 begin: Alignment.topLeft,
                                 end: Alignment.bottomRight,
                               ),
@@ -6147,7 +6268,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                     width: 44,
                                     height: 44,
                                     decoration: BoxDecoration(
-                                      color: const Color(0xFF1A1A24),
+                                      color: const Color(0xFF1E1E1E),
                                       shape: BoxShape.circle,
                                       border: Border.all(color: Colors.white.withValues(alpha: 0.12), width: 0.8),
                                     ),
@@ -6179,7 +6300,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                               return Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                                 decoration: BoxDecoration(
-                                  color: const Color(0xFF181822),
+                                  color: const Color(0xFF1E1E1E),
                                   borderRadius: BorderRadius.circular(16),
                                   border: Border.all(
                                     color: m.isHost ? const Color(0xFFE50914).withValues(alpha: 0.5) : Colors.white12,
@@ -6224,7 +6345,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                     hintText: 'Type message to party...',
                                     hintStyle: const TextStyle(color: Colors.white38, fontSize: 13),
                                     filled: true,
-                                    fillColor: const Color(0xFF181822),
+                                    fillColor: const Color(0xFF242424),
                                     contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
                                     border: OutlineInputBorder(
                                       borderRadius: BorderRadius.circular(24),
@@ -6370,7 +6491,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                         Container(
                           padding: const EdgeInsets.all(4),
                           decoration: BoxDecoration(
-                            color: const Color(0xFF161620),
+                            color: const Color(0xFF1E1E1E),
                             borderRadius: BorderRadius.circular(12),
                             border: Border.all(color: Colors.white.withValues(alpha: 0.1), width: 0.8),
                           ),
@@ -6491,7 +6612,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                             width: double.infinity,
                             padding: const EdgeInsets.all(14),
                             decoration: BoxDecoration(
-                              color: const Color(0xFF14141E),
+                              color: const Color(0xFF1A1A1A),
                               borderRadius: BorderRadius.circular(14),
                               border: Border.all(color: Colors.white.withValues(alpha: 0.08), width: 0.8),
                             ),
@@ -6610,7 +6731,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                               hintText: 'e.g. V-7X9K',
                               hintStyle: const TextStyle(color: Colors.white24, letterSpacing: 2.0, fontSize: 16),
                               filled: true,
-                              fillColor: const Color(0xFF161622),
+                              fillColor: const Color(0xFF242424),
                               contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
                               border: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(10),

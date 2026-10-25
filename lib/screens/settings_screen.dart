@@ -1,3 +1,4 @@
+import '../core/utils/language_utils.dart';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -36,6 +37,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _downloadWifiOnly = false;
   bool _smartDownloads = true;
   String _cellularDataUsage = 'Automatic';
+  String _preferredQuality = 'High (1080p Full HD)';
   String _downloadQuality = 'High (1080p Full HD)';
   String _preferredAudioLang = 'Original Audio';
   String _preferredSubtitleLang = 'English';
@@ -113,7 +115,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _downloadWifiOnly = prefs.getBool('voidflix_download_wifi_only') ?? false;
         _smartDownloads = prefs.getBool('voidflix_smart_downloads') ?? true;
         _cellularDataUsage = prefs.getString('voidflix_cellular_data') ?? 'Automatic';
-        _downloadQuality = prefs.getString('voidflix_download_quality') ?? 'High (1080p Full HD)';
+        _preferredQuality = prefs.getString('voidflix_preferred_quality') ?? prefs.getString('voidflix_download_quality') ?? 'High (1080p Full HD)';
+        _downloadQuality = prefs.getString('voidflix_download_quality') ?? _preferredQuality;
         _preferredAudioLang = prefs.getString('voidflix_preferred_audio_lang') ?? 'Original Audio';
         _preferredSubtitleLang = prefs.getString('voidflix_preferred_sub_lang') ?? 'English';
         _isDeveloperMode = prefs.getBool('voidflix_developer_mode') ?? false;
@@ -247,12 +250,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
-  void _showDownloadQualitySheet() {
+  void _showQualityPreferenceSheet({bool isDownload = false}) {
     final options = [
-      {'title': 'High (1080p Full HD)', 'desc': 'Crisp 1080p Full HD stream with clear audio (Recommended).'},
-      {'title': 'Ultra HD (4K)', 'desc': 'Highest available 4K resolution (uses more storage).'},
-      {'title': 'Standard (720p HD)', 'desc': 'Downloads faster, balanced storage and clarity.'},
-      {'title': 'Data Saver (480p)', 'desc': 'Smallest download footprint, ideal for limited networks.'},
+      {'title': 'High (1080p Full HD)', 'desc': 'Crisp 1080p Full HD video with clear multi-channel audio (Recommended).'},
+      {'title': 'Ultra HD (4K)', 'desc': 'Highest available 4K UHD resolution.'},
+      {'title': 'Standard (720p HD)', 'desc': 'Balanced bandwidth & clarity for faster playback and downloads.'},
+      {'title': 'Data Saver (480p)', 'desc': 'Lowest data usage, instant buffering on slower connections.'},
     ];
     showModalBottomSheet(
       context: context,
@@ -266,18 +269,21 @@ class _SettingsScreenState extends State<SettingsScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
               child: Text(
-                'Download Video Quality',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
+                isDownload ? 'Download Video Quality' : 'Preferred Video Quality',
+                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
               ),
             ),
             const Divider(color: Color(0xFF262638)),
             ...options.map((opt) {
-              final isSel = _downloadQuality == opt['title'] ||
-                  (_downloadQuality == 'High' && opt['title']!.startsWith('High')) ||
-                  (_downloadQuality == 'Standard' && opt['title']!.startsWith('Standard'));
+              final currentVal = isDownload ? _downloadQuality : _preferredQuality;
+              final isSel = currentVal == opt['title'] ||
+                  (currentVal.contains('1080') && opt['title']!.contains('1080')) ||
+                  (currentVal.contains('4K') && opt['title']!.contains('4K')) ||
+                  (currentVal.contains('720') && opt['title']!.contains('720')) ||
+                  (currentVal.contains('480') && opt['title']!.contains('480'));
               return ListTile(
                 leading: Icon(
                   isSel ? Icons.radio_button_checked : Icons.radio_button_off,
@@ -286,8 +292,12 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 title: Text(opt['title']!, style: TextStyle(color: isSel ? Colors.white : Colors.white70, fontWeight: FontWeight.bold)),
                 subtitle: Text(opt['desc']!, style: const TextStyle(color: Colors.white38, fontSize: 12)),
                 onTap: () async {
-                  setState(() => _downloadQuality = opt['title']!);
+                  setState(() {
+                    _preferredQuality = opt['title']!;
+                    _downloadQuality = opt['title']!;
+                  });
                   final prefs = await SharedPreferences.getInstance();
+                  await prefs.setString('voidflix_preferred_quality', opt['title']!);
                   await prefs.setString('voidflix_download_quality', opt['title']!);
                   if (ctx.mounted) Navigator.pop(ctx);
                 },
@@ -299,122 +309,188 @@ class _SettingsScreenState extends State<SettingsScreen> {
     );
   }
 
+  void _showSearchableLanguageSheet({
+    required String title,
+    required String current,
+    required List<String> options,
+    required Future<void> Function(String) onSelected,
+  }) {
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF141414),
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        String query = '';
+        return StatefulBuilder(
+          builder: (modalCtx, setModalState) {
+            final filtered = options.where((o) => o.toLowerCase().contains(query.toLowerCase())).toList();
+
+            return SafeArea(
+              child: Container(
+                height: MediaQuery.of(ctx).size.height * 0.75,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                child: Column(
+                  children: [
+                    Center(
+                      child: Container(
+                        width: 36,
+                        height: 4,
+                        margin: const EdgeInsets.only(bottom: 12),
+                        decoration: BoxDecoration(
+                          color: Colors.white24,
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            title,
+                            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.close, color: Colors.white54, size: 20),
+                            onPressed: () => Navigator.pop(ctx),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
+                      child: TextField(
+                        onChanged: (q) => setModalState(() => query = q),
+                        style: const TextStyle(color: Colors.white, fontSize: 14),
+                        decoration: InputDecoration(
+                          hintText: 'Search language...',
+                          hintStyle: const TextStyle(color: Colors.white38, fontSize: 14),
+                          prefixIcon: const Icon(Icons.search, color: Colors.white54, size: 20),
+                          filled: true,
+                          fillColor: const Color(0xFF222222),
+                          contentPadding: const EdgeInsets.symmetric(vertical: 0, horizontal: 16),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: BorderSide.none,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const Divider(color: Colors.white12, height: 1),
+                    Expanded(
+                      child: ListView.builder(
+                        itemCount: filtered.length,
+                        itemBuilder: (context, idx) {
+                          final opt = filtered[idx];
+                          final isSel = current == opt;
+                          final info = LanguageUtils.getInfo(opt);
+
+                          return ListTile(
+                            leading: Text(
+                              opt.contains('Original') ? '🔊' : (opt.contains('Off') ? '🚫' : info.flag),
+                              style: const TextStyle(fontSize: 20),
+                            ),
+                            title: Text(
+                              opt,
+                              style: TextStyle(
+                                color: isSel ? Colors.white : Colors.white70,
+                                fontWeight: isSel ? FontWeight.bold : FontWeight.normal,
+                              ),
+                            ),
+                            trailing: isSel
+                                ? const Icon(Icons.check_circle_rounded, color: AppTheme.primaryRed, size: 22)
+                                : null,
+                            onTap: () async {
+                              await onSelected(opt);
+                              if (ctx.mounted) Navigator.pop(ctx);
+                            },
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
   void _showPreferredAudioSheet() {
     final audioOptions = [
       'Original Audio',
-      'English',
-      'Hindi',
-      'Spanish',
-      'French',
-      'German',
-      'Japanese',
-      'Korean',
-      'Telugu',
-      'Tamil',
-      'Malayalam',
-      'Italian',
-      'Portuguese',
+      ...LanguageUtils.supportedLanguages.map((l) => l.name),
     ];
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: const Color(0xFF14141E),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      builder: (ctx) => Container(
-        padding: const EdgeInsets.symmetric(vertical: 16),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-              child: Text(
-                'Preferred Audio Language',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
-              ),
-            ),
-            const Divider(color: Color(0xFF262638)),
-            Expanded(
-              child: ListView.builder(
-                shrinkWrap: true,
-                itemCount: audioOptions.length,
-                itemBuilder: (context, idx) {
-                  final opt = audioOptions[idx];
-                  final isSel = _preferredAudioLang == opt;
-                  return ListTile(
-                    leading: Icon(
-                      isSel ? Icons.radio_button_checked : Icons.radio_button_off,
-                      color: isSel ? const Color(0xFF0071eb) : Colors.white54,
-                    ),
-                    title: Text(opt, style: TextStyle(color: isSel ? Colors.white : Colors.white70, fontWeight: isSel ? FontWeight.bold : FontWeight.normal)),
-                    onTap: () async {
-                      setState(() => _preferredAudioLang = opt);
-                      final prefs = await SharedPreferences.getInstance();
-                      await prefs.setString('voidflix_preferred_audio_lang', opt);
-                      if (ctx.mounted) Navigator.pop(ctx);
-                    },
-                  );
-                },
-              ),
-            ),
-          ],
-        ),
-      ),
+    _showSearchableLanguageSheet(
+      title: 'Preferred Audio Language',
+      current: _preferredAudioLang,
+      options: audioOptions,
+      onSelected: (opt) async {
+        setState(() => _preferredAudioLang = opt);
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('voidflix_preferred_audio_lang', opt);
+        if (mounted) {
+          try {
+            final profileProv = context.read<ProfileProvider>();
+          final activeProfile = profileProv.activeProfileOrNull;
+          if (activeProfile != null) {
+            profileProv.updateProfile(
+              activeProfile.id,
+              name: activeProfile.name,
+              colorIndex: activeProfile.colorIndex,
+              avatar: activeProfile.avatar,
+              isKids: activeProfile.isKids,
+              pin: activeProfile.pin,
+              preferredAudioLang: opt,
+              preferredSubtitleLang: activeProfile.preferredSubtitleLang,
+              preferredLanguages: [opt, 'English'],
+            );
+          }
+          } catch (_) {}
+        }
+      },
     );
   }
 
   void _showPreferredSubtitleSheet() {
     final subOptions = [
-      'English',
-      'Spanish',
-      'Hindi',
-      'French',
-      'German',
-      'Japanese',
-      'Korean',
-      'Arabic',
       'Off / None',
+      ...LanguageUtils.supportedLanguages.map((l) => l.name),
     ];
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: const Color(0xFF14141E),
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
-      ),
-      builder: (ctx) => Container(
-        padding: const EdgeInsets.symmetric(vertical: 16),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-              child: Text(
-                'Preferred Subtitles',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
-              ),
-            ),
-            const Divider(color: Color(0xFF262638)),
-            ...subOptions.map((opt) {
-              final isSel = _preferredSubtitleLang == opt;
-              return ListTile(
-                leading: Icon(
-                  isSel ? Icons.radio_button_checked : Icons.radio_button_off,
-                  color: isSel ? const Color(0xFF0071eb) : Colors.white54,
-                ),
-                title: Text(opt, style: TextStyle(color: isSel ? Colors.white : Colors.white70, fontWeight: isSel ? FontWeight.bold : FontWeight.normal)),
-                onTap: () async {
-                  setState(() => _preferredSubtitleLang = opt);
-                  final prefs = await SharedPreferences.getInstance();
-                  await prefs.setString('voidflix_preferred_sub_lang', opt);
-                  if (ctx.mounted) Navigator.pop(ctx);
-                },
-              );
-            }),
-          ],
-        ),
-      ),
+    _showSearchableLanguageSheet(
+      title: 'Preferred Subtitles',
+      current: _preferredSubtitleLang,
+      options: subOptions,
+      onSelected: (opt) async {
+        setState(() => _preferredSubtitleLang = opt);
+        final prefs = await SharedPreferences.getInstance();
+        await prefs.setString('voidflix_preferred_sub_lang', opt);
+        if (mounted) {
+          try {
+            final profileProv = context.read<ProfileProvider>();
+          final activeProfile = profileProv.activeProfileOrNull;
+          if (activeProfile != null) {
+            profileProv.updateProfile(
+              activeProfile.id,
+              name: activeProfile.name,
+              colorIndex: activeProfile.colorIndex,
+              avatar: activeProfile.avatar,
+              isKids: activeProfile.isKids,
+              pin: activeProfile.pin,
+              preferredAudioLang: activeProfile.preferredAudioLang,
+              preferredSubtitleLang: opt,
+              preferredLanguages: [activeProfile.preferredAudioLang ?? 'Original Audio', 'English'],
+            );
+          }
+          } catch (_) {}
+        }
+      },
     );
   }
 
@@ -720,6 +796,13 @@ class _SettingsScreenState extends State<SettingsScreen> {
           // ═══════════════════════════════════════════════
           _buildCategoryHeader('Video Playback'),
           _buildSettingTile(
+            leading: Icons.high_quality_outlined,
+            title: 'Preferred Video Quality',
+            subtitle: _preferredQuality,
+            onTap: () => _showQualityPreferenceSheet(isDownload: false),
+          ),
+          const Divider(height: 1, color: Color(0xFF1E1E1E)),
+          _buildSettingTile(
             leading: Icons.signal_cellular_alt,
             title: 'Mobile Data Usage',
             subtitle: _cellularDataUsage,
@@ -802,7 +885,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
             leading: Icons.video_settings_outlined,
             title: 'Download Video Quality',
             subtitle: _downloadQuality,
-            onTap: _showDownloadQualitySheet,
+            onTap: () => _showQualityPreferenceSheet(isDownload: true),
           ),
           const Divider(height: 1, color: Color(0xFF1E1E1E)),
           _buildSettingTile(

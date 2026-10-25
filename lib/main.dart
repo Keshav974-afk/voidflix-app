@@ -132,7 +132,17 @@ class FlowflixApp extends StatelessWidget {
           },
         ),
         ChangeNotifierProvider(create: (_) => NotificationProvider()),
-        ChangeNotifierProvider(create: (_) => DownloadProvider()..loadDownloads()),
+        ChangeNotifierProxyProvider<ProfileProvider, DownloadProvider>(
+          create: (_) => DownloadProvider()..loadDownloads(),
+          update: (_, profileProv, downloadProv) {
+            final prov = downloadProv ?? (DownloadProvider()..loadDownloads());
+            final active = profileProv.activeProfileOrNull;
+            if (active != null) {
+              prov.setActiveProfileId(active.id);
+            }
+            return prov;
+          },
+        ),
         ChangeNotifierProvider(create: (_) => TvModeService()..initialize()),
         ChangeNotifierProvider(create: (_) => CastService()),
         ChangeNotifierProvider(create: (_) => VoidCastService()..initialize()),

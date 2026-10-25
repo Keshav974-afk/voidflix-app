@@ -204,7 +204,74 @@ class LanguageUtils {
     'nep': LanguageInfo(flag: '🇳🇵', code: 'NE', name: 'Nepali'),
     'nepali': LanguageInfo(flag: '🇳🇵', code: 'NE', name: 'Nepali'),
     'नेपाली': LanguageInfo(flag: '🇳🇵', code: 'NE', name: 'Nepali'),
+
+    'ml': LanguageInfo(flag: '🇮🇳', code: 'ML', name: 'Malayalam'),
+    'mal': LanguageInfo(flag: '🇮🇳', code: 'ML', name: 'Malayalam'),
+    'malayalam': LanguageInfo(flag: '🇮🇳', code: 'ML', name: 'Malayalam'),
+    'മലയാളം': LanguageInfo(flag: '🇮🇳', code: 'ML', name: 'Malayalam'),
+
+    'kn': LanguageInfo(flag: '🇮🇳', code: 'KN', name: 'Kannada'),
+    'kan': LanguageInfo(flag: '🇮🇳', code: 'KN', name: 'Kannada'),
+    'kannada': LanguageInfo(flag: '🇮🇳', code: 'KN', name: 'Kannada'),
+    'ಕನ್ನಡ': LanguageInfo(flag: '🇮🇳', code: 'KN', name: 'Kannada'),
+
+    'mr': LanguageInfo(flag: '🇮🇳', code: 'MR', name: 'Marathi'),
+    'mar': LanguageInfo(flag: '🇮🇳', code: 'MR', name: 'Marathi'),
+    'marathi': LanguageInfo(flag: '🇮🇳', code: 'MR', name: 'Marathi'),
+    'मराठी': LanguageInfo(flag: '🇮🇳', code: 'MR', name: 'Marathi'),
+
+    'gu': LanguageInfo(flag: '🇮🇳', code: 'GU', name: 'Gujarati'),
+    'guj': LanguageInfo(flag: '🇮🇳', code: 'GU', name: 'Gujarati'),
+    'gujarati': LanguageInfo(flag: '🇮🇳', code: 'GU', name: 'Gujarati'),
+    'ગુજરાતી': LanguageInfo(flag: '🇮🇳', code: 'GU', name: 'Gujarati'),
   };
+
+  /// Comprehensive list of all world languages for Audio & Subtitle preferences
+  static const List<LanguageInfo> supportedLanguages = [
+    LanguageInfo(flag: '🇺🇸', code: 'EN', name: 'English'),
+    LanguageInfo(flag: '🇮🇳', code: 'HI', name: 'Hindi'),
+    LanguageInfo(flag: '🇪🇸', code: 'ES', name: 'Spanish'),
+    LanguageInfo(flag: '🇫🇷', code: 'FR', name: 'French'),
+    LanguageInfo(flag: '🇩🇪', code: 'DE', name: 'German'),
+    LanguageInfo(flag: '🇮🇹', code: 'IT', name: 'Italian'),
+    LanguageInfo(flag: '🇧🇷', code: 'PT', name: 'Portuguese (Brazil)'),
+    LanguageInfo(flag: '🇵🇹', code: 'PT', name: 'Portuguese (Portugal)'),
+    LanguageInfo(flag: '🇷🇺', code: 'RU', name: 'Russian'),
+    LanguageInfo(flag: '🇯🇵', code: 'JA', name: 'Japanese'),
+    LanguageInfo(flag: '🇰🇷', code: 'KO', name: 'Korean'),
+    LanguageInfo(flag: '🇨🇳', code: 'ZH', name: 'Chinese (Mandarin)'),
+    LanguageInfo(flag: '🇭🇰', code: 'ZH', name: 'Chinese (Cantonese)'),
+    LanguageInfo(flag: '🇸🇦', code: 'AR', name: 'Arabic'),
+    LanguageInfo(flag: '🇹🇷', code: 'TR', name: 'Turkish'),
+    LanguageInfo(flag: '🇮🇩', code: 'ID', name: 'Indonesian'),
+    LanguageInfo(flag: '🇲🇾', code: 'MS', name: 'Malay'),
+    LanguageInfo(flag: '🇮🇳', code: 'TA', name: 'Tamil'),
+    LanguageInfo(flag: '🇮🇳', code: 'TE', name: 'Telugu'),
+    LanguageInfo(flag: '🇮🇳', code: 'ML', name: 'Malayalam'),
+    LanguageInfo(flag: '🇮🇳', code: 'KN', name: 'Kannada'),
+    LanguageInfo(flag: '🇮🇳', code: 'BN', name: 'Bengali'),
+    LanguageInfo(flag: '🇮🇳', code: 'PA', name: 'Punjabi'),
+    LanguageInfo(flag: '🇮🇳', code: 'MR', name: 'Marathi'),
+    LanguageInfo(flag: '🇮🇳', code: 'GU', name: 'Gujarati'),
+    LanguageInfo(flag: '🇵🇰', code: 'UR', name: 'Urdu'),
+    LanguageInfo(flag: '🇳🇵', code: 'NE', name: 'Nepali'),
+    LanguageInfo(flag: '🇵🇭', code: 'TL', name: 'Tagalog / Filipino'),
+    LanguageInfo(flag: '🇻🇳', code: 'VI', name: 'Vietnamese'),
+    LanguageInfo(flag: '🇹🇭', code: 'TH', name: 'Thai'),
+    LanguageInfo(flag: '🇵🇱', code: 'PL', name: 'Polish'),
+    LanguageInfo(flag: '🇳🇱', code: 'NL', name: 'Dutch'),
+    LanguageInfo(flag: '🇸🇪', code: 'SV', name: 'Swedish'),
+    LanguageInfo(flag: '🇬🇷', code: 'EL', name: 'Greek'),
+    LanguageInfo(flag: '🇮🇱', code: 'HE', name: 'Hebrew'),
+    LanguageInfo(flag: '🇨🇿', code: 'CS', name: 'Czech'),
+    LanguageInfo(flag: '🇩🇰', code: 'DA', name: 'Danish'),
+    LanguageInfo(flag: '🇫🇮', code: 'FI', name: 'Finnish'),
+    LanguageInfo(flag: '🇳🇴', code: 'NO', name: 'Norwegian'),
+    LanguageInfo(flag: '🇭🇺', code: 'HU', name: 'Hungarian'),
+    LanguageInfo(flag: '🇷🇴', code: 'RO', name: 'Romanian'),
+    LanguageInfo(flag: '🇺🇦', code: 'UK', name: 'Ukrainian'),
+    LanguageInfo(flag: '🇰🇪', code: 'SW', name: 'Swahili'),
+  ];
 
   /// Resolves any language code or label into a structured LanguageInfo with flag, code, and title.
   static LanguageInfo getInfo(String input) {
@@ -232,15 +299,24 @@ class LanguageUtils {
     );
   }
 
-  /// Returns a clean, user-friendly language name without raw codes or brackets.
+  /// Returns a clean, user-friendly language name without server names, resolutions, or noise.
   static String cleanLanguageName(String raw) {
-    if (raw.trim().isEmpty) return 'Default';
-    final cleaned = raw.replaceAll(RegExp(r'\[.*?\]|\(.*?\)', caseSensitive: false), '').trim();
+    if (raw.trim().isEmpty) return 'English';
+    // 1. Strip brackets and parentheses: [Dubbed], (1080p), (Original)
+    var cleaned = raw.replaceAll(RegExp(r'\[.*?\]|\(.*?\)', caseSensitive: false), '').trim();
+    // 2. Strip separator suffixes like ' - NetMirror', ' • Cinejoy'
+    cleaned = cleaned.split(RegExp(r'\s*[-–—•|]\s*')).first.trim();
+    // 3. Strip resolution tokens (4k, 1080p, 720p, etc.)
+    cleaned = cleaned.replaceAll(RegExp(r'\b(4k|2160p|1080p|720p|480p|360p)\b', caseSensitive: false), '').trim();
+    // 4. Strip server/dub noise words
+    cleaned = cleaned.replaceAll(RegExp(r'\b(dub|sub|audio|original|server|netmirror|cinejoy|screenfetch|stream)\b', caseSensitive: false), '').trim();
+
+    if (cleaned.isEmpty) return 'English';
     final info = getInfo(cleaned);
     if (info.name.isNotEmpty && info.name != 'Subtitle' && info.name != 'Default') {
       return info.name;
     }
-    return cleaned.isNotEmpty ? cleaned : raw;
+    return cleaned;
   }
 
   /// Checks if candidate matches target language (handles codes, names, and native scripts)

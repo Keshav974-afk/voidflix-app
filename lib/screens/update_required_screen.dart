@@ -65,16 +65,7 @@ class _UpdateRequiredScreenState extends State<UpdateRequiredScreen> {
       child: Scaffold(
         backgroundColor: Colors.black,
         body: Container(
-          decoration: const BoxDecoration(
-            gradient: RadialGradient(
-              center: Alignment(0, -0.4),
-              radius: 1.2,
-              colors: [
-                Color(0x33E50914), // Deep crimson ambient bloom
-                Color(0xFF000000),
-              ],
-            ),
-          ),
+          color: const Color(0xFF0A0A0A),
           child: SafeArea(
             child: Center(
               child: SingleChildScrollView(
@@ -83,24 +74,17 @@ class _UpdateRequiredScreenState extends State<UpdateRequiredScreen> {
                   mainAxisAlignment: MainAxisAlignment.center,
                   crossAxisAlignment: CrossAxisAlignment.center,
                   children: [
-                    // Glowing Alert Icon
+                    // Clean Netflix Alert Icon
                     Container(
-                      padding: const EdgeInsets.all(20),
+                      padding: const EdgeInsets.all(18),
                       decoration: BoxDecoration(
                         shape: BoxShape.circle,
-                        color: const Color(0x26E50914),
-                        border: Border.all(color: const Color(0x66E50914), width: 2),
-                        boxShadow: const [
-                          BoxShadow(
-                            color: Color(0x59E50914),
-                            blurRadius: 30,
-                            spreadRadius: 5,
-                          ),
-                        ],
+                        color: const Color(0xFF141414),
+                        border: Border.all(color: Colors.white12, width: 1),
                       ),
                       child: const Icon(
                         Icons.system_security_update_rounded,
-                        size: 54,
+                        size: 48,
                         color: Color(0xFFE50914),
                       ),
                     ),
@@ -108,19 +92,19 @@ class _UpdateRequiredScreenState extends State<UpdateRequiredScreen> {
 
                     // Priority Badge
                     Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 5),
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
                       decoration: BoxDecoration(
-                        color: const Color(0x33E50914),
-                        borderRadius: BorderRadius.circular(20),
-                        border: Border.all(color: const Color(0x99E50914)),
+                        color: const Color(0xFF1E1E1E),
+                        borderRadius: BorderRadius.circular(6),
+                        border: Border.all(color: Colors.white12),
                       ),
                       child: const Text(
-                        'MANDATORY UPDATE REQUIRED',
+                        'UPDATE REQUIRED',
                         style: TextStyle(
-                          color: Color(0xFFFF5252),
+                          color: Colors.white70,
                           fontSize: 11,
-                          fontWeight: FontWeight.w900,
-                          letterSpacing: 1.2,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 1.0,
                         ),
                       ),
                     ),
@@ -157,7 +141,7 @@ class _UpdateRequiredScreenState extends State<UpdateRequiredScreen> {
                         width: double.infinity,
                         padding: const EdgeInsets.all(18),
                         decoration: BoxDecoration(
-                          color: const Color(0xFF14141A),
+                          color: const Color(0xFF141414),
                           borderRadius: BorderRadius.circular(18),
                           border: Border.all(color: const Color(0x14FFFFFF)),
                         ),
@@ -212,10 +196,10 @@ class _UpdateRequiredScreenState extends State<UpdateRequiredScreen> {
                         style: ElevatedButton.styleFrom(
                           backgroundColor: const Color(0xFFE50914),
                           foregroundColor: Colors.white,
-                          elevation: 8,
-                          shadowColor: const Color(0x80E50914),
+                          elevation: 0,
+                          shadowColor: Colors.transparent,
                           shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(16),
+                            borderRadius: BorderRadius.circular(8),
                           ),
                         ),
                         child: const Row(

@@ -1,3 +1,4 @@
+import '../core/utils/language_utils.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -27,7 +28,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   String _gameHandle = '';
   String _maturityRating = 'No restrictions';
   String _displayLanguage = 'English';
-  String _audioLanguages = 'English, Original';
+  String _preferredAudio = 'Original Audio';
+  String _preferredSubtitle = 'Off / None';
   bool _autoplayNext = true;
   bool _autoplayPreviews = true;
 
@@ -48,9 +50,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       _gameHandle = prefs.getString('profile_${widget.profile.id}_game_handle') ?? '';
       _maturityRating = prefs.getString('profile_${widget.profile.id}_maturity') ?? (_isKids ? 'Kids (TV-Y, TV-G)' : 'No restrictions');
       _displayLanguage = prefs.getString('profile_${widget.profile.id}_lang') ?? 'English';
-      _audioLanguages = widget.profile.preferredAudioLang != null && widget.profile.preferredAudioLang!.isNotEmpty
-          ? '${widget.profile.preferredAudioLang}, English'
-          : (prefs.getString('profile_${widget.profile.id}_audio_lang') ?? 'English, Original');
+      _preferredAudio = widget.profile.preferredAudioLang ?? 'Original Audio';
+      _preferredSubtitle = widget.profile.preferredSubtitleLang ?? 'Off / None';
       _autoplayNext = prefs.getBool('profile_${widget.profile.id}_autoplay_next') ?? true;
       _autoplayPreviews = prefs.getBool('profile_${widget.profile.id}_autoplay_previews') ?? true;
     });
@@ -61,7 +62,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     await prefs.setString('profile_${widget.profile.id}_game_handle', _gameHandle);
     await prefs.setString('profile_${widget.profile.id}_maturity', _maturityRating);
     await prefs.setString('profile_${widget.profile.id}_lang', _displayLanguage);
-    await prefs.setString('profile_${widget.profile.id}_audio_lang', _audioLanguages);
+    await prefs.setString('profile_${widget.profile.id}_preferred_audio', _preferredAudio);
+    await prefs.setString('profile_${widget.profile.id}_preferred_sub', _preferredSubtitle);
     await prefs.setBool('profile_${widget.profile.id}_autoplay_next', _autoplayNext);
     await prefs.setBool('profile_${widget.profile.id}_autoplay_previews', _autoplayPreviews);
   }
@@ -76,14 +78,6 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     final name = _nameController.text.trim();
     if (name.isEmpty) return;
 
-    final parts = _audioLanguages
-        .split(',')
-        .map((p) => p.trim())
-        .where((p) => p.isNotEmpty && p.toLowerCase() != 'original' && !p.toLowerCase().contains('all languages'))
-        .toList();
-    final primaryAudio = parts.isNotEmpty ? parts.first : 'English';
-    final primarySub = parts.isNotEmpty ? parts.first : 'English';
-
     final profileProv = context.read<ProfileProvider>();
     profileProv.updateProfile(
       widget.profile.id,
@@ -92,9 +86,9 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
       avatar: _avatar,
       isKids: _isKids,
       pin: _pin,
-      preferredAudioLang: primaryAudio,
-      preferredSubtitleLang: primarySub,
-      preferredLanguages: parts.isNotEmpty ? parts : ['English'],
+      preferredAudioLang: _preferredAudio,
+      preferredSubtitleLang: _preferredSubtitle,
+      preferredLanguages: [_preferredAudio, 'English'],
       clearPin: _pin == null || _pin!.isEmpty,
     );
 
@@ -226,18 +220,120 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
   }
 
   void _showPinDialog() {
-    final pinCtl = TextEditingController(text: _pin ?? '');
+    if (_pin != null && _pin!.isNotEmpty) {
+      _showVerifyCurrentPinDialog();
+    } else {
+      _showSetNewPinDialog();
+    }
+  }
+
+  void _showVerifyCurrentPinDialog() {
+    final verifyCtl = TextEditingController();
+    String? errorText;
+
+    showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (dialogCtx, setModalState) => AlertDialog(
+          backgroundColor: const Color(0xFF141414),
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(16),
+            side: const BorderSide(color: Colors.white12),
+          ),
+          title: const Text('Verify Current PIN', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Enter current 4-digit PIN for ${widget.profile.name} to modify or remove lock.',
+                style: const TextStyle(color: Colors.white70, fontSize: 13),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: verifyCtl,
+                keyboardType: TextInputType.number,
+                maxLength: 4,
+                obscureText: true,
+                autofocus: true,
+                textAlign: TextAlign.center,
+                style: const TextStyle(fontSize: 24, letterSpacing: 10, color: Colors.white),
+                decoration: InputDecoration(
+                  hintText: '••••',
+                  counterText: '',
+                  filled: true,
+                  fillColor: const Color(0xFF222222),
+                  errorText: errorText,
+                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                ),
+                onChanged: (val) {
+                  if (errorText != null) setModalState(() => errorText = null);
+                  if (val.length == 4) {
+                    if (val == _pin) {
+                      Navigator.of(dialogCtx).pop();
+                      _showSetNewPinDialog(canRemove: true);
+                    } else {
+                      setModalState(() {
+                        errorText = 'Incorrect PIN. Try again.';
+                        verifyCtl.clear();
+                      });
+                    }
+                  }
+                },
+              ),
+              const SizedBox(height: 14),
+              TextButton(
+                onPressed: () {
+                  _showForgotPinDeleteProfileDialog(dialogCtx);
+                },
+                child: const Text(
+                  'Forgot PIN? Delete Profile',
+                  style: TextStyle(color: Colors.redAccent, fontSize: 13, fontWeight: FontWeight.w600),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Cancel', style: TextStyle(color: Colors.white60)),
+            ),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryRed),
+              onPressed: () {
+                if (verifyCtl.text == _pin) {
+                  Navigator.of(ctx).pop();
+                  _showSetNewPinDialog(canRemove: true);
+                } else {
+                  setModalState(() {
+                    errorText = 'Incorrect PIN. Try again.';
+                    verifyCtl.clear();
+                  });
+                }
+              },
+              child: const Text('Continue', style: TextStyle(color: Colors.white)),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showSetNewPinDialog({bool canRemove = false}) {
+    final pinCtl = TextEditingController();
     showDialog(
       context: context,
       builder: (ctx) => AlertDialog(
-        backgroundColor: const Color(0xFF1E1E28),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: const Text('Profile Lock PIN', style: TextStyle(color: Colors.white)),
+        backgroundColor: const Color(0xFF141414),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: const BorderSide(color: Colors.white12),
+        ),
+        title: Text(canRemove ? 'Update Profile PIN' : 'Set Profile Lock PIN', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
         content: Column(
           mainAxisSize: MainAxisSize.min,
           children: [
             const Text(
-              'Require a 4-digit PIN to access this profile.',
+              'Enter a 4-digit PIN to secure this profile.',
               style: TextStyle(color: Colors.white70, fontSize: 13),
             ),
             const SizedBox(height: 16),
@@ -253,18 +349,24 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
                 hintText: '••••',
                 counterText: '',
                 filled: true,
-                fillColor: const Color(0xFF14141E),
+                fillColor: const Color(0xFF222222),
                 border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
               ),
             ),
           ],
         ),
         actions: [
-          if (_pin != null && _pin!.isNotEmpty)
+          if (canRemove)
             TextButton(
               onPressed: () {
                 setState(() => _pin = null);
                 Navigator.of(ctx).pop();
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    backgroundColor: Color(0xFF1F1F1F),
+                    content: Text('PIN protection removed.', style: TextStyle(color: Colors.white)),
+                  ),
+                );
               },
               child: const Text('Remove PIN', style: TextStyle(color: Colors.redAccent)),
             ),
@@ -276,10 +378,60 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
             style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryRed),
             onPressed: () {
               final text = pinCtl.text.trim();
-              setState(() => _pin = text.isEmpty ? null : text);
-              Navigator.of(ctx).pop();
+              if (text.length == 4) {
+                setState(() => _pin = text);
+                Navigator.of(ctx).pop();
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    backgroundColor: Color(0xFF1F1F1F),
+                    content: Text('Profile PIN saved.', style: TextStyle(color: Colors.white)),
+                  ),
+                );
+              }
             },
             child: const Text('Save PIN', style: TextStyle(color: Colors.white)),
+          ),
+        ],
+      ),
+    );
+  }
+
+  void _showForgotPinDeleteProfileDialog(BuildContext parentDialogCtx) {
+    showDialog(
+      context: context,
+      builder: (confirmCtx) => AlertDialog(
+        backgroundColor: const Color(0xFF141414),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(16),
+          side: const BorderSide(color: Colors.white12),
+        ),
+        title: const Text('Delete Profile?', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+        content: Text(
+          'Because this profile is locked with a PIN and you do not know the PIN, deleting the profile is the only option. All data, watch history, and watchlist for "${widget.profile.name}" will be permanently removed. Are you sure?',
+          style: const TextStyle(color: Colors.white70, fontSize: 14),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(confirmCtx).pop(),
+            child: const Text('Cancel', style: TextStyle(color: Colors.white60)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFE50914)),
+            onPressed: () async {
+              Navigator.of(confirmCtx).pop();
+              Navigator.of(parentDialogCtx).pop();
+              await context.read<ProfileProvider>().deleteProfile(widget.profile.id);
+              if (mounted) {
+                Navigator.of(context).pop();
+                ScaffoldMessenger.of(context).showSnackBar(
+                  SnackBar(
+                    backgroundColor: const Color(0xFF1F1F1F),
+                    content: Text('Profile "${widget.profile.name}" deleted.', style: const TextStyle(color: Colors.white)),
+                  ),
+                );
+              }
+            },
+            child: const Text('Delete Profile', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
           ),
         ],
       ),
@@ -335,51 +487,142 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     );
   }
 
-  void _showAudioLanguagesDialog() {
-    final audioOptions = [
-      'English, Original',
-      'Urdu, English',
-      'Hindi, English',
-      'Nepali, English',
-      'Japanese, English',
-      'Korean, English',
-      'Spanish, English',
-      'French, English',
-      'German, English',
-      'Arabic, English',
-      'All Languages (Multi-Audio)',
-    ];
+  void _showSearchableLanguagePicker({
+    required String title,
+    required String current,
+    required List<String> options,
+    required ValueChanged<String> onSelected,
+  }) {
     showModalBottomSheet(
       context: context,
-      backgroundColor: const Color(0xFF1E1E28),
-      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.vertical(top: Radius.circular(16))),
-      builder: (ctx) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Padding(
-              padding: EdgeInsets.fromLTRB(20, 16, 20, 10),
-              child: Text(
-                'Audio & Subtitle Languages',
-                style: TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.bold),
-              ),
-            ),
-            const Divider(color: Colors.white12),
-            ...audioOptions.map((opt) {
-              final isSel = _audioLanguages == opt;
-              return ListTile(
-                title: Text(opt, style: TextStyle(color: isSel ? Colors.white : Colors.white70, fontWeight: isSel ? FontWeight.bold : FontWeight.normal)),
-                trailing: isSel ? const Icon(Icons.check, color: AppTheme.primaryRed) : null,
-                onTap: () {
-                  setState(() => _audioLanguages = opt);
-                  Navigator.pop(ctx);
-                },
-              );
-            }),
-          ],
-        ),
+      backgroundColor: const Color(0xFF141414),
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
+      builder: (ctx) {
+        String query = '';
+        return StatefulBuilder(
+          builder: (modalCtx, setModalState) {
+            final filtered = options.where((o) => o.toLowerCase().contains(query.toLowerCase())).toList();
+
+            return SafeArea(
+              child: Container(
+                height: MediaQuery.of(ctx).size.height * 0.75,
+                padding: const EdgeInsets.symmetric(vertical: 14),
+                child: Column(
+                  children: [
+                    Center(
+                      child: Container(
+                        width: 36,
+                        height: 4,
+                        margin: const EdgeInsets.only(bottom: 12),
+                        decoration: BoxDecoration(
+                          color: Colors.white24,
+                          borderRadius: BorderRadius.circular(2),
+                        ),
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            title,
+                            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
+                          ),
+                          IconButton(
+                            icon: const Icon(Icons.close, color: Colors.white54, size: 20),
+                            onPressed: () => Navigator.pop(ctx),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
+                      child: TextField(
+                        onChanged: (q) => setModalState(() => query = q),
+                        style: const TextStyle(color: Colors.white, fontSize: 14),
+                        decoration: InputDecoration(
+                          hintText: 'Search language...',
+                          hintStyle: const TextStyle(color: Colors.white38, fontSize: 14),
+                          prefixIcon: const Icon(Icons.search, color: Colors.white54, size: 20),
+                          filled: true,
+                          fillColor: const Color(0xFF222222),
+                          contentPadding: const EdgeInsets.symmetric(vertical: 0, horizontal: 16),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
+                            borderSide: BorderSide.none,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const Divider(color: Colors.white12, height: 1),
+                    Expanded(
+                      child: ListView.builder(
+                        itemCount: filtered.length,
+                        itemBuilder: (context, idx) {
+                          final opt = filtered[idx];
+                          final isSel = current == opt;
+                          final info = LanguageUtils.getInfo(opt);
+
+                          return ListTile(
+                            leading: Text(
+                              opt.contains('Original') ? '🔊' : (opt.contains('Off') ? '🚫' : info.flag),
+                              style: const TextStyle(fontSize: 20),
+                            ),
+                            title: Text(
+                              opt,
+                              style: TextStyle(
+                                color: isSel ? Colors.white : Colors.white70,
+                                fontWeight: isSel ? FontWeight.bold : FontWeight.normal,
+                              ),
+                            ),
+                            trailing: isSel
+                                ? const Icon(Icons.check_circle_rounded, color: AppTheme.primaryRed, size: 22)
+                                : null,
+                            onTap: () {
+                              onSelected(opt);
+                              Navigator.pop(ctx);
+                            },
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void _showPreferredAudioSheet() {
+    final options = [
+      'Original Audio',
+      ...LanguageUtils.supportedLanguages.map((l) => l.name),
+    ];
+    _showSearchableLanguagePicker(
+      title: 'Preferred Audio Language',
+      current: _preferredAudio,
+      options: options,
+      onSelected: (val) => setState(() => _preferredAudio = val),
+    );
+  }
+
+  void _showPreferredSubtitleSheet() {
+    final options = [
+      'Off / None',
+      ...LanguageUtils.supportedLanguages.map((l) => l.name),
+    ];
+    _showSearchableLanguagePicker(
+      title: 'Preferred Subtitle Language',
+      current: _preferredSubtitle,
+      options: options,
+      onSelected: (val) => setState(() => _preferredSubtitle = val),
     );
   }
 
@@ -519,12 +762,21 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
           ),
           const SizedBox(height: 10),
 
-          // 7. Audio & Subtitle Languages (Screenshot 5)
+          // 7A. Preferred Audio Language
           _buildSettingsTile(
-            icon: Icons.chat_bubble_outline_rounded,
-            title: 'Audio & Subtitle Languages',
-            subtitle: 'Choose the languages you like to watch shows and movies in.',
-            onTap: _showAudioLanguagesDialog,
+            icon: Icons.mic_none_rounded,
+            title: 'Preferred Audio Language',
+            subtitle: _preferredAudio,
+            onTap: _showPreferredAudioSheet,
+          ),
+          const SizedBox(height: 10),
+
+          // 7B. Preferred Subtitle Language
+          _buildSettingsTile(
+            icon: Icons.subtitles_outlined,
+            title: 'Preferred Subtitle Language',
+            subtitle: _preferredSubtitle,
+            onTap: _showPreferredSubtitleSheet,
           ),
           const SizedBox(height: 10),
 

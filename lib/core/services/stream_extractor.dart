@@ -1393,13 +1393,21 @@ class StreamExtractor {
       'https://net77.net.in',
     ];
 
+    String cleanDubLang(String raw) {
+      var c = raw.replaceAll(RegExp(r'\s*dub|\s*sub', caseSensitive: false), '').trim();
+      if (c.isEmpty || c.toLowerCase() == 'default' || c.toLowerCase() == 'original') {
+        return 'English';
+      }
+      if (c.toLowerCase() == 'esla') return 'Spanish (Latin)';
+      if (c.toLowerCase() == 'ptbr') return 'Portuguese (Brazil)';
+      return c[0].toUpperCase() + c.substring(1);
+    }
+
     for (final base in domains) {
       try {
-        String? chosenDubId = dubSubjectId;
-
-        // Step 1: If user prefers a specific audio language (e.g. Hindi, English) and no explicit dubSubjectId was provided,
-        // query /api/variants-tmdb/$type/$tmdbId to find matching dub variant!
+        // Step 1: Query /api/variants-tmdb/$type/$tmdbId to find all available dub variants!
         List<Map<String, String>> availableDubs = [];
+        String? defaultDubId;
         try {
           final varUri = Uri.parse('$base/api/variants-tmdb/$type/$tmdbId');
           final varRes = await http.get(varUri, headers: {
@@ -1409,6 +1417,7 @@ class StreamExtractor {
           if (varRes.statusCode == 200) {
             final varJson = jsonDecode(varRes.body) as Map<String, dynamic>;
             if (varJson['ok'] == true && varJson['variants'] is List) {
+              defaultDubId = varJson['defaultSubjectId']?.toString();
               for (final v in varJson['variants']) {
                 if (v is Map<String, dynamic>) {
                   final dId = v['dubSubjectId']?.toString() ?? '';
@@ -1422,118 +1431,156 @@ class StreamExtractor {
           }
         } catch (_) {}
 
-        if (chosenDubId == null && preferredAudioLang != null && availableDubs.isNotEmpty) {
+        // Helper to fetch and parse a single dub variant
+        Future<ExtractedStream?> fetchDubStream(String? dubId, String langLabel) async {
+          try {
+            var urlStr = '$base/api/embed-tmdb/$tmdbId?type=$type&se=$season&ep=$episode';
+            if (dubId != null && dubId.isNotEmpty) {
+              urlStr += '&dub=${Uri.encodeComponent(dubId)}';
+            }
+
+            final res = await http.get(Uri.parse(urlStr), headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+              'Referer': '$base/',
+              'Accept': 'application/json, text/plain, */*',
+            }).timeout(const Duration(seconds: 6));
+
+            if (res.statusCode != 200) return null;
+            final data = jsonDecode(res.body) as Map<String, dynamic>;
+            if (data['ok'] != true && data['streams'] == null && data['mp4'] == null) return null;
+
+            final rawStreams = data['streams'] as List<dynamic>? ?? [];
+            if (rawStreams.isEmpty && data['mp4'] == null) return null;
+
+            // Subtitles extraction
+            final subs = <SubtitleTrack>[];
+            final rawCaptions = data['captions'] as List<dynamic>? ?? [];
+            for (final c in rawCaptions) {
+              if (c is Map<String, dynamic>) {
+                final lang = c['lang'] as String? ?? 'en';
+                final name = c['name'] as String? ?? c['label'] as String? ?? lang;
+                var subUrl = c['url'] as String? ?? '';
+                if (subUrl.startsWith('/api/proxy/video?url=')) {
+                  final encoded = subUrl.substring('/api/proxy/video?url='.length);
+                  subUrl = Uri.decodeComponent(encoded);
+                } else if (subUrl.startsWith('/')) {
+                  subUrl = '$base$subUrl';
+                }
+                if (subUrl.isNotEmpty && subUrl.startsWith('http')) {
+                  subs.add(SubtitleTrack(
+                    label: name,
+                    language: lang,
+                    url: subUrl,
+                  ));
+                }
+              }
+            }
+
+            // Quality variants
+            final qualities = <StreamQuality>[];
+            for (final s in rawStreams) {
+              if (s is Map<String, dynamic>) {
+                final qUrl = s['url'] as String? ?? '';
+                final resHeight = (s['resolution'] as num?)?.toInt() ?? 0;
+                if (qUrl.isNotEmpty && resHeight > 0) {
+                  qualities.add(StreamQuality(
+                    label: '${resHeight}p',
+                    height: resHeight,
+                    url: qUrl,
+                  ));
+                }
+              }
+            }
+
+            if (qualities.isEmpty && data['mp4'] != null) {
+              final mp4Url = data['mp4'].toString();
+              if (mp4Url.isNotEmpty) {
+                final height = (data['resolution'] as num?)?.toInt() ?? 1080;
+                qualities.add(StreamQuality(
+                  label: '${height}p',
+                  height: height,
+                  url: mp4Url,
+                ));
+              }
+            }
+
+            qualities.sort((a, b) => b.height.compareTo(a.height));
+            final primaryUrl = qualities.isNotEmpty ? qualities.first.url : (data['mp4'] as String? ?? '');
+            if (primaryUrl.isEmpty) return null;
+
+            final streamHeaders = {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+              'Referer': 'https://moviebox.ph/',
+            };
+
+            return ExtractedStream(
+              url: primaryUrl,
+              type: 'mp4',
+              sourceName: 'NetMirror',
+              language: langLabel,
+              headers: streamHeaders,
+              qualityLabel: qualities.isNotEmpty ? qualities.first.label : '1080p',
+              qualities: qualities,
+              subtitles: subs,
+            );
+          } catch (_) {
+            return null;
+          }
+        }
+
+        // Determine primary dub
+        String primaryDubId = dubSubjectId ?? '';
+        String primaryDubLabel = 'English';
+
+        if (primaryDubId.isEmpty && preferredAudioLang != null && availableDubs.isNotEmpty) {
           final prefClean = preferredAudioLang.toLowerCase().replaceAll(RegExp(r'[^a-z]'), '');
           for (final d in availableDubs) {
             final lClean = d['language']!.toLowerCase().replaceAll(RegExp(r'[^a-z]'), '');
             if (lClean.contains(prefClean) || prefClean.contains(lClean)) {
-              chosenDubId = d['dubId'];
+              primaryDubId = d['dubId']!;
+              primaryDubLabel = cleanDubLang(d['language']!);
               break;
             }
           }
         }
 
-        // Step 2: Fetch embed-tmdb stream data
-        var urlStr = '$base/api/embed-tmdb/$tmdbId?type=$type&se=$season&ep=$episode';
-        if (chosenDubId != null && chosenDubId.isNotEmpty) {
-          urlStr += '&dub=${Uri.encodeComponent(chosenDubId)}';
+        if (primaryDubId.isEmpty && defaultDubId != null && defaultDubId.isNotEmpty) {
+          primaryDubId = defaultDubId;
         }
 
-        final res = await http.get(Uri.parse(urlStr), headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-          'Referer': '$base/',
-          'Accept': 'application/json, text/plain, */*',
-        }).timeout(const Duration(seconds: 6));
+        // 1. Fetch primary dub stream first
+        final primaryStream = await fetchDubStream(primaryDubId.isNotEmpty ? primaryDubId : null, primaryDubLabel);
+        if (primaryStream == null) continue;
 
-        if (res.statusCode != 200) continue;
-        final data = jsonDecode(res.body) as Map<String, dynamic>;
-        if (data['ok'] != true) continue;
+        final results = <ExtractedStream>[primaryStream];
 
-        final rawStreams = data['streams'] as List<dynamic>? ?? [];
-        if (rawStreams.isEmpty && data['mp4'] == null) continue;
+        // 2. Concurrently fetch all other available dub variants (Hindi, French, Spanish, Tamil, Telugu, etc.)!
+        if (availableDubs.isNotEmpty) {
+          final otherDubs = <Map<String, String>>[];
+          final seenLangs = <String>{primaryDubLabel.toLowerCase()};
 
-        // Subtitles extraction
-        final subs = <SubtitleTrack>[];
-        final rawCaptions = data['captions'] as List<dynamic>? ?? [];
-        for (final c in rawCaptions) {
-          if (c is Map<String, dynamic>) {
-            final lang = c['lang'] as String? ?? 'en';
-            final name = c['name'] as String? ?? lang;
-            var subUrl = c['url'] as String? ?? '';
-            if (subUrl.startsWith('/api/proxy/video?url=')) {
-              final encoded = subUrl.substring('/api/proxy/video?url='.length);
-              subUrl = Uri.decodeComponent(encoded);
-            } else if (subUrl.startsWith('/')) {
-              subUrl = '$base$subUrl';
-            }
-            if (subUrl.isNotEmpty) {
-              subs.add(SubtitleTrack(
-                label: name,
-                language: lang,
-                url: subUrl,
-              ));
+          for (final d in availableDubs) {
+            final dId = d['dubId']!;
+            if (dId == primaryDubId) continue;
+            final clean = cleanDubLang(d['language']!);
+            if (!seenLangs.contains(clean.toLowerCase())) {
+              seenLangs.add(clean.toLowerCase());
+              otherDubs.add({'dubId': dId, 'language': clean});
             }
           }
-        }
 
-        // Quality variants
-        final qualities = <StreamQuality>[];
-        for (final s in rawStreams) {
-          if (s is Map<String, dynamic>) {
-            final qUrl = s['url'] as String? ?? '';
-            final resHeight = (s['resolution'] as num?)?.toInt() ?? 0;
-            if (qUrl.isNotEmpty && resHeight > 0) {
-              qualities.add(StreamQuality(
-                label: '${resHeight}p',
-                height: resHeight,
-                url: qUrl,
-              ));
-            }
+          if (otherDubs.isNotEmpty) {
+            try {
+              final extraStreams = await Future.wait(
+                otherDubs.take(12).map((d) => fetchDubStream(d['dubId'], d['language']!)),
+              );
+              for (final s in extraStreams) {
+                if (s != null) {
+                  results.add(s);
+                }
+              }
+            } catch (_) {}
           }
-        }
-        qualities.sort((a, b) => b.height.compareTo(a.height));
-
-        final primaryUrl = qualities.isNotEmpty ? qualities.first.url : (data['mp4'] as String? ?? '');
-        if (primaryUrl.isEmpty) continue;
-
-        // MovieBox referer header strictly required to bypass 429
-        final streamHeaders = {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-          'Referer': 'https://moviebox.ph/',
-        };
-
-        String currentLanguage = 'Original';
-        if (chosenDubId != null && availableDubs.isNotEmpty) {
-          final matched = availableDubs.firstWhere((d) => d['dubId'] == chosenDubId, orElse: () => {});
-          if (matched.isNotEmpty) {
-            currentLanguage = matched['language']!;
-          }
-        }
-
-        final results = <ExtractedStream>[];
-        results.add(ExtractedStream(
-          url: primaryUrl,
-          type: 'mp4',
-          sourceName: 'NetMirror (${qualities.isNotEmpty ? qualities.first.label : "1080p"})',
-          language: currentLanguage,
-          headers: streamHeaders,
-          qualityLabel: qualities.isNotEmpty ? qualities.first.label : '1080p',
-          qualities: qualities,
-          subtitles: subs,
-        ));
-
-        // Add remaining qualities as selectable entries
-        for (final q in qualities.skip(1)) {
-          results.add(ExtractedStream(
-            url: q.url,
-            type: 'mp4',
-            sourceName: 'NetMirror (${q.label})',
-            language: currentLanguage,
-            headers: streamHeaders,
-            qualityLabel: q.label,
-            qualities: qualities,
-            subtitles: subs,
-          ));
         }
 
         if (results.isNotEmpty) {
@@ -1563,6 +1610,7 @@ class StreamExtractor {
     int season = 1,
     int episode = 1,
     bool forceRefresh = false,
+    String? preferredAudioLang,
   }) async {
     final key = getCacheKey(type, tmdbId, season, episode);
 
@@ -1584,10 +1632,42 @@ class StreamExtractor {
       }
     }
 
+    // 1. ALWAYS connect to NetMirror FIRST (fastest direct MP4, multiple dubs & qualities)
+    try {
+      final nmStreams = await extractNetMirror(
+        type: type,
+        tmdbId: tmdbId,
+        season: season,
+        episode: episode,
+        preferredAudioLang: preferredAudioLang,
+      ).timeout(const Duration(milliseconds: 4000), onTimeout: () => <ExtractedStream>[]);
+
+      if (nmStreams.isNotEmpty) {
+        debugPrint('StreamExtractor: Successfully connected to NetMirror first (${nmStreams.length} streams/dubs ready!)');
+        setCachedEntry(key, nmStreams);
+
+        // Fetch rich external subtitles in background if needed
+        if (nmStreams.first.subtitles.length <= 1) {
+          extractVoidflixBackend(type: type, tmdbId: tmdbId, season: season, episode: episode).then((vf) {
+            if (vf != null && vf.subtitles.isNotEmpty) {
+              final enriched = nmStreams.map((s) => s.copyWith(
+                subtitles: [...s.subtitles, ...vf.subtitles.where((sub) => !s.subtitles.any((es) => es.language == sub.language))],
+              )).toList();
+              setCachedEntry(key, enriched);
+            }
+          }).catchError((_) => null);
+        }
+
+        return nmStreams;
+      }
+    } catch (e) {
+      debugPrint('StreamExtractor: NetMirror initial connection failed ($e). Falling back to multiple extraction...');
+    }
+
     final results = <ExtractedStream>[];
     List<SubtitleTrack> sharedSubs = [];
 
-    // Parallel concurrent extraction across all direct sources
+    // 2. If NetMirror is unavailable, run multiple extraction across all remaining direct sources
     try {
       final telegramFuture = extractTelegram(
         type: type,
