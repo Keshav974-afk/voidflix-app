@@ -6,6 +6,8 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'subtitle_service.dart';
 import '../constants/api_constants.dart';
+import 'aoneroom_client.dart';
+import 'aoneroom_matcher.dart';
 
 class StreamQuality {
   final String label;
@@ -1471,5 +1473,243 @@ class StreamExtractor {
     }
 
     return results;
+  }
+
+  /// Extracts high-speed direct streams and multi-language dubs from Aoneroom (MovieBox).
+  static Future<List<ExtractedStream>> extractAoneroom({
+    required String type, // 'movie' or 'tv'
+    required int tmdbId,
+    required String title,
+    String? releaseDate,
+    int season = 1,
+    int episode = 1,
+    String? preferredAudioLang,
+    String? subjectIdOverride,
+  }) async {
+    final cacheKey = getCacheKey(type, tmdbId, season, episode, prefix: 'aoneroom');
+    final cached = await getCachedEntry(cacheKey);
+    if (cached != null && cached.streams.isNotEmpty) {
+      debugPrint('StreamExtractor: Reusing cached Aoneroom streams for $cacheKey');
+      return cached.streams;
+    }
+
+    try {
+      // 1. Resolve Aoneroom subjectId
+      final subjectId = subjectIdOverride ??
+          await AoneroomMatcher.instance.resolveSubjectId(
+            type: type,
+            tmdbId: tmdbId,
+            title: title,
+            releaseDate: releaseDate,
+          );
+
+      if (subjectId == null || subjectId.isEmpty) {
+        debugPrint('StreamExtractor: Aoneroom title match failed for "$title" (tmdb: $tmdbId)');
+        return <ExtractedStream>[];
+      }
+
+      // 2. Fetch title detail (dubs & seasons metadata)
+      final detail = await AoneroomClient.instance.getDetail(subjectId);
+      if (detail == null) {
+        debugPrint('StreamExtractor: Aoneroom getDetail returned null for $subjectId');
+        return <ExtractedStream>[];
+      }
+
+      // If TV series, verify season availability if seasons list is provided
+      if (type == 'tv' && detail.seasons.isNotEmpty) {
+        final hasSeason = detail.seasons.any((s) => s.se == season);
+        if (!hasSeason) {
+          debugPrint('StreamExtractor: Aoneroom season $season not found in available seasons');
+        }
+      }
+
+      // 3. Examine dubs and select user's preferred dub
+      final dubs = detail.dubs.isNotEmpty
+          ? detail.dubs
+          : [
+              AoneroomDub(
+                subjectId: subjectId,
+                lanName: 'Original',
+                lanCode: 'en',
+                original: true,
+              )
+            ];
+
+      AoneroomDub chosenDub = dubs.firstWhere(
+        (d) => d.original,
+        orElse: () => dubs.first,
+      );
+
+      if (preferredAudioLang != null && preferredAudioLang.isNotEmpty) {
+        final prefLower = preferredAudioLang.toLowerCase();
+        final match = dubs.firstWhere(
+          (d) =>
+              d.lanCode.toLowerCase() == prefLower ||
+              d.lanName.toLowerCase().contains(prefLower) ||
+              prefLower.contains(d.lanCode.toLowerCase()),
+          orElse: () => chosenDub,
+        );
+        chosenDub = match;
+      }
+
+      // 4. Fetch play stream for chosen dub
+      final playResult = await AoneroomClient.instance.getPlay(
+        chosenDub.subjectId,
+        season: type == 'tv' ? season : null,
+        episode: type == 'tv' ? episode : null,
+      );
+
+      if (playResult == null || !playResult.hasPlayableStreams || playResult.vipLocked) {
+        debugPrint(
+          'StreamExtractor: Aoneroom play returned no streams (vipLocked: ${playResult?.vipLocked}) for subjectId ${chosenDub.subjectId}',
+        );
+        return <ExtractedStream>[];
+      }
+
+      final primaryUrl = playResult.hlsUrls.isNotEmpty
+          ? playResult.hlsUrls.first
+          : (playResult.dashUrls.isNotEmpty
+              ? playResult.dashUrls.first
+              : (playResult.streams.isNotEmpty ? playResult.streams.first['url']?.toString() ?? '' : ''));
+
+      if (primaryUrl.isEmpty) {
+        return <ExtractedStream>[];
+      }
+
+      // Resolve HLS variants if master playlist
+      List<StreamQuality> qualities = [];
+      if (primaryUrl.contains('.m3u8')) {
+        qualities = await _resolveHlsVariants(
+          primaryUrl,
+          AoneroomClient.instance.headers,
+        );
+      }
+
+      if (qualities.isEmpty) {
+        qualities = [
+          StreamQuality(label: 'Auto (Adaptive)', height: 0, url: primaryUrl),
+          StreamQuality(label: '720p HD', height: 720, url: primaryUrl),
+          StreamQuality(label: '480p (Fast)', height: 480, url: primaryUrl),
+        ];
+      }
+
+      final streamType = primaryUrl.contains('.m3u8')
+          ? 'hls'
+          : (primaryUrl.contains('.mpd') ? 'dash' : 'mp4');
+
+      final results = <ExtractedStream>[];
+
+      // Add primary active stream
+      results.add(ExtractedStream(
+        url: primaryUrl,
+        type: streamType,
+        sourceName: 'Aoneroom [${chosenDub.lanName}]',
+        language: chosenDub.lanName,
+        headers: {
+          'User-Agent':
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+          'X-Client-Info': jsonEncode({'timezone': DateTime.now().timeZoneName}),
+          'X-No-High-Risk-Restrict': '1',
+          'x-aoneroom-subject-id': chosenDub.subjectId,
+        },
+        qualityLabel: 'Auto (Adaptive)',
+        qualities: qualities,
+        subtitles: const [],
+      ));
+
+      // Surface remaining dub variants for multi-audio selector
+      for (final dub in dubs) {
+        if (dub.subjectId == chosenDub.subjectId) continue;
+        results.add(ExtractedStream(
+          url: '', // Lazily resolved on tap via extractAoneroomPlayUrl
+          type: 'hls',
+          sourceName: 'Aoneroom [${dub.lanName}]',
+          language: dub.lanName,
+          headers: {
+            'x-aoneroom-subject-id': dub.subjectId,
+            'x-aoneroom-lang': dub.lanName,
+          },
+          qualityLabel: 'HD',
+          qualities: const [],
+          subtitles: const [],
+        ));
+      }
+
+      if (results.isNotEmpty) {
+        setCachedEntry(cacheKey, results);
+      }
+      return results;
+    } catch (e, st) {
+      debugPrint('StreamExtractor: Aoneroom extraction error: $e\n$st');
+      return <ExtractedStream>[];
+    }
+  }
+
+  /// Lazily fetches a playable stream for a specific Aoneroom dub when selected by the user.
+  static Future<List<ExtractedStream>?> extractAoneroomPlayUrl({
+    required String subjectId,
+    required String language,
+    int? season,
+    int? episode,
+  }) async {
+    try {
+      final playResult = await AoneroomClient.instance.getPlay(
+        subjectId,
+        season: season,
+        episode: episode,
+      );
+
+      if (playResult == null || !playResult.hasPlayableStreams || playResult.vipLocked) {
+        return null;
+      }
+
+      final primaryUrl = playResult.hlsUrls.isNotEmpty
+          ? playResult.hlsUrls.first
+          : (playResult.dashUrls.isNotEmpty
+              ? playResult.dashUrls.first
+              : (playResult.streams.isNotEmpty ? playResult.streams.first['url']?.toString() ?? '' : ''));
+
+      if (primaryUrl.isEmpty) return null;
+
+      List<StreamQuality> qualities = [];
+      if (primaryUrl.contains('.m3u8')) {
+        qualities = await _resolveHlsVariants(
+          primaryUrl,
+          AoneroomClient.instance.headers,
+        );
+      }
+
+      if (qualities.isEmpty) {
+        qualities = [
+          StreamQuality(label: 'Auto (Adaptive)', height: 0, url: primaryUrl),
+          StreamQuality(label: '720p HD', height: 720, url: primaryUrl),
+          StreamQuality(label: '480p (Fast)', height: 480, url: primaryUrl),
+        ];
+      }
+
+      return [
+        ExtractedStream(
+          url: primaryUrl,
+          type: primaryUrl.contains('.m3u8')
+              ? 'hls'
+              : (primaryUrl.contains('.mpd') ? 'dash' : 'mp4'),
+          sourceName: 'Aoneroom [$language]',
+          language: language,
+          headers: {
+            'User-Agent':
+                'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+            'X-Client-Info': jsonEncode({'timezone': DateTime.now().timeZoneName}),
+            'X-No-High-Risk-Restrict': '1',
+            'x-aoneroom-subject-id': subjectId,
+          },
+          qualityLabel: 'Auto (Adaptive)',
+          qualities: qualities,
+          subtitles: const [],
+        ),
+      ];
+    } catch (e) {
+      debugPrint('StreamExtractor: extractAoneroomPlayUrl error: $e');
+      return null;
+    }
   }
 }

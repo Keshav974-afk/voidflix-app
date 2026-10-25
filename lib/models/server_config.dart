@@ -27,6 +27,13 @@ class ServerConfig {
       isDirectPlay: true,
     ),
     VideoServer(
+      name: "Aoneroom (MovieBox)",
+      description: "Direct high-speed CDN stream cluster with multi-language dubs",
+      movieUrl: (id) => "https://h5-api.aoneroom.com/wefeed-h5api-bff/detail?subjectId=$id",
+      tvUrl: (id, s, e) => "https://h5-api.aoneroom.com/wefeed-h5api-bff/detail?subjectId=$id&se=$s&ep=$e",
+      isDirectPlay: true,
+    ),
+    VideoServer(
       name: "Cine4K (Lisbon)",
       description: "Direct 4K Ultra HD HDR / 1080p with multi-audio (Recommended)",
       movieUrl: (id) => "https://api.wing.st/embed/movie/$id",
