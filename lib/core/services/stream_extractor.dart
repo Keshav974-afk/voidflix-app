@@ -976,6 +976,25 @@ class StreamExtractor {
     try {
       final res = await http.get(Uri.parse(playlistUrl), headers: headers).timeout(const Duration(milliseconds: 2500));
       if (res.statusCode == 200 && res.body.contains('#EXTM3U')) {
+        // Audio health check: Detect and reject servers with broken/502 audio CDNs (e.g. lit.cheaptruckrepairs.cc)
+        final audioMatches = RegExp(r'#EXT-X-MEDIA:TYPE=AUDIO.*?URI="([^"]+)"').allMatches(res.body);
+        if (audioMatches.isNotEmpty) {
+          final firstAudioUri = audioMatches.first.group(1);
+          if (firstAudioUri != null) {
+            final resolvedAudio = Uri.parse(playlistUrl).resolve(firstAudioUri).toString();
+            try {
+              final aCheck = await http.get(Uri.parse(resolvedAudio), headers: headers)
+                  .timeout(const Duration(milliseconds: 1500));
+              if (aCheck.statusCode >= 400) {
+                debugPrint('Cinejoy $serverName audio CDN failed with ${aCheck.statusCode} - skipping to working audio server!');
+                return null;
+              }
+            } catch (_) {
+              debugPrint('Cinejoy $serverName audio CDN timed out - skipping to working audio server!');
+              return null;
+            }
+          }
+        }
         final lines = res.body.split('\n');
         final variants = <_HlsVariantCandidate>[];
         String? currentInfo;
