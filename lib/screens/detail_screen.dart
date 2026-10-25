@@ -60,6 +60,8 @@ class _DetailScreenState extends State<DetailScreen> {
   void initState() {
     super.initState();
     _loadDetail();
+    // Netflix-style background pre-warming: pre-resolve stream while user views synopsis
+    StreamExtractor.prewarm(widget.mediaType, widget.mediaId, season: 1, episode: 1);
   }
 
   void _updateTrailerPlayer(String key) {

@@ -34,8 +34,9 @@ class StreamProxyService {
   Timer? _cleanupTimer;
   late final HttpClient _client = HttpClient()
     ..badCertificateCallback = ((cert, host, port) => true)
-    ..connectionTimeout = const Duration(seconds: 12)
-    ..idleTimeout = const Duration(seconds: 30);
+    ..connectionTimeout = const Duration(seconds: 15)
+    ..idleTimeout = const Duration(seconds: 60)
+    ..maxConnectionsPerHost = 32;
 
   int _sessionCounter = 0;
 

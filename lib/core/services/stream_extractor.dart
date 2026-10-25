@@ -86,6 +86,27 @@ class ExtractedStream {
             [],
       );
 
+  ExtractedStream copyWith({
+    String? url,
+    String? type,
+    String? sourceName,
+    String? language,
+    Map<String, String>? headers,
+    String? qualityLabel,
+    List<StreamQuality>? qualities,
+    List<SubtitleTrack>? subtitles,
+  }) =>
+      ExtractedStream(
+        url: url ?? this.url,
+        type: type ?? this.type,
+        sourceName: sourceName ?? this.sourceName,
+        language: language ?? this.language,
+        headers: headers ?? this.headers,
+        qualityLabel: qualityLabel ?? this.qualityLabel,
+        qualities: qualities ?? this.qualities,
+        subtitles: subtitles ?? this.subtitles,
+      );
+
   @override
   String toString() => 'ExtractedStream($sourceName: $url, lang: $language)';
 }
@@ -733,8 +754,8 @@ class StreamExtractor {
 
     try {
       final endpoint = type == 'tv'
-          ? 'http://103.30.211.131/api/source/tv/$tmdbId/$season/$episode'
-          : 'http://103.30.211.131/api/source/movie/$tmdbId';
+          ? 'https://api.voidflix.org/api/source/tv/$tmdbId/$season/$episode'
+          : 'https://api.voidflix.org/api/source/movie/$tmdbId';
 
       final res = await http.get(
         Uri.parse(endpoint),
@@ -1152,6 +1173,13 @@ class StreamExtractor {
   /// Master extraction method that queries all direct stream extractors
   /// and aggregates audio sources, qualities, and all subtitle tracks.
   /// Automatically uses cached results within 3 hours for instant resumption.
+  /// Netflix-style background pre-warming: pre-resolves streams before the user taps Play!
+  static void prewarm(String type, int tmdbId, {int season = 1, int episode = 1}) {
+    final key = getCacheKey(type, tmdbId, season, episode);
+    if (_cache.containsKey(key)) return;
+    extractAll(type: type, tmdbId: tmdbId, season: season, episode: episode).ignore();
+  }
+
   static Future<List<ExtractedStream>> extractAll({
     required String type, // 'movie' or 'tv'
     required int tmdbId,
@@ -1184,52 +1212,107 @@ class StreamExtractor {
 
     // Parallel concurrent extraction across all direct sources
     try {
+      final telegramFuture = extractTelegram(
+        type: type,
+        tmdbId: tmdbId,
+        season: season,
+        episode: episode,
+      ).catchError((e) {
+        debugPrint('Telegram extractor error: $e');
+        return <ExtractedStream>[];
+      });
+
+      final cinejoyFuture = extractCinejoy(
+        type: type,
+        tmdbId: tmdbId,
+        season: season,
+        episode: episode,
+      ).catchError((e) {
+        debugPrint('Cinejoy extractor error: $e');
+        return <ExtractedStream>[];
+      });
+
+      final vidrockFuture = extractVidrock(
+        type: type,
+        tmdbId: tmdbId,
+        season: season,
+        episode: episode,
+      ).catchError((e) {
+        debugPrint('Vidrock extractor error: $e');
+        return <ExtractedStream>[];
+      });
+
+      final vidlinkFuture = extractVidlink(
+        type: type,
+        tmdbId: tmdbId,
+        season: season,
+        episode: episode,
+      ).catchError((e) {
+        debugPrint('Vidlink extractor error: $e');
+        return null;
+      });
+
+      final voidflixFuture = extractVoidflixBackend(
+        type: type,
+        tmdbId: tmdbId,
+        season: season,
+        episode: episode,
+      ).catchError((e) {
+        debugPrint('Voidflix extractor error: $e');
+        return null;
+      });
+
+      // Netflix-Style Fast Path: if ultra-fast Telegram or Cinejoy returns in <950ms,
+      // return immediately so the player starts playing in <1 second!
+      // The remaining extractors will complete in background and enrich the cache.
+      final fastDirect = await Future.any([
+        telegramFuture.then((list) => list.isNotEmpty ? list : null),
+        cinejoyFuture.then((list) => list.isNotEmpty ? list : null),
+        Future.delayed(const Duration(milliseconds: 950), () => null),
+      ]);
+
+      if (fastDirect != null && fastDirect.isNotEmpty) {
+        debugPrint('StreamExtractor: Fast-path ready in <950ms (${fastDirect.first.sourceName}) - instant play!');
+        setCachedEntry(key, fastDirect);
+
+        // Background worker to enrich cache with all alternate audio & subtitles
+        Future.wait([telegramFuture, cinejoyFuture, vidrockFuture, vidlinkFuture, voidflixFuture]).then((all) {
+          try {
+            final tList = all[0] as List<ExtractedStream>;
+            final cList = all[1] as List<ExtractedStream>;
+            final vList = all[2] as List<ExtractedStream>;
+            final vl = all[3] as ExtractedStream?;
+            final vf = all[4] as ExtractedStream?;
+
+            List<SubtitleTrack> bgSubs = [];
+            if (vf != null && vf.subtitles.isNotEmpty) bgSubs = vf.subtitles;
+            if (vl != null && vl.subtitles.isNotEmpty && bgSubs.isEmpty) bgSubs = vl.subtitles;
+
+            final combined = <ExtractedStream>[];
+            for (final t in tList) {
+              combined.add(t.copyWith(subtitles: bgSubs.isNotEmpty ? bgSubs : t.subtitles));
+            }
+            for (final c in cList) {
+              combined.add(c.copyWith(subtitles: bgSubs.isNotEmpty ? bgSubs : c.subtitles));
+            }
+            for (final v in vList) {
+              combined.add(v.copyWith(subtitles: bgSubs.isNotEmpty ? bgSubs : v.subtitles));
+            }
+            if (combined.isNotEmpty) {
+              setCachedEntry(key, combined);
+            }
+          } catch (_) {}
+        }).ignore();
+
+        return fastDirect;
+      }
+
       final futures = await Future.wait([
-        extractTelegram(
-          type: type,
-          tmdbId: tmdbId,
-          season: season,
-          episode: episode,
-        ).catchError((e) {
-          debugPrint('Telegram extractor error: $e');
-          return <ExtractedStream>[];
-        }),
-        extractCinejoy(
-          type: type,
-          tmdbId: tmdbId,
-          season: season,
-          episode: episode,
-        ).catchError((e) {
-          debugPrint('Cinejoy extractor error: $e');
-          return <ExtractedStream>[];
-        }),
-        extractVidrock(
-          type: type,
-          tmdbId: tmdbId,
-          season: season,
-          episode: episode,
-        ).catchError((e) {
-          debugPrint('Vidrock extractor error: $e');
-          return <ExtractedStream>[];
-        }),
-        extractVidlink(
-          type: type,
-          tmdbId: tmdbId,
-          season: season,
-          episode: episode,
-        ).catchError((e) {
-          debugPrint('Vidlink extractor error: $e');
-          return null;
-        }),
-        extractVoidflixBackend(
-          type: type,
-          tmdbId: tmdbId,
-          season: season,
-          episode: episode,
-        ).catchError((e) {
-          debugPrint('Voidflix extractor error: $e');
-          return null;
-        }),
+        telegramFuture,
+        cinejoyFuture,
+        vidrockFuture,
+        vidlinkFuture,
+        voidflixFuture,
       ]);
 
       final telegramStreams = futures[0] as List<ExtractedStream>;

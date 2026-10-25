@@ -47,14 +47,15 @@ void main() async {
         'video.decoders': ['D3D11', 'FFmpeg'],
         'player': {
           'avio.reconnect': '1',
-          'avio.reconnect_delay_max': '15',
+          'avio.reconnect_delay_max': '5',
           'reconnect_streamed': '1',
           'reconnect_at_eof': '1',
           'avformat.allowed_extensions': 'ALL',
-          'buffer_size': '15728640', // 15MB buffer for smooth playback on slow networks
-          'max_buffer_size': '31457280', // 30MB max buffer
-          'probesize': '10000000',
-          'analyzeduration': '10000000',
+          'probesize': '524288', // 512KB for instant startup (<0.5s playback start)
+          'analyzeduration': '500000', // 0.5s analysis for instant first frame
+          'fpsprobesize': '0',
+          'buffer_size': '33554432', // 32MB forward buffer for smooth bufferless playback
+          'max_buffer_size': '67108864', // 64MB max buffer
           'http-persistent': '1',
         },
         'fastSeek': true,

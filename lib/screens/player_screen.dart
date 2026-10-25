@@ -133,6 +133,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
   bool _isLoading = true;
   bool _isDeveloperMode = false;
   bool _isStreamUnavailable = false;
+  int _lastErrorRecoveryTime = 0;
+  int _errorRecoveryCount = 0;
 
   // Double tap seek ripple indicator
   int? _doubleTapSeekSeconds;
@@ -630,7 +632,23 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
     try {
       List<ExtractedStream> streams = [];
-      if (server.name.contains('Cine4K') || server.name.contains('Lisbon')) {
+      if (server.name.contains('Meow')) {
+        // Fast-path: Direct Telegram 27,000 media database query
+        streams = await StreamExtractor.extractTelegram(
+          type: widget.mediaType,
+          tmdbId: widget.mediaId,
+          season: _currentSeason,
+          episode: _currentEpisode,
+        );
+        if (streams.isEmpty) {
+          streams = await StreamExtractor.extractAll(
+            type: widget.mediaType,
+            tmdbId: widget.mediaId,
+            season: _currentSeason,
+            episode: _currentEpisode,
+          );
+        }
+      } else if (server.name.contains('Cine4K') || server.name.contains('Lisbon')) {
         streams = await StreamExtractor.extractCinejoy(
           type: widget.mediaType,
           tmdbId: widget.mediaId,
@@ -785,12 +803,22 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
   }
 
-  Future<void> _initNativePlayer(ExtractedStream stream, {Duration? startPosition, bool autoPlay = true}) async {
+  Future<void> _initNativePlayer(
+    ExtractedStream stream, {
+    Duration? startPosition,
+    bool autoPlay = true,
+    bool isMidStreamRecovery = false,
+  }) async {
     _disposeVideoController();
+
+    final isResumingMidStream = isMidStreamRecovery || (startPosition != null && startPosition > Duration.zero);
 
     setState(() {
       _isExtracting = false;
-      _isLoading = true;
+      // CRITICAL: Never show full-screen black overlay with "Connecting to stream..." if recovering mid-stream!
+      // Keep _isLoading = false and set _isBuffering = true so current video frame stays visible.
+      _isLoading = !isResumingMidStream;
+      _isBuffering = isResumingMidStream;
       _isNativeMode = true;
       _availableQualities = stream.qualities.isNotEmpty
           ? stream.qualities
@@ -851,6 +879,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
       setState(() {
         _isLoading = false;
+        _isBuffering = false;
         _isPlaying = autoPlay;
         _totalDuration = controller.value.duration;
         _currentPosition = controller.value.position;
@@ -924,13 +953,35 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
     final val = controller.value;
     if (val.hasError) {
-      AppLogger.instance.error('Player', 'Native playback error during stream: ');
-      
-      // If user explicitly selected this server OR is actively playing/seeking, NEVER switch servers!
-      if (_userExplicitlySelectedServer || (_totalDuration.inSeconds > 0 && _currentPosition.inSeconds > 0)) {
-        AppLogger.instance.log('Player', 'Recovering seek/playback error on current server without switching servers');
+      final now = DateTime.now().millisecondsSinceEpoch;
+      // Debounce errors: don't hammer re-inits in a 2.5s window
+      if (now - _lastErrorRecoveryTime < 2500) return;
+      _lastErrorRecoveryTime = now;
+      _errorRecoveryCount++;
+
+      AppLogger.instance.error('Player', 'Native playback glitch: ${val.errorDescription} (attempt $_errorRecoveryCount)');
+
+      // If user is actively playing mid-stream:
+      if (_totalDuration.inSeconds > 0 && _currentPosition.inSeconds > 0) {
+        // Attempt 1 & 2: gentle in-place resume without blacking out the screen
+        if (_errorRecoveryCount <= 2) {
+          setState(() => _isBuffering = true);
+          controller.seekTo(_currentPosition).then((_) {
+            if (mounted) controller.play();
+          }).catchError((_) {});
+          return;
+        }
+
+        // Attempt 3+: seamlessly re-initialize controller with isMidStreamRecovery = true
+        _errorRecoveryCount = 0;
+        AppLogger.instance.log('Player', 'Seamless in-place stream recovery on current server');
         if (_directStreams.isNotEmpty && _selectedStreamIndex < _directStreams.length) {
-          _initNativePlayer(_directStreams[_selectedStreamIndex], startPosition: _currentPosition, autoPlay: true);
+          _initNativePlayer(
+            _directStreams[_selectedStreamIndex],
+            startPosition: _currentPosition,
+            autoPlay: true,
+            isMidStreamRecovery: true,
+          );
         } else {
           _loadServerDirect(_selectedServerIndex, startPosition: _currentPosition);
         }
@@ -944,6 +995,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
         _fallbackToNextNativeOrEmbed(resumePosition: _currentPosition);
       }
       return;
+    }
+
+    if (val.isPlaying && _errorRecoveryCount > 0) {
+      _errorRecoveryCount = 0;
     }
 
     if (!_isDraggingSeekbar) {
