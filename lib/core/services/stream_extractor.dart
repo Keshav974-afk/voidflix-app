@@ -1301,6 +1301,75 @@ class StreamExtractor {
     }
   }
 
+  /// Extracts zero-buffering micro-segmented HLS streams via Screenfetch (Filmpire engine)
+  static Future<List<ExtractedStream>> extractScreenfetch({
+    required String type, // 'movie' or 'tv'
+    required int tmdbId,
+    int season = 1,
+    int episode = 1,
+  }) async {
+    final cacheKey = getCacheKey(type, tmdbId, season, episode, prefix: 'screenfetch');
+    final cached = await getCachedEntry(cacheKey);
+    if (cached != null && cached.streams.isNotEmpty) {
+      debugPrint('StreamExtractor: Reusing cached Screenfetch streams for $cacheKey (instant!)');
+      return cached.streams;
+    }
+
+    try {
+      // Query central Cloudflare KV & R2 extraction API
+      final uri = Uri.parse(
+        'https://flowflix.org/api/public/extract?type=$type&id=$tmdbId&s=$season&e=$episode&server=Screenfetch',
+      );
+      final res = await http.get(uri, headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept': 'application/json',
+      }).timeout(const Duration(seconds: 7));
+
+      if (res.statusCode == 200) {
+        final j = jsonDecode(res.body) as Map<String, dynamic>;
+        final hls = j['hls'] as String? ?? j['url'] as String?;
+        if (hls != null && hls.isNotEmpty) {
+          final referer = j['referer'] as String? ?? 'https://firandfable.space/';
+          final streamHeaders = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Referer': referer,
+          };
+          final subs = <SubtitleTrack>[];
+          if (j['subs'] is List) {
+            for (final sub in j['subs']) {
+              if (sub is Map<String, dynamic> && sub['url'] != null) {
+                subs.add(SubtitleTrack(
+                  label: sub['label']?.toString() ?? 'Sub',
+                  language: sub['lang']?.toString() ?? 'en',
+                  url: sub['url'].toString(),
+                ));
+              }
+            }
+          }
+
+          final results = [
+            ExtractedStream(
+              url: hls,
+              type: 'hls',
+              sourceName: 'Screenfetch (Filmpire 1080p)',
+              language: 'Original',
+              headers: streamHeaders,
+              qualityLabel: '1080p',
+              subtitles: subs,
+            ),
+          ];
+
+          setCachedEntry(cacheKey, results);
+          return results;
+        }
+      }
+    } catch (e) {
+      debugPrint('Screenfetch API extraction error: $e');
+    }
+
+    return [];
+  }
+
   /// Extracts high-speed direct multi-quality MP4 streams, multi-language dubs, and subtitles via NetMirror
   static Future<List<ExtractedStream>> extractNetMirror({
     required String type, // 'movie' or 'tv'

@@ -659,23 +659,62 @@ class _PlayerScreenState extends State<PlayerScreen> {
         ).timeout(const Duration(milliseconds: 4500), onTimeout: () => <ExtractedStream>[]);
 
         if (streams.isEmpty) {
-          // Fast-fallback to Meow or NebulaHD if NetMirror has no streams
-          final tStreams = await StreamExtractor.extractTelegram(
+          // Fast-fallback to Screenfetch (Filmpire HLS)
+          final sfStreams = await StreamExtractor.extractScreenfetch(
             type: widget.mediaType,
             tmdbId: widget.mediaId,
             season: _currentSeason,
             episode: _currentEpisode,
-          );
-          if (tStreams.isNotEmpty) {
-            streams = tStreams;
+          ).timeout(const Duration(milliseconds: 4000), onTimeout: () => <ExtractedStream>[]);
+          if (sfStreams.isNotEmpty) {
+            streams = sfStreams;
           } else {
-            streams = await StreamExtractor.extractCinejoy(
+            final tStreams = await StreamExtractor.extractTelegram(
               type: widget.mediaType,
               tmdbId: widget.mediaId,
-              title: widget.mediaTitle,
               season: _currentSeason,
               episode: _currentEpisode,
-              preferredServer: 'Nebula',
+            );
+            if (tStreams.isNotEmpty) {
+              streams = tStreams;
+            } else {
+              streams = await StreamExtractor.extractCinejoy(
+                type: widget.mediaType,
+                tmdbId: widget.mediaId,
+                title: widget.mediaTitle,
+                season: _currentSeason,
+                episode: _currentEpisode,
+                preferredServer: 'Nebula',
+              );
+            }
+          }
+        }
+      } else if (server.name.contains('Screenfetch')) {
+        streams = await StreamExtractor.extractScreenfetch(
+          type: widget.mediaType,
+          tmdbId: widget.mediaId,
+          season: _currentSeason,
+          episode: _currentEpisode,
+        ).timeout(const Duration(milliseconds: 5500), onTimeout: () => <ExtractedStream>[]);
+
+        if (streams.isEmpty) {
+          // Fallback to Cinejoy Nebula or NetMirror
+          final cStreams = await StreamExtractor.extractCinejoy(
+            type: widget.mediaType,
+            tmdbId: widget.mediaId,
+            title: widget.mediaTitle,
+            season: _currentSeason,
+            episode: _currentEpisode,
+            preferredServer: 'Nebula',
+          );
+          if (cStreams.isNotEmpty) {
+            streams = cStreams;
+          } else {
+            streams = await StreamExtractor.extractNetMirror(
+              type: widget.mediaType,
+              tmdbId: widget.mediaId,
+              season: _currentSeason,
+              episode: _currentEpisode,
             );
           }
         }
@@ -1537,9 +1576,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
       });
     }
 
-    // Debounce actual seek call so 3-4 rapid button presses/arrow keys fire ONLY ONE seek!
+    // Debounce actual seek call so rapid button presses/arrow keys fire ONLY ONE seek without delay!
     _seekDebounceTimer?.cancel();
-    _seekDebounceTimer = Timer(const Duration(milliseconds: 300), () {
+    _seekDebounceTimer = Timer(const Duration(milliseconds: 100), () {
       final target = _pendingSeekTarget;
       if (target != null && mounted) {
         _videoPlayerController?.seekTo(target);
@@ -1560,8 +1599,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
     setState(() => _doubleTapSeekSeconds = _cumulativeSeekSeconds);
     _doubleTapTimer?.cancel();
 
-    // Debounce the actual seek call so 3 rapid double-taps fire ONLY ONE consolidated seek request!
-    _doubleTapTimer = Timer(const Duration(milliseconds: 350), () {
+    // Debounce the actual seek call so rapid double-taps fire ONLY ONE consolidated seek request!
+    _doubleTapTimer = Timer(const Duration(milliseconds: 200), () {
       if (mounted) {
         final totalSec = _cumulativeSeekSeconds;
         setState(() {

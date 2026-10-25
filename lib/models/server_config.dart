@@ -29,6 +29,15 @@ class ServerConfig {
       isDirectPlay: true,
     ),
     VideoServer(
+      name: "Screenfetch",
+      description:
+          "Zero-buffering micro-segmented HLS (Filmpire Engine • Instant Keyframe Seeking)",
+      movieUrl: (id) => "https://screenfetch4.cyou/embed/movie?tmdb=$id",
+      tvUrl: (id, s, e) =>
+          "https://screenfetch4.cyou/embed/tv?tmdb=$id&season=$s&episode=$e",
+      isDirectPlay: true,
+    ),
+    VideoServer(
       name: "Meow",
       description:
           "Direct 4K/1080p multi-audio streams from 25k Telegram channel (Ultra Fast • Primary)",
