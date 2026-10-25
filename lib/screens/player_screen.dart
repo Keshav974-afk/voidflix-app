@@ -642,47 +642,48 @@ class _PlayerScreenState extends State<PlayerScreen> {
     try {
       List<ExtractedStream> streams = [];
       if (server.name.contains('Meow')) {
-        // Fast-path: Direct Telegram 27,000 media database query
-        streams = await StreamExtractor.extractTelegram(
+        // Ultra-fast concurrent fast-path: Query Telegram 25k DB and Cinejoy in parallel
+        final tFuture = StreamExtractor.extractTelegram(
           type: widget.mediaType,
           tmdbId: widget.mediaId,
           season: _currentSeason,
           episode: _currentEpisode,
         );
-        if (streams.isEmpty) {
-          streams = await StreamExtractor.extractAll(
-            type: widget.mediaType,
-            tmdbId: widget.mediaId,
-            season: _currentSeason,
-            episode: _currentEpisode,
-          );
-        }
-      } else if (server.name.contains('Aoneroom')) {
-        // Aoneroom / MovieBox CDN cluster with multi-language dubs
-        String? prefAudio;
-        try {
-          if (mounted) {
-            prefAudio = context.read<ProfileProvider>().activeProfile.preferredAudioLang;
-          }
-        } catch (_) {}
-        streams = await StreamExtractor.extractAoneroom(
+        final cFuture = StreamExtractor.extractCinejoy(
           type: widget.mediaType,
           tmdbId: widget.mediaId,
           title: widget.mediaTitle,
           season: _currentSeason,
           episode: _currentEpisode,
-          preferredAudioLang: prefAudio,
-        ).timeout(
-          const Duration(seconds: 7),
-          onTimeout: () {
-            AppLogger.instance.log('Player', 'Aoneroom timed out after 7s');
-            return <ExtractedStream>[];
-          },
+          preferredServer: 'Lisbon',
         );
+
+        // Instant race: if Telegram returns in <750ms, start playback instantly!
+        streams = await Future.any([
+          tFuture.then((list) => list.isNotEmpty ? list : null),
+          Future.delayed(const Duration(milliseconds: 750), () => null),
+        ]) ?? [];
+
+        if (streams.isEmpty) {
+          final completed = await Future.wait([tFuture, cFuture]);
+          if (completed[0].isNotEmpty) {
+            streams = completed[0];
+          } else if (completed[1].isNotEmpty) {
+            streams = completed[1];
+          } else {
+            streams = await StreamExtractor.extractAll(
+              type: widget.mediaType,
+              tmdbId: widget.mediaId,
+              season: _currentSeason,
+              episode: _currentEpisode,
+            );
+          }
+        }
       } else if (server.name.contains('Cine4K') || server.name.contains('Lisbon')) {
         streams = await StreamExtractor.extractCinejoy(
           type: widget.mediaType,
           tmdbId: widget.mediaId,
+          title: widget.mediaTitle,
           season: _currentSeason,
           episode: _currentEpisode,
           preferredServer: 'Lisbon',
@@ -691,6 +692,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
         streams = await StreamExtractor.extractCinejoy(
           type: widget.mediaType,
           tmdbId: widget.mediaId,
+          title: widget.mediaTitle,
           season: _currentSeason,
           episode: _currentEpisode,
           preferredServer: 'Nebula',
@@ -1922,28 +1924,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
   Future<void> _selectAudioSource(int index) async {
     if (index >= _directStreams.length) return;
     _selectedStreamIndex = index;
-    var stream = _directStreams[index];
+    final stream = _directStreams[index];
     final currentPos = _videoPlayerController?.value.position ?? Duration.zero;
     final wasPlaying = _videoPlayerController?.value.isPlaying ?? false;
-
-    // Check if this stream is an Aoneroom dub that requires lazy URL resolution
-    if (stream.url.isEmpty && stream.headers.containsKey('x-aoneroom-subject-id')) {
-      final subjectId = stream.headers['x-aoneroom-subject-id']!;
-      final newStreams = await StreamExtractor.extractAoneroomPlayUrl(
-        subjectId: subjectId,
-        language: stream.language,
-        season: widget.mediaType == 'tv' ? _currentSeason : null,
-        episode: widget.mediaType == 'tv' ? _currentEpisode : null,
-      );
-      if (newStreams != null && newStreams.isNotEmpty) {
-        stream = newStreams.first;
-        _directStreams[index] = stream;
-      }
-    }
-
-    if (stream.url.isNotEmpty) {
-      await _switchVideoStream(stream.url, currentPos, wasPlaying);
-    }
+    await _switchVideoStream(stream.url, currentPos, wasPlaying);
   }
 
   Future<void> _selectQuality(int index) async {

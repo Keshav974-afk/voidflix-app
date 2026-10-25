@@ -217,7 +217,14 @@ class StreamExtractor {
       final uri = Uri.parse(
         'https://voidflix.org/api/public/extract?type=$type&id=$tmdbId&s=$season&e=$episode&server=$server',
       );
-      final res = await http.get(uri).timeout(const Duration(seconds: 4));
+      final res = await http.get(
+        uri,
+        headers: {
+          'User-Agent':
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+          'Accept': 'application/json, */*',
+        },
+      ).timeout(const Duration(seconds: 4));
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body) as Map<String, dynamic>;
         final hlsUrl = (data['hls'] ?? data['url']) as String?;
@@ -762,8 +769,13 @@ class StreamExtractor {
 
       final res = await http.get(
         Uri.parse(endpoint),
-        headers: {'Accept': 'application/json'},
-      ).timeout(const Duration(seconds: 4));
+        headers: {
+          'User-Agent':
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+          'Accept': 'application/json',
+          'Connection': 'keep-alive',
+        },
+      ).timeout(const Duration(milliseconds: 2500));
 
       if (res.statusCode != 200) return [];
       final data = jsonDecode(res.body) as Map<String, dynamic>;
@@ -1089,6 +1101,8 @@ class StreamExtractor {
   static Future<List<ExtractedStream>> extractCinejoy({
     required String type, // 'movie' or 'tv'
     required int tmdbId,
+    String? title,
+    String? year,
     int season = 1,
     int episode = 1,
     String? preferredServer, // 'Lisbon' (4K) or 'Nebula' (1080p)
@@ -1101,37 +1115,50 @@ class StreamExtractor {
     }
 
     try {
-      // 1. Fetch metadata (Title, Year, IMDb ID) from TMDB (with edge proxy fallback)
-      Map<String, dynamic>? tmdbJson;
-      try {
-        final tmdbUri = Uri.parse(
-          'https://api.themoviedb.org/3/$type/$tmdbId?api_key=${ApiConstants.tmdbApiKey}&append_to_response=external_ids',
-        );
-        final tmdbRes = await http.get(tmdbUri).timeout(const Duration(seconds: 4));
-        if (tmdbRes.statusCode == 200) {
-          tmdbJson = jsonDecode(tmdbRes.body) as Map<String, dynamic>;
-        }
-      } catch (_) {}
+      String resolvedTitle = (title != null && title.isNotEmpty) ? title : '';
+      String resolvedYear = (year != null && year.isNotEmpty) ? year : '';
+      String imdbId = '';
 
-      if (tmdbJson == null) {
+      if (resolvedTitle.isEmpty) {
+        Map<String, dynamic>? tmdbJson;
         try {
-          final proxyUri = Uri.parse(
-            'https://voidflix.org/api/public/tmdb?path=/$type/$tmdbId&append_to_response=external_ids',
+          final tmdbUri = Uri.parse(
+            'https://api.themoviedb.org/3/$type/$tmdbId?api_key=${ApiConstants.tmdbApiKey}&append_to_response=external_ids',
           );
-          final proxyRes = await http.get(proxyUri).timeout(const Duration(seconds: 6));
-          if (proxyRes.statusCode == 200) {
-            tmdbJson = jsonDecode(proxyRes.body) as Map<String, dynamic>;
+          final tmdbRes = await http.get(tmdbUri, headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          }).timeout(const Duration(seconds: 3));
+          if (tmdbRes.statusCode == 200) {
+            tmdbJson = jsonDecode(tmdbRes.body) as Map<String, dynamic>;
           }
         } catch (_) {}
+
+        if (tmdbJson == null) {
+          try {
+            final proxyUri = Uri.parse(
+              'https://voidflix.org/api/public/tmdb?path=/$type/$tmdbId&append_to_response=external_ids',
+            );
+            final proxyRes = await http.get(proxyUri, headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            }).timeout(const Duration(seconds: 3));
+            if (proxyRes.statusCode == 200) {
+              tmdbJson = jsonDecode(proxyRes.body) as Map<String, dynamic>;
+            }
+          } catch (_) {}
+        }
+
+        if (tmdbJson != null) {
+          resolvedTitle = (tmdbJson['title'] ?? tmdbJson['name'] ?? '') as String;
+          final rawDate = (tmdbJson['release_date'] ?? tmdbJson['first_air_date'] ?? '') as String;
+          resolvedYear = rawDate.length >= 4 ? rawDate.substring(0, 4) : '';
+          final extIds = tmdbJson['external_ids'] as Map<String, dynamic>?;
+          imdbId = (tmdbJson['imdb_id'] ?? extIds?['imdb_id'] ?? '') as String;
+        }
       }
 
-      if (tmdbJson == null) return [];
-      final title = (tmdbJson['title'] ?? tmdbJson['name'] ?? '') as String;
-      final rawDate = (tmdbJson['release_date'] ?? tmdbJson['first_air_date'] ?? '') as String;
-      final year = rawDate.length >= 4 ? rawDate.substring(0, 4) : '';
-      final extIds = tmdbJson['external_ids'] as Map<String, dynamic>?;
-      final imdbId = (tmdbJson['imdb_id'] ?? extIds?['imdb_id'] ?? '') as String;
-      if (title.isEmpty) return [];
+      if (resolvedTitle.isEmpty) return [];
+      final finalTitle = resolvedTitle;
+      final finalYear = resolvedYear;
 
       final serversToTry = preferredServer != null
           ? [preferredServer, if (preferredServer != 'Lisbon') 'Lisbon', if (preferredServer != 'Nebula') 'Nebula']
@@ -1148,8 +1175,8 @@ class StreamExtractor {
         try {
           final tParam = type == 'movie' ? 'movie' : 'series';
           final wingUrl = type == 'movie'
-              ? 'https://api.wing.st/?title=${Uri.encodeComponent(title)}&type=$tParam&year=$year&imdb=$imdbId&tmdb=$tmdbId&server=$srv'
-              : 'https://api.wing.st/?title=${Uri.encodeComponent(title)}&type=$tParam&year=$year&imdb=$imdbId&tmdb=$tmdbId&server=$srv&season=$season&episode=$episode';
+              ? 'https://api.wing.st/?title=${Uri.encodeComponent(finalTitle)}&type=$tParam&year=$finalYear&imdb=$imdbId&tmdb=$tmdbId&server=$srv'
+              : 'https://api.wing.st/?title=${Uri.encodeComponent(finalTitle)}&type=$tParam&year=$finalYear&imdb=$imdbId&tmdb=$tmdbId&server=$srv&season=$season&episode=$episode';
 
           // Step 1: Encrypt request via enc-dec
           Map<String, dynamic>? encResult;
