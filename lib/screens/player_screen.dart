@@ -11,7 +11,6 @@ import 'package:webview_flutter_android/webview_flutter_android.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import 'package:url_launcher/url_launcher.dart';
 
 import '../core/constants/theme_constants.dart';
 import '../core/network/api_service.dart';
@@ -759,25 +758,78 @@ class _PlayerScreenState extends State<PlayerScreen> {
           season: _currentSeason,
           episode: _currentEpisode,
           preferredAudioLang: preferredAudio,
-        ).timeout(const Duration(milliseconds: 4500), onTimeout: () => <ExtractedStream>[]);
+        ).timeout(const Duration(milliseconds: 8500), onTimeout: () => <ExtractedStream>[]);
 
         if (streams.isEmpty) {
-          // Fast-fallback to Screenfetch (Filmpire HLS)
+          // Fast-fallback 1: Screenfetch (Filmpire HLS via voidflix.org)
           final sfStreams = await StreamExtractor.extractScreenfetch(
             type: widget.mediaType,
             tmdbId: widget.mediaId,
             season: _currentSeason,
             episode: _currentEpisode,
-          ).timeout(const Duration(milliseconds: 4000), onTimeout: () => <ExtractedStream>[]);
+          ).timeout(const Duration(milliseconds: 5000), onTimeout: () => <ExtractedStream>[]);
           if (sfStreams.isNotEmpty) {
             streams = sfStreams;
+          } else {
+            // Fast-fallback 2: Meow Telegram direct stream (api.voidflix.org)
+            final tStreams = await StreamExtractor.extractTelegram(
+              type: widget.mediaType,
+              tmdbId: widget.mediaId,
+              season: _currentSeason,
+              episode: _currentEpisode,
+            ).timeout(const Duration(milliseconds: 3000), onTimeout: () => <ExtractedStream>[]);
+            if (tStreams.isNotEmpty) {
+              streams = tStreams;
+            } else {
+              // Fast-fallback 3: Aoneroom (MovieBox direct MP4)
+              final aStreams = await StreamExtractor.extractAoneroom(
+                type: widget.mediaType,
+                tmdbId: widget.mediaId,
+                title: widget.mediaTitle,
+                season: _currentSeason,
+                episode: _currentEpisode,
+              ).timeout(const Duration(milliseconds: 3500), onTimeout: () => <ExtractedStream>[]);
+              if (aStreams.isNotEmpty) {
+                streams = aStreams;
+              } else {
+                // Fast-fallback 4: Cinejoy
+                streams = await StreamExtractor.extractCinejoy(
+                  type: widget.mediaType,
+                  tmdbId: widget.mediaId,
+                  title: widget.mediaTitle,
+                  season: _currentSeason,
+                  episode: _currentEpisode,
+                  preferredServer: 'Nebula',
+                ).timeout(const Duration(milliseconds: 4000), onTimeout: () => <ExtractedStream>[]);
+              }
+            }
+          }
+        }
+      } else if (server.name.contains('Screenfetch')) {
+        streams = await StreamExtractor.extractScreenfetch(
+          type: widget.mediaType,
+          tmdbId: widget.mediaId,
+          season: _currentSeason,
+          episode: _currentEpisode,
+        ).timeout(const Duration(milliseconds: 6000), onTimeout: () => <ExtractedStream>[]);
+
+        if (streams.isEmpty) {
+          // Fallback to NetMirror
+          final nmStreams = await StreamExtractor.extractNetMirror(
+            type: widget.mediaType,
+            tmdbId: widget.mediaId,
+            season: _currentSeason,
+            episode: _currentEpisode,
+          ).timeout(const Duration(milliseconds: 6000), onTimeout: () => <ExtractedStream>[]);
+          if (nmStreams.isNotEmpty) {
+            streams = nmStreams;
           } else {
             final tStreams = await StreamExtractor.extractTelegram(
               type: widget.mediaType,
               tmdbId: widget.mediaId,
               season: _currentSeason,
               episode: _currentEpisode,
-            );
+            ).timeout(const Duration(milliseconds: 3000), onTimeout: () => <ExtractedStream>[]);
             if (tStreams.isNotEmpty) {
               streams = tStreams;
             } else {
@@ -788,75 +840,37 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 season: _currentSeason,
                 episode: _currentEpisode,
                 preferredServer: 'Nebula',
-              );
+              ).timeout(const Duration(milliseconds: 4000), onTimeout: () => <ExtractedStream>[]);
             }
           }
         }
-      } else if (server.name.contains('Screenfetch')) {
-        streams = await StreamExtractor.extractScreenfetch(
+      } else if (server.name.contains('Meow')) {
+        // Query Telegram 25k DB (api.voidflix.org) first
+        final tStreams = await StreamExtractor.extractTelegram(
           type: widget.mediaType,
           tmdbId: widget.mediaId,
           season: _currentSeason,
           episode: _currentEpisode,
-        ).timeout(const Duration(milliseconds: 5500), onTimeout: () => <ExtractedStream>[]);
-
-        if (streams.isEmpty) {
-          // Fallback to Cinejoy Nebula or NetMirror
-          final cStreams = await StreamExtractor.extractCinejoy(
+        ).timeout(const Duration(milliseconds: 3500), onTimeout: () => <ExtractedStream>[]);
+        if (tStreams.isNotEmpty) {
+          streams = tStreams;
+        } else {
+          // Fallback to NetMirror or Screenfetch
+          final nmStreams = await StreamExtractor.extractNetMirror(
             type: widget.mediaType,
             tmdbId: widget.mediaId,
-            title: widget.mediaTitle,
             season: _currentSeason,
             episode: _currentEpisode,
-            preferredServer: 'Nebula',
-          );
-          if (cStreams.isNotEmpty) {
-            streams = cStreams;
+          ).timeout(const Duration(milliseconds: 6000), onTimeout: () => <ExtractedStream>[]);
+          if (nmStreams.isNotEmpty) {
+            streams = nmStreams;
           } else {
-            streams = await StreamExtractor.extractNetMirror(
+            streams = await StreamExtractor.extractScreenfetch(
               type: widget.mediaType,
               tmdbId: widget.mediaId,
               season: _currentSeason,
               episode: _currentEpisode,
-            );
-          }
-        }
-      } else if (server.name.contains('Meow')) {
-        // Ultra-fast concurrent fast-path: Query Telegram 25k DB and Cinejoy in parallel
-        final tFuture = StreamExtractor.extractTelegram(
-          type: widget.mediaType,
-          tmdbId: widget.mediaId,
-          season: _currentSeason,
-          episode: _currentEpisode,
-        );
-        final cFuture = StreamExtractor.extractCinejoy(
-          type: widget.mediaType,
-          tmdbId: widget.mediaId,
-          title: widget.mediaTitle,
-          season: _currentSeason,
-          episode: _currentEpisode,
-          preferredServer: 'Lisbon',
-        );
-
-        // Instant race: if Telegram returns in <750ms, start playback instantly!
-        streams = await Future.any([
-          tFuture.then((list) => list.isNotEmpty ? list : null),
-          Future.delayed(const Duration(milliseconds: 750), () => null),
-        ]) ?? [];
-
-        if (streams.isEmpty) {
-          final completed = await Future.wait([tFuture, cFuture]);
-          if (completed[0].isNotEmpty) {
-            streams = completed[0];
-          } else if (completed[1].isNotEmpty) {
-            streams = completed[1];
-          } else {
-            streams = await StreamExtractor.extractAll(
-              type: widget.mediaType,
-              tmdbId: widget.mediaId,
-              season: _currentSeason,
-              episode: _currentEpisode,
-            );
+            ).timeout(const Duration(milliseconds: 5000), onTimeout: () => <ExtractedStream>[]);
           }
         }
       } else if (server.name.contains('Cine4K') || server.name.contains('Lisbon')) {
@@ -940,13 +954,51 @@ class _PlayerScreenState extends State<PlayerScreen> {
         );
         if (v != null) streams = [v];
       } else {
-        // VoidDirect / default: multi-source extraction (Cinejoy + Vidrock in parallel)
-        streams = await StreamExtractor.extractAll(
+        // VoidDirect / default: NetMirror first, then Screenfetch, then Telegram, then extractAll
+        String? preferredAudio;
+        try {
+          if (mounted) {
+            final profile = context.read<ProfileProvider>().activeProfile;
+            preferredAudio = profile.preferredAudioLang;
+          }
+        } catch (_) {}
+
+        streams = await StreamExtractor.extractNetMirror(
           type: widget.mediaType,
           tmdbId: widget.mediaId,
           season: _currentSeason,
           episode: _currentEpisode,
-        );
+          preferredAudioLang: preferredAudio,
+        ).timeout(const Duration(milliseconds: 7000), onTimeout: () => <ExtractedStream>[]);
+
+        if (streams.isEmpty) {
+          final sfStreams = await StreamExtractor.extractScreenfetch(
+            type: widget.mediaType,
+            tmdbId: widget.mediaId,
+            season: _currentSeason,
+            episode: _currentEpisode,
+          ).timeout(const Duration(milliseconds: 4500), onTimeout: () => <ExtractedStream>[]);
+          if (sfStreams.isNotEmpty) {
+            streams = sfStreams;
+          } else {
+            final tStreams = await StreamExtractor.extractTelegram(
+              type: widget.mediaType,
+              tmdbId: widget.mediaId,
+              season: _currentSeason,
+              episode: _currentEpisode,
+            ).timeout(const Duration(milliseconds: 3000), onTimeout: () => <ExtractedStream>[]);
+            if (tStreams.isNotEmpty) {
+              streams = tStreams;
+            } else {
+              streams = await StreamExtractor.extractAll(
+                type: widget.mediaType,
+                tmdbId: widget.mediaId,
+                season: _currentSeason,
+                episode: _currentEpisode,
+              );
+            }
+          }
+        }
       }
 
       if (!mounted) return;
@@ -5586,51 +5638,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
                               style: TextStyle(fontWeight: FontWeight.w600, fontSize: 13),
                             ),
                             onPressed: _openServerPicker,
-                          ),
-                          ElevatedButton.icon(
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: const Color(0xFFE50914),
-                              foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 13),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(24),
-                              ),
-                              elevation: 0,
-                            ),
-                            icon: const Icon(Icons.open_in_new_rounded, size: 18),
-                            label: const Text(
-                              'Open in External Player (VLC)',
-                              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                            ),
-                            onPressed: () {
-                              final url = _directStreams.isNotEmpty
-                                  ? _directStreams.first.url
-                                  : _buildCurrentEmbedUrl();
-                              CastService.launchExternalPlayer(
-                                videoUrl: url,
-                                title: widget.mediaTitle,
-                              );
-                            },
-                          ),
-                          ElevatedButton.icon(
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: Colors.white.withValues(alpha: 0.15),
-                              foregroundColor: Colors.white,
-                              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 13),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(24),
-                              ),
-                              elevation: 0,
-                            ),
-                            icon: const Icon(Icons.language_rounded, size: 18),
-                            label: const Text(
-                              'Watch in Browser',
-                              style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13),
-                            ),
-                            onPressed: () {
-                              final webUrl = _buildCurrentEmbedUrl();
-                              launchUrl(Uri.parse(webUrl), mode: LaunchMode.externalApplication);
-                            },
                           ),
                           OutlinedButton.icon(
                             style: OutlinedButton.styleFrom(

@@ -1318,7 +1318,7 @@ class StreamExtractor {
     try {
       // Query central Cloudflare KV & R2 extraction API
       final uri = Uri.parse(
-        'https://flowflix.org/api/public/extract?type=$type&id=$tmdbId&s=$season&e=$episode&server=Screenfetch',
+        'https://voidflix.org/api/public/extract?type=$type&id=$tmdbId&s=$season&e=$episode&server=Screenfetch',
       );
       final res = await http.get(uri, headers: {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
@@ -1607,6 +1607,7 @@ class StreamExtractor {
   static Future<List<ExtractedStream>> extractAll({
     required String type, // 'movie' or 'tv'
     required int tmdbId,
+    String? title,
     int season = 1,
     int episode = 1,
     bool forceRefresh = false,
@@ -1640,7 +1641,7 @@ class StreamExtractor {
         season: season,
         episode: episode,
         preferredAudioLang: preferredAudioLang,
-      ).timeout(const Duration(milliseconds: 4000), onTimeout: () => <ExtractedStream>[]);
+      ).timeout(const Duration(milliseconds: 7500), onTimeout: () => <ExtractedStream>[]);
 
       if (nmStreams.isNotEmpty) {
         debugPrint('StreamExtractor: Successfully connected to NetMirror first (${nmStreams.length} streams/dubs ready!)');
@@ -1669,6 +1670,16 @@ class StreamExtractor {
 
     // 2. If NetMirror is unavailable, run multiple extraction across all remaining direct sources
     try {
+      final screenfetchFuture = extractScreenfetch(
+        type: type,
+        tmdbId: tmdbId,
+        season: season,
+        episode: episode,
+      ).catchError((e) {
+        debugPrint('Screenfetch extractor error: $e');
+        return <ExtractedStream>[];
+      });
+
       final telegramFuture = extractTelegram(
         type: type,
         tmdbId: tmdbId,
@@ -1679,13 +1690,14 @@ class StreamExtractor {
         return <ExtractedStream>[];
       });
 
-      final netMirrorFuture = extractNetMirror(
+      final aoneroomFuture = extractAoneroom(
         type: type,
         tmdbId: tmdbId,
+        title: title ?? '',
         season: season,
         episode: episode,
       ).catchError((e) {
-        debugPrint('NetMirror extractor error: $e');
+        debugPrint('Aoneroom extractor error: $e');
         return <ExtractedStream>[];
       });
 
@@ -1733,10 +1745,11 @@ class StreamExtractor {
       // return immediately so the player starts playing in <1 second!
       // The remaining extractors will complete in background and enrich the cache.
       final fastDirect = await Future.any([
+        screenfetchFuture.then((list) => list.isNotEmpty ? list : null),
         telegramFuture.then((list) => list.isNotEmpty ? list : null),
-        netMirrorFuture.then((list) => list.isNotEmpty ? list : null),
+        aoneroomFuture.then((list) => list.isNotEmpty ? list : null),
         cinejoyFuture.then((list) => list.isNotEmpty ? list : null),
-        Future.delayed(const Duration(milliseconds: 650), () => null),
+        Future.delayed(const Duration(milliseconds: 1500), () => null),
       ]);
 
       if (fastDirect != null && fastDirect.isNotEmpty) {
@@ -1744,25 +1757,29 @@ class StreamExtractor {
         setCachedEntry(key, fastDirect);
 
         // Background worker to enrich cache with all alternate audio & subtitles
-        Future.wait([telegramFuture, netMirrorFuture, cinejoyFuture, vidrockFuture, vidlinkFuture, voidflixFuture]).then((all) {
+        Future.wait([screenfetchFuture, telegramFuture, aoneroomFuture, cinejoyFuture, vidrockFuture, vidlinkFuture, voidflixFuture]).then((all) {
           try {
-            final tList = all[0] as List<ExtractedStream>;
-            final nmList = all[1] as List<ExtractedStream>;
-            final cList = all[2] as List<ExtractedStream>;
-            final vList = all[3] as List<ExtractedStream>;
-            final vl = all[4] as ExtractedStream?;
-            final vf = all[5] as ExtractedStream?;
+            final sfList = all[0] as List<ExtractedStream>;
+            final tList = all[1] as List<ExtractedStream>;
+            final arList = all[2] as List<ExtractedStream>;
+            final cList = all[3] as List<ExtractedStream>;
+            final vList = all[4] as List<ExtractedStream>;
+            final vl = all[5] as ExtractedStream?;
+            final vf = all[6] as ExtractedStream?;
 
             List<SubtitleTrack> bgSubs = [];
             if (vf != null && vf.subtitles.isNotEmpty) bgSubs = vf.subtitles;
             if (vl != null && vl.subtitles.isNotEmpty && bgSubs.isEmpty) bgSubs = vl.subtitles;
 
             final combined = <ExtractedStream>[];
+            for (final sf in sfList) {
+              combined.add(sf.copyWith(subtitles: bgSubs.isNotEmpty ? bgSubs : sf.subtitles));
+            }
             for (final t in tList) {
               combined.add(t.copyWith(subtitles: bgSubs.isNotEmpty ? bgSubs : t.subtitles));
             }
-            for (final nm in nmList) {
-              combined.add(nm.copyWith(subtitles: nm.subtitles.isNotEmpty ? nm.subtitles : bgSubs));
+            for (final ar in arList) {
+              combined.add(ar.copyWith(subtitles: bgSubs.isNotEmpty ? bgSubs : ar.subtitles));
             }
             for (final c in cList) {
               combined.add(c.copyWith(subtitles: bgSubs.isNotEmpty ? bgSubs : c.subtitles));
@@ -1780,20 +1797,22 @@ class StreamExtractor {
       }
 
       final futures = await Future.wait([
+        screenfetchFuture,
         telegramFuture,
-        netMirrorFuture,
+        aoneroomFuture,
         cinejoyFuture,
         vidrockFuture,
         vidlinkFuture,
         voidflixFuture,
       ]);
 
-      final telegramStreams = futures[0] as List<ExtractedStream>;
-      final netMirrorStreams = futures[1] as List<ExtractedStream>;
-      final cinejoyStreams = futures[2] as List<ExtractedStream>;
-      final vidrockStreams = futures[3] as List<ExtractedStream>;
-      final vidlinkStream = futures[4] as ExtractedStream?;
-      final voidflixStream = futures[5] as ExtractedStream?;
+      final screenfetchStreams = futures[0] as List<ExtractedStream>;
+      final telegramStreams = futures[1] as List<ExtractedStream>;
+      final aoneroomStreams = futures[2] as List<ExtractedStream>;
+      final cinejoyStreams = futures[3] as List<ExtractedStream>;
+      final vidrockStreams = futures[4] as List<ExtractedStream>;
+      final vidlinkStream = futures[5] as ExtractedStream?;
+      final voidflixStream = futures[6] as ExtractedStream?;
 
       if (voidflixStream != null && voidflixStream.subtitles.isNotEmpty) {
         sharedSubs = voidflixStream.subtitles;
@@ -1802,7 +1821,17 @@ class StreamExtractor {
         sharedSubs = vidlinkStream.subtitles;
       }
 
-      // 1. Add Telegram streams first (Direct VPS MTProto, highest speed, uncompressed multi-audio)
+      // 0. Add Screenfetch (Filmpire) streams (Direct HLS 1080p, ultra-reliable)
+      for (final sf in screenfetchStreams) {
+        results.add(sf.copyWith(subtitles: sf.subtitles.isNotEmpty ? sf.subtitles : sharedSubs));
+      }
+
+      // 0.5 Add Aoneroom streams
+      for (final ar in aoneroomStreams) {
+        results.add(ar.copyWith(subtitles: ar.subtitles.isNotEmpty ? ar.subtitles : sharedSubs));
+      }
+
+      // 1. Add Telegram streams (Direct VPS MTProto, highest speed, uncompressed multi-audio)
       for (final t in telegramStreams) {
         results.add(ExtractedStream(
           url: t.url,
@@ -1816,19 +1845,7 @@ class StreamExtractor {
         ));
       }
 
-      // 1.5 Add NetMirror streams (Direct Progressive MP4, multi-quality 1080p/720p/480p)
-      for (final nm in netMirrorStreams) {
-        results.add(ExtractedStream(
-          url: nm.url,
-          type: nm.type,
-          sourceName: nm.sourceName,
-          language: nm.language,
-          headers: nm.headers,
-          qualityLabel: nm.qualityLabel,
-          qualities: nm.qualities,
-          subtitles: nm.subtitles.isNotEmpty ? nm.subtitles : sharedSubs,
-        ));
-      }
+
 
       // 2. Add Cinejoy 4K & 1080p streams (fastest, cleanest, high-res)
       for (final c in cinejoyStreams) {
