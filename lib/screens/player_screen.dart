@@ -656,18 +656,28 @@ class _PlayerScreenState extends State<PlayerScreen> {
           season: _currentSeason,
           episode: _currentEpisode,
           preferredAudioLang: preferredAudio,
-        ).timeout(const Duration(milliseconds: 3200), onTimeout: () => <ExtractedStream>[]);
+        ).timeout(const Duration(milliseconds: 4500), onTimeout: () => <ExtractedStream>[]);
 
         if (streams.isEmpty) {
-          // Fast-fallback to NebulaHD or Meow if NetMirror has no streams
-          streams = await StreamExtractor.extractCinejoy(
+          // Fast-fallback to Meow or NebulaHD if NetMirror has no streams
+          final tStreams = await StreamExtractor.extractTelegram(
             type: widget.mediaType,
             tmdbId: widget.mediaId,
-            title: widget.mediaTitle,
             season: _currentSeason,
             episode: _currentEpisode,
-            preferredServer: 'Nebula',
           );
+          if (tStreams.isNotEmpty) {
+            streams = tStreams;
+          } else {
+            streams = await StreamExtractor.extractCinejoy(
+              type: widget.mediaType,
+              tmdbId: widget.mediaId,
+              title: widget.mediaTitle,
+              season: _currentSeason,
+              episode: _currentEpisode,
+              preferredServer: 'Nebula',
+            );
+          }
         }
       } else if (server.name.contains('Meow')) {
         // Ultra-fast concurrent fast-path: Query Telegram 25k DB and Cinejoy in parallel
@@ -1581,6 +1591,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _setZoom(!_isZoomedToFill);
   }
 
+  // ignore: unused_element
   void _openClipMoment() {
     final isTv = TvModeService().isTvMode;
     if (isTv) return;
@@ -4931,11 +4942,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                     child: Row(
                                       mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                                       children: [
-                                        if (!isTv && _isNativeMode)
+                                        if (_isNativeMode)
                                           _NetflixBarButton(
-                                            icon: Icons.content_cut_rounded,
-                                            label: 'Clip',
-                                            onTap: _openClipMoment,
+                                            icon: Icons.tune_rounded,
+                                            label: 'Quality',
+                                            onTap: _openQualitySheet,
                                           ),
                                         if (isPc)
                                           _NetflixBarButton(
@@ -4955,12 +4966,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                             icon: Icons.view_carousel_outlined,
                                             label: 'Episodes',
                                             onTap: _openEpisodesSheet,
-                                          )
-                                        else if (_availableQualities.isNotEmpty)
-                                          _NetflixBarButton(
-                                            icon: Icons.tune_rounded,
-                                            label: 'Quality',
-                                            onTap: _openQualitySheet,
                                           ),
                                         _NetflixBarButton(
                                           icon: Icons.chat_bubble_outline_rounded,

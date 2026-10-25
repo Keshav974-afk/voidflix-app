@@ -1,158 +1,167 @@
-class VideoServer {
-  final String name;
-  final String description;
-  final String Function(dynamic id) movieUrl;
-  final String Function(dynamic id, int s, int e) tvUrl;
-  final bool isDirectPlay;
-
-  const VideoServer({
-    required this.name,
-    required this.description,
-    required this.movieUrl,
-    required this.tvUrl,
-    this.isDirectPlay = false,
-  });
-}
-
-class ServerConfig {
-  static final List<VideoServer> servers = [
-    // -------------------------------------------------------------------------
-    // DIRECT NATIVE SERVERS (Extractable HLS • Hardware Accelerated • No Ads)
-    // -------------------------------------------------------------------------
-    VideoServer(
-      name: "Meow",
-      description: "Direct 4K/1080p multi-audio streams from 25k Telegram channel (Ultra Fast • Primary)",
-      movieUrl: (id) => "http://103.30.211.131/stream/movie/$id",
-      tvUrl: (id, s, e) => "http://103.30.211.131/stream/tv/$id/$s/$e",
-      isDirectPlay: true,
-    ),
-    VideoServer(
-      name: "NetMirror",
-      description: "Direct 1080p MP4 adaptive streams (Fast Start • Multi-Audio • Multi-Sub)",
-      movieUrl: (id) => "https://net79.cc/watch-tmdb/$id?type=movie",
-      tvUrl: (id, s, e) => "https://net79.cc/watch-tmdb/$id?type=tv&se=$s&ep=$e",
-      isDirectPlay: true,
-    ),
-    VideoServer(
-      name: "NebulaHD",
-      description: "Direct Full HD 1080p HLS stream with full audio (Recommended)",
-      movieUrl: (id) => "https://api.wing.st/embed/movie/$id",
-      tvUrl: (id, s, e) => "https://api.wing.st/embed/tv/$id/$s/$e",
-      isDirectPlay: true,
-    ),
-    VideoServer(
-      name: "Cine4K (Lisbon)",
-      description: "Direct 4K Ultra HD HDR / 1080p with multi-audio",
-      movieUrl: (id) => "https://api.wing.st/embed/movie/$id",
-      tvUrl: (id, s, e) => "https://api.wing.st/embed/tv/$id/$s/$e",
-      isDirectPlay: true,
-    ),
-    VideoServer(
-      name: "VoidDirect (Native)",
-      description: "Direct stream extraction with native player (Recommended)",
-      movieUrl: (id) => "https://vidrock.ru/embed/movie/$id",
-      tvUrl: (id, s, e) => "https://vidrock.ru/embed/tv/$id/$s/$e",
-      isDirectPlay: true,
-    ),
-    VideoServer(
-      name: "OrionStream",
-      description: "Ultra-fast direct 1080p HLS cluster with native player",
-      movieUrl: (id) => "https://vidrock.ru/embed/movie/$id",
-      tvUrl: (id, s, e) => "https://vidrock.ru/embed/tv/$id/$s/$e",
-      isDirectPlay: true,
-    ),
-    VideoServer(
-      name: "PulsarHD",
-      description: "Direct CDN HLS stream with native player",
-      movieUrl: (id) => "https://vidrock.ru/embed/movie/$id",
-      tvUrl: (id, s, e) => "https://vidrock.ru/embed/tv/$id/$s/$e",
-      isDirectPlay: true,
-    ),
-    VideoServer(
-      name: "NovaStream",
-      description: "Fast direct HLS cluster with native player",
-      movieUrl: (id) => "https://vidrock.ru/embed/movie/$id",
-      tvUrl: (id, s, e) => "https://vidrock.ru/embed/tv/$id/$s/$e",
-      isDirectPlay: true,
-    ),
-    VideoServer(
-      name: "AtlasStream",
-      description: "Low-latency direct HLS stream with native player",
-      movieUrl: (id) => "https://vidrock.ru/embed/movie/$id",
-      tvUrl: (id, s, e) => "https://vidrock.ru/embed/tv/$id/$s/$e",
-      isDirectPlay: true,
-    ),
-    VideoServer(
-      name: "VoidHD",
-      description: "Direct 1080p stream with native player",
-      movieUrl: (id) => "https://vidlink.pro/movie/$id?primaryColor=e50914",
-      tvUrl: (id, s, e) => "https://vidlink.pro/tv/$id/$s/$e?primaryColor=e50914",
-      isDirectPlay: true,
-    ),
-
-    // -------------------------------------------------------------------------
-    // VERIFIED WEB EMBED SERVERS (Active Fallback • Developer Mode Only)
-    // -------------------------------------------------------------------------
-    VideoServer(
-      name: "TurboStream",
-      description: "Adaptive fast stream with low-data support (Recommended)",
-      movieUrl: (id) => "https://player.videasy.to/movie/$id?color=e50914&progress=true",
-      tvUrl: (id, s, e) => "https://player.videasy.to/tv/$id/$s/$e?color=e50914&progress=true",
-    ),
-    VideoServer(
-      name: "QuantumX",
-      description: "Fast low-latency stream engine",
-      movieUrl: (id) => "https://vidfast.vc/movie/$id",
-      tvUrl: (id, s, e) => "https://vidfast.vc/tv/$id/$s/$e",
-    ),
-    VideoServer(
-      name: "VidsrcX",
-      description: "Fast buffer-free adaptive mirror",
-      movieUrl: (id) => "https://vidsrc.xyz/embed/movie/$id",
-      tvUrl: (id, s, e) => "https://vidsrc.xyz/embed/tv/$id/$s/$e",
-    ),
-    VideoServer(
-      name: "SuperEmbed",
-      description: "Adaptive multi-server CDN cluster",
-      movieUrl: (id) => "https://multiembed.mov/?video_id=$id&tmdb=1",
-      tvUrl: (id, s, e) => "https://multiembed.mov/?video_id=$id&tmdb=1&s=$s&e=$e",
-    ),
-    VideoServer(
-      name: "FlashPlay",
-      description: "Fast multi-resolution embed",
-      movieUrl: (id) => "https://vidsrc.to/embed/movie/$id",
-      tvUrl: (id, s, e) => "https://vidsrc.to/embed/tv/$id/$s/$e",
-    ),
-    VideoServer(
-      name: "CosmoPlay",
-      description: "Adaptive multi-server embed",
-      movieUrl: (id) => "https://autoembed.to/movie/tmdb/$id",
-      tvUrl: (id, s, e) => "https://autoembed.to/tv/tmdb/$id/$s/$e",
-    ),
-    VideoServer(
-      name: "SmashyStream",
-      description: "High-speed multi-quality embed cluster",
-      movieUrl: (id) => "https://embed.smashystream.com/playere.php?tmdb=$id",
-      tvUrl: (id, s, e) => "https://embed.smashystream.com/playere.php?tmdb=$id&season=$s&episode=$e",
-    ),
-    VideoServer(
-      name: "CloudCast",
-      description: "Global cloud streaming mirror",
-      movieUrl: (id) => "https://www.2embed.cc/embed/$id",
-      tvUrl: (id, s, e) => "https://www.2embed.cc/embedtv/$id&s=$s&e=$e",
-    ),
-  ];
-
-  static String getEmbedUrl({
-    required VideoServer server,
-    required String type, // 'movie' or 'tv'
-    required int id,
-    int season = 1,
-    int episode = 1,
-  }) {
-    if (type == 'tv') {
-      return server.tvUrl(id, season, episode);
-    }
-    return server.movieUrl(id);
-  }
-}
+class VideoServer {
+  final String name;
+  final String description;
+  final String Function(dynamic id) movieUrl;
+  final String Function(dynamic id, int s, int e) tvUrl;
+  final bool isDirectPlay;
+
+  const VideoServer({
+    required this.name,
+    required this.description,
+    required this.movieUrl,
+    required this.tvUrl,
+    this.isDirectPlay = false,
+  });
+}
+
+class ServerConfig {
+  static final List<VideoServer> servers = [
+    // -------------------------------------------------------------------------
+    // DIRECT NATIVE SERVERS (Extractable HLS • Hardware Accelerated • No Ads)
+    // -------------------------------------------------------------------------
+    VideoServer(
+      name: "NetMirror",
+      description:
+          "Direct 1080p MP4 adaptive streams (Fast Start • Multi-Audio • Multi-Sub)",
+      movieUrl: (id) => "https://net79.cc/watch-tmdb/$id?type=movie",
+      tvUrl: (id, s, e) =>
+          "https://net79.cc/watch-tmdb/$id?type=tv&se=$s&ep=$e",
+      isDirectPlay: true,
+    ),
+    VideoServer(
+      name: "Meow",
+      description:
+          "Direct 4K/1080p multi-audio streams from 25k Telegram channel (Ultra Fast • Primary)",
+      movieUrl: (id) => "http://103.30.211.131/stream/movie/$id",
+      tvUrl: (id, s, e) => "http://103.30.211.131/stream/tv/$id/$s/$e",
+      isDirectPlay: true,
+    ),
+    VideoServer(
+      name: "NebulaHD",
+      description:
+          "Direct Full HD 1080p HLS stream with full audio (Recommended)",
+      movieUrl: (id) => "https://api.wing.st/embed/movie/$id",
+      tvUrl: (id, s, e) => "https://api.wing.st/embed/tv/$id/$s/$e",
+      isDirectPlay: true,
+    ),
+    VideoServer(
+      name: "Cine4K (Lisbon)",
+      description: "Direct 4K Ultra HD HDR / 1080p with multi-audio",
+      movieUrl: (id) => "https://api.wing.st/embed/movie/$id",
+      tvUrl: (id, s, e) => "https://api.wing.st/embed/tv/$id/$s/$e",
+      isDirectPlay: true,
+    ),
+    VideoServer(
+      name: "VoidDirect (Native)",
+      description: "Direct stream extraction with native player (Recommended)",
+      movieUrl: (id) => "https://vidrock.ru/embed/movie/$id",
+      tvUrl: (id, s, e) => "https://vidrock.ru/embed/tv/$id/$s/$e",
+      isDirectPlay: true,
+    ),
+    VideoServer(
+      name: "OrionStream",
+      description: "Ultra-fast direct 1080p HLS cluster with native player",
+      movieUrl: (id) => "https://vidrock.ru/embed/movie/$id",
+      tvUrl: (id, s, e) => "https://vidrock.ru/embed/tv/$id/$s/$e",
+      isDirectPlay: true,
+    ),
+    VideoServer(
+      name: "PulsarHD",
+      description: "Direct CDN HLS stream with native player",
+      movieUrl: (id) => "https://vidrock.ru/embed/movie/$id",
+      tvUrl: (id, s, e) => "https://vidrock.ru/embed/tv/$id/$s/$e",
+      isDirectPlay: true,
+    ),
+    VideoServer(
+      name: "NovaStream",
+      description: "Fast direct HLS cluster with native player",
+      movieUrl: (id) => "https://vidrock.ru/embed/movie/$id",
+      tvUrl: (id, s, e) => "https://vidrock.ru/embed/tv/$id/$s/$e",
+      isDirectPlay: true,
+    ),
+    VideoServer(
+      name: "AtlasStream",
+      description: "Low-latency direct HLS stream with native player",
+      movieUrl: (id) => "https://vidrock.ru/embed/movie/$id",
+      tvUrl: (id, s, e) => "https://vidrock.ru/embed/tv/$id/$s/$e",
+      isDirectPlay: true,
+    ),
+    VideoServer(
+      name: "VoidHD",
+      description: "Direct 1080p stream with native player",
+      movieUrl: (id) => "https://vidlink.pro/movie/$id?primaryColor=e50914",
+      tvUrl: (id, s, e) =>
+          "https://vidlink.pro/tv/$id/$s/$e?primaryColor=e50914",
+      isDirectPlay: true,
+    ),
+
+    // -------------------------------------------------------------------------
+    // VERIFIED WEB EMBED SERVERS (Active Fallback • Developer Mode Only)
+    // -------------------------------------------------------------------------
+    VideoServer(
+      name: "TurboStream",
+      description: "Adaptive fast stream with low-data support (Recommended)",
+      movieUrl: (id) =>
+          "https://player.videasy.to/movie/$id?color=e50914&progress=true",
+      tvUrl: (id, s, e) =>
+          "https://player.videasy.to/tv/$id/$s/$e?color=e50914&progress=true",
+    ),
+    VideoServer(
+      name: "QuantumX",
+      description: "Fast low-latency stream engine",
+      movieUrl: (id) => "https://vidfast.vc/movie/$id",
+      tvUrl: (id, s, e) => "https://vidfast.vc/tv/$id/$s/$e",
+    ),
+    VideoServer(
+      name: "VidsrcX",
+      description: "Fast buffer-free adaptive mirror",
+      movieUrl: (id) => "https://vidsrc.xyz/embed/movie/$id",
+      tvUrl: (id, s, e) => "https://vidsrc.xyz/embed/tv/$id/$s/$e",
+    ),
+    VideoServer(
+      name: "SuperEmbed",
+      description: "Adaptive multi-server CDN cluster",
+      movieUrl: (id) => "https://multiembed.mov/?video_id=$id&tmdb=1",
+      tvUrl: (id, s, e) =>
+          "https://multiembed.mov/?video_id=$id&tmdb=1&s=$s&e=$e",
+    ),
+    VideoServer(
+      name: "FlashPlay",
+      description: "Fast multi-resolution embed",
+      movieUrl: (id) => "https://vidsrc.to/embed/movie/$id",
+      tvUrl: (id, s, e) => "https://vidsrc.to/embed/tv/$id/$s/$e",
+    ),
+    VideoServer(
+      name: "CosmoPlay",
+      description: "Adaptive multi-server embed",
+      movieUrl: (id) => "https://autoembed.to/movie/tmdb/$id",
+      tvUrl: (id, s, e) => "https://autoembed.to/tv/tmdb/$id/$s/$e",
+    ),
+    VideoServer(
+      name: "SmashyStream",
+      description: "High-speed multi-quality embed cluster",
+      movieUrl: (id) => "https://embed.smashystream.com/playere.php?tmdb=$id",
+      tvUrl: (id, s, e) =>
+          "https://embed.smashystream.com/playere.php?tmdb=$id&season=$s&episode=$e",
+    ),
+    VideoServer(
+      name: "CloudCast",
+      description: "Global cloud streaming mirror",
+      movieUrl: (id) => "https://www.2embed.cc/embed/$id",
+      tvUrl: (id, s, e) => "https://www.2embed.cc/embedtv/$id&s=$s&e=$e",
+    ),
+  ];
+
+  static String getEmbedUrl({
+    required VideoServer server,
+    required String type, // 'movie' or 'tv'
+    required int id,
+    int season = 1,
+    int episode = 1,
+  }) {
+    if (type == 'tv') {
+      return server.tvUrl(id, season, episode);
+    }
+    return server.movieUrl(id);
+  }
+}
