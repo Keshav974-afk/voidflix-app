@@ -700,6 +700,45 @@ class DownloadProvider extends ChangeNotifier {
         debugPrint('Download: Meow Telegram candidate error: $e');
       }
 
+      // Priority 1.5: NetMirror (Direct High-Speed MP4 CDN with Multi-Quality 1080p/720p/480p and Range 206)
+      try {
+        final netMirrorStreams = await StreamExtractor.extractNetMirror(
+          type: mediaType,
+          tmdbId: mediaId,
+          season: season,
+          episode: episode,
+          preferredAudioLang: preferredAudioLangs.isNotEmpty ? preferredAudioLangs.first : null,
+        ).timeout(const Duration(seconds: 4));
+
+        for (final s in netMirrorStreams) {
+          if (s.subtitles.isNotEmpty) availableSubs.addAll(s.subtitles);
+          for (final q in s.qualities) {
+            candidates.add(_DownloadCandidate(
+              url: q.url,
+              headers: s.headers,
+              isHls: false, // Direct progressive MP4 stream with byte-range 206!
+              qualityLabel: q.label,
+              serverName: 'NetMirror',
+              audioLanguage: s.language,
+              height: q.height > 0 ? q.height : 1080,
+            ));
+          }
+          if (s.qualities.isEmpty && s.url.isNotEmpty) {
+            candidates.add(_DownloadCandidate(
+              url: s.url,
+              headers: s.headers,
+              isHls: false,
+              qualityLabel: s.qualityLabel ?? '1080p',
+              serverName: 'NetMirror',
+              audioLanguage: s.language,
+              height: 1080,
+            ));
+          }
+        }
+      } catch (e) {
+        debugPrint('Download: NetMirror candidate error: $e');
+      }
+
       // Priority 2: NebulaHD & Cine4K (Direct High-Speed CDN with Full Muxed Audio)
       try {
         final cinejoyStreams = await StreamExtractor.extractCinejoy(
@@ -854,6 +893,8 @@ class DownloadProvider extends ChangeNotifier {
         // 3. Best Server Weight
         if (c.serverName == 'Meow') {
           score += 1200; // Slot #1: Direct MP4 from 25k Telegram channel, fastest progressive download
+        } else if (c.serverName == 'NetMirror') {
+          score += 1150; // Direct High-Speed MP4 CDN with Multi-Quality 1080p/720p/480p and Range 206
         } else if (c.serverName.contains('NebulaHD')) {
           score += 900; // Slot #2: Full muxed AAC stereo audio HLS
         } else if (c.serverName.contains('Cine4K')) {

@@ -1301,6 +1301,183 @@ class StreamExtractor {
     }
   }
 
+  /// Extracts high-speed direct multi-quality MP4 streams, multi-language dubs, and subtitles via NetMirror
+  static Future<List<ExtractedStream>> extractNetMirror({
+    required String type, // 'movie' or 'tv'
+    required int tmdbId,
+    int season = 1,
+    int episode = 1,
+    String? preferredAudioLang,
+    String? dubSubjectId,
+  }) async {
+    final cacheKey = getCacheKey(type, tmdbId, season, episode, prefix: 'netmirror_${dubSubjectId ?? preferredAudioLang ?? "def"}');
+    final cached = await getCachedEntry(cacheKey);
+    if (cached != null && cached.streams.isNotEmpty) {
+      debugPrint('StreamExtractor: Reusing cached NetMirror streams for $cacheKey (instant!)');
+      return cached.streams;
+    }
+
+    final domains = [
+      'https://net79.cc',
+      'https://net27.cc',
+      'https://net77.in',
+      'https://net77.net.in',
+    ];
+
+    for (final base in domains) {
+      try {
+        String? chosenDubId = dubSubjectId;
+
+        // Step 1: If user prefers a specific audio language (e.g. Hindi, English) and no explicit dubSubjectId was provided,
+        // query /api/variants-tmdb/$type/$tmdbId to find matching dub variant!
+        List<Map<String, String>> availableDubs = [];
+        try {
+          final varUri = Uri.parse('$base/api/variants-tmdb/$type/$tmdbId');
+          final varRes = await http.get(varUri, headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            'Referer': '$base/',
+          }).timeout(const Duration(seconds: 4));
+          if (varRes.statusCode == 200) {
+            final varJson = jsonDecode(varRes.body) as Map<String, dynamic>;
+            if (varJson['ok'] == true && varJson['variants'] is List) {
+              for (final v in varJson['variants']) {
+                if (v is Map<String, dynamic>) {
+                  final dId = v['dubSubjectId']?.toString() ?? '';
+                  final dLang = v['language']?.toString() ?? '';
+                  if (dId.isNotEmpty && dLang.isNotEmpty) {
+                    availableDubs.add({'dubId': dId, 'language': dLang});
+                  }
+                }
+              }
+            }
+          }
+        } catch (_) {}
+
+        if (chosenDubId == null && preferredAudioLang != null && availableDubs.isNotEmpty) {
+          final prefClean = preferredAudioLang.toLowerCase().replaceAll(RegExp(r'[^a-z]'), '');
+          for (final d in availableDubs) {
+            final lClean = d['language']!.toLowerCase().replaceAll(RegExp(r'[^a-z]'), '');
+            if (lClean.contains(prefClean) || prefClean.contains(lClean)) {
+              chosenDubId = d['dubId'];
+              break;
+            }
+          }
+        }
+
+        // Step 2: Fetch embed-tmdb stream data
+        var urlStr = '$base/api/embed-tmdb/$tmdbId?type=$type&se=$season&ep=$episode';
+        if (chosenDubId != null && chosenDubId.isNotEmpty) {
+          urlStr += '&dub=${Uri.encodeComponent(chosenDubId)}';
+        }
+
+        final res = await http.get(Uri.parse(urlStr), headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Referer': '$base/',
+          'Accept': 'application/json, text/plain, */*',
+        }).timeout(const Duration(seconds: 6));
+
+        if (res.statusCode != 200) continue;
+        final data = jsonDecode(res.body) as Map<String, dynamic>;
+        if (data['ok'] != true) continue;
+
+        final rawStreams = data['streams'] as List<dynamic>? ?? [];
+        if (rawStreams.isEmpty && data['mp4'] == null) continue;
+
+        // Subtitles extraction
+        final subs = <SubtitleTrack>[];
+        final rawCaptions = data['captions'] as List<dynamic>? ?? [];
+        for (final c in rawCaptions) {
+          if (c is Map<String, dynamic>) {
+            final lang = c['lang'] as String? ?? 'en';
+            final name = c['name'] as String? ?? lang;
+            var subUrl = c['url'] as String? ?? '';
+            if (subUrl.startsWith('/api/proxy/video?url=')) {
+              final encoded = subUrl.substring('/api/proxy/video?url='.length);
+              subUrl = Uri.decodeComponent(encoded);
+            } else if (subUrl.startsWith('/')) {
+              subUrl = '$base$subUrl';
+            }
+            if (subUrl.isNotEmpty) {
+              subs.add(SubtitleTrack(
+                label: name,
+                language: lang,
+                url: subUrl,
+              ));
+            }
+          }
+        }
+
+        // Quality variants
+        final qualities = <StreamQuality>[];
+        for (final s in rawStreams) {
+          if (s is Map<String, dynamic>) {
+            final qUrl = s['url'] as String? ?? '';
+            final resHeight = (s['resolution'] as num?)?.toInt() ?? 0;
+            if (qUrl.isNotEmpty && resHeight > 0) {
+              qualities.add(StreamQuality(
+                label: '${resHeight}p',
+                height: resHeight,
+                url: qUrl,
+              ));
+            }
+          }
+        }
+        qualities.sort((a, b) => b.height.compareTo(a.height));
+
+        final primaryUrl = qualities.isNotEmpty ? qualities.first.url : (data['mp4'] as String? ?? '');
+        if (primaryUrl.isEmpty) continue;
+
+        // MovieBox referer header strictly required to bypass 429
+        final streamHeaders = {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Referer': 'https://moviebox.ph/',
+        };
+
+        String currentLanguage = 'Original';
+        if (chosenDubId != null && availableDubs.isNotEmpty) {
+          final matched = availableDubs.firstWhere((d) => d['dubId'] == chosenDubId, orElse: () => {});
+          if (matched.isNotEmpty) {
+            currentLanguage = matched['language']!;
+          }
+        }
+
+        final results = <ExtractedStream>[];
+        results.add(ExtractedStream(
+          url: primaryUrl,
+          type: 'mp4',
+          sourceName: 'NetMirror (${qualities.isNotEmpty ? qualities.first.label : "1080p"})',
+          language: currentLanguage,
+          headers: streamHeaders,
+          qualityLabel: qualities.isNotEmpty ? qualities.first.label : '1080p',
+          qualities: qualities,
+          subtitles: subs,
+        ));
+
+        // Add remaining qualities as selectable entries
+        for (final q in qualities.skip(1)) {
+          results.add(ExtractedStream(
+            url: q.url,
+            type: 'mp4',
+            sourceName: 'NetMirror (${q.label})',
+            language: currentLanguage,
+            headers: streamHeaders,
+            qualityLabel: q.label,
+            qualities: qualities,
+            subtitles: subs,
+          ));
+        }
+
+        if (results.isNotEmpty) {
+          setCachedEntry(cacheKey, results);
+          return results;
+        }
+      } catch (e) {
+        debugPrint('StreamExtractor: NetMirror error with $base: $e');
+      }
+    }
+    return <ExtractedStream>[];
+  }
+
   /// Master extraction method that queries all direct stream extractors
   /// and aggregates audio sources, qualities, and all subtitle tracks.
   /// Automatically uses cached results within 3 hours for instant resumption.
@@ -1353,6 +1530,16 @@ class StreamExtractor {
         return <ExtractedStream>[];
       });
 
+      final netMirrorFuture = extractNetMirror(
+        type: type,
+        tmdbId: tmdbId,
+        season: season,
+        episode: episode,
+      ).catchError((e) {
+        debugPrint('NetMirror extractor error: $e');
+        return <ExtractedStream>[];
+      });
+
       final cinejoyFuture = extractCinejoy(
         type: type,
         tmdbId: tmdbId,
@@ -1398,6 +1585,7 @@ class StreamExtractor {
       // The remaining extractors will complete in background and enrich the cache.
       final fastDirect = await Future.any([
         telegramFuture.then((list) => list.isNotEmpty ? list : null),
+        netMirrorFuture.then((list) => list.isNotEmpty ? list : null),
         cinejoyFuture.then((list) => list.isNotEmpty ? list : null),
         Future.delayed(const Duration(milliseconds: 650), () => null),
       ]);
@@ -1407,13 +1595,14 @@ class StreamExtractor {
         setCachedEntry(key, fastDirect);
 
         // Background worker to enrich cache with all alternate audio & subtitles
-        Future.wait([telegramFuture, cinejoyFuture, vidrockFuture, vidlinkFuture, voidflixFuture]).then((all) {
+        Future.wait([telegramFuture, netMirrorFuture, cinejoyFuture, vidrockFuture, vidlinkFuture, voidflixFuture]).then((all) {
           try {
             final tList = all[0] as List<ExtractedStream>;
-            final cList = all[1] as List<ExtractedStream>;
-            final vList = all[2] as List<ExtractedStream>;
-            final vl = all[3] as ExtractedStream?;
-            final vf = all[4] as ExtractedStream?;
+            final nmList = all[1] as List<ExtractedStream>;
+            final cList = all[2] as List<ExtractedStream>;
+            final vList = all[3] as List<ExtractedStream>;
+            final vl = all[4] as ExtractedStream?;
+            final vf = all[5] as ExtractedStream?;
 
             List<SubtitleTrack> bgSubs = [];
             if (vf != null && vf.subtitles.isNotEmpty) bgSubs = vf.subtitles;
@@ -1422,6 +1611,9 @@ class StreamExtractor {
             final combined = <ExtractedStream>[];
             for (final t in tList) {
               combined.add(t.copyWith(subtitles: bgSubs.isNotEmpty ? bgSubs : t.subtitles));
+            }
+            for (final nm in nmList) {
+              combined.add(nm.copyWith(subtitles: nm.subtitles.isNotEmpty ? nm.subtitles : bgSubs));
             }
             for (final c in cList) {
               combined.add(c.copyWith(subtitles: bgSubs.isNotEmpty ? bgSubs : c.subtitles));
@@ -1440,6 +1632,7 @@ class StreamExtractor {
 
       final futures = await Future.wait([
         telegramFuture,
+        netMirrorFuture,
         cinejoyFuture,
         vidrockFuture,
         vidlinkFuture,
@@ -1447,10 +1640,11 @@ class StreamExtractor {
       ]);
 
       final telegramStreams = futures[0] as List<ExtractedStream>;
-      final cinejoyStreams = futures[1] as List<ExtractedStream>;
-      final vidrockStreams = futures[2] as List<ExtractedStream>;
-      final vidlinkStream = futures[3] as ExtractedStream?;
-      final voidflixStream = futures[4] as ExtractedStream?;
+      final netMirrorStreams = futures[1] as List<ExtractedStream>;
+      final cinejoyStreams = futures[2] as List<ExtractedStream>;
+      final vidrockStreams = futures[3] as List<ExtractedStream>;
+      final vidlinkStream = futures[4] as ExtractedStream?;
+      final voidflixStream = futures[5] as ExtractedStream?;
 
       if (voidflixStream != null && voidflixStream.subtitles.isNotEmpty) {
         sharedSubs = voidflixStream.subtitles;
@@ -1470,6 +1664,20 @@ class StreamExtractor {
           qualityLabel: t.qualityLabel,
           qualities: t.qualities,
           subtitles: sharedSubs.isNotEmpty ? sharedSubs : t.subtitles,
+        ));
+      }
+
+      // 1.5 Add NetMirror streams (Direct Progressive MP4, multi-quality 1080p/720p/480p)
+      for (final nm in netMirrorStreams) {
+        results.add(ExtractedStream(
+          url: nm.url,
+          type: nm.type,
+          sourceName: nm.sourceName,
+          language: nm.language,
+          headers: nm.headers,
+          qualityLabel: nm.qualityLabel,
+          qualities: nm.qualities,
+          subtitles: nm.subtitles.isNotEmpty ? nm.subtitles : sharedSubs,
         ));
       }
 

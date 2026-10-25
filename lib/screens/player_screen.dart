@@ -641,7 +641,35 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
     try {
       List<ExtractedStream> streams = [];
-      if (server.name.contains('Meow')) {
+      if (server.name.contains('NetMirror')) {
+        String? preferredAudio;
+        try {
+          if (mounted) {
+            final profile = context.read<ProfileProvider>().activeProfile;
+            preferredAudio = profile.preferredAudioLang;
+          }
+        } catch (_) {}
+
+        streams = await StreamExtractor.extractNetMirror(
+          type: widget.mediaType,
+          tmdbId: widget.mediaId,
+          season: _currentSeason,
+          episode: _currentEpisode,
+          preferredAudioLang: preferredAudio,
+        ).timeout(const Duration(milliseconds: 3200), onTimeout: () => <ExtractedStream>[]);
+
+        if (streams.isEmpty) {
+          // Fast-fallback to NebulaHD or Meow if NetMirror has no streams
+          streams = await StreamExtractor.extractCinejoy(
+            type: widget.mediaType,
+            tmdbId: widget.mediaId,
+            title: widget.mediaTitle,
+            season: _currentSeason,
+            episode: _currentEpisode,
+            preferredServer: 'Nebula',
+          );
+        }
+      } else if (server.name.contains('Meow')) {
         // Ultra-fast concurrent fast-path: Query Telegram 25k DB and Cinejoy in parallel
         final tFuture = StreamExtractor.extractTelegram(
           type: widget.mediaType,
