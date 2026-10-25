@@ -142,6 +142,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
   int _cumulativeSeekSeconds = 0;
   DateTime? _lastDoubleTapTime;
 
+  // Unified Seek Debouncer & Position Anchor
+  Timer? _seekDebounceTimer;
+  Duration? _pendingSeekTarget;
+  DateTime? _lastSeekTime;
+  int _consecutiveBufferingStalls = 0;
+  int _lastBufferingStallTime = 0;
+  bool _hasAutoDowngradedForNetwork = false;
+
   // Full-screen Zoom to fill system
   bool _isZoomedToFill = false;
   bool _showZoomHud = false;
@@ -314,6 +322,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _brightnessHudTimer?.cancel();
     _volumeHudTimer?.cancel();
     _doubleTapTimer?.cancel();
+    _seekDebounceTimer?.cancel();
     _zoomHudTimer?.cancel();
     _autoplayTimer?.cancel();
     _disposeVideoController();
@@ -823,10 +832,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _availableQualities = stream.qualities.isNotEmpty
           ? stream.qualities
           : [
-              StreamQuality(label: 'Auto (HLS)', height: 0, url: stream.url),
-              StreamQuality(label: '1080p', height: 1080, url: stream.url),
-              StreamQuality(label: '720p', height: 720, url: stream.url),
-              StreamQuality(label: '480p', height: 480, url: stream.url),
+              StreamQuality(label: 'Auto (Adaptive)', height: 0, url: stream.url),
+              StreamQuality(label: '1080p Full HD', height: 1080, url: stream.url),
+              StreamQuality(label: '720p HD', height: 720, url: stream.url),
+              StreamQuality(label: '480p (Fast / Low Data)', height: 480, url: stream.url),
             ];
       _selectedQualityIndex = 0;
     });
@@ -1001,6 +1010,35 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _errorRecoveryCount = 0;
     }
 
+    // Protect against stale position reports while seek is buffering
+    if (_pendingSeekTarget != null) {
+      final diff = (val.position - _pendingSeekTarget!).inMilliseconds.abs();
+      final elapsed = _lastSeekTime != null
+          ? DateTime.now().difference(_lastSeekTime!).inMilliseconds
+          : 9999;
+      if (diff < 1500 || elapsed > 3500) {
+        _pendingSeekTarget = null;
+      }
+    }
+
+    // Detect repeated buffering stalls on slow networks & adapt dynamically
+    if (val.isPlaying && val.isBuffering) {
+      final now = DateTime.now().millisecondsSinceEpoch;
+      if (now - _lastBufferingStallTime > 3000) {
+        _lastBufferingStallTime = now;
+        _consecutiveBufferingStalls++;
+
+        if (_consecutiveBufferingStalls >= 2 && !_hasAutoDowngradedForNetwork) {
+          _handleLowNetworkBuffering();
+        }
+      }
+    } else if (!val.isBuffering && val.isPlaying) {
+      final now = DateTime.now().millisecondsSinceEpoch;
+      if (now - _lastBufferingStallTime > 15000 && _consecutiveBufferingStalls > 0) {
+        _consecutiveBufferingStalls = 0;
+      }
+    }
+
     if (!_isDraggingSeekbar) {
       Duration maxBuffered = Duration.zero;
       if (val.buffered.isNotEmpty) {
@@ -1015,7 +1053,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
       }
 
       setState(() {
-        _currentPosition = val.position;
+        if (_pendingSeekTarget == null) {
+          _currentPosition = val.position;
+        }
         _totalDuration = val.duration;
         _bufferedPosition = maxBuffered;
         _isPlaying = val.isPlaying;
@@ -1345,28 +1385,84 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
   }
 
+  void _handleLowNetworkBuffering() {
+    _hasAutoDowngradedForNetwork = true;
+    int targetIdx = -1;
+    for (int i = 0; i < _availableQualities.length; i++) {
+      final q = _availableQualities[i];
+      if (q.height > 0 && q.height <= 720) {
+        targetIdx = i;
+        break;
+      }
+    }
+
+    if (targetIdx != -1 && targetIdx != _selectedQualityIndex) {
+      final targetQuality = _availableQualities[targetIdx];
+      AppLogger.instance.log('Player', 'Low internet detected: switching to ${targetQuality.label}');
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Row(
+              children: [
+                const Icon(Icons.network_check_rounded, color: Colors.white, size: 20),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Slow connection detected • Switched to ${targetQuality.label} for smooth playback',
+                    style: const TextStyle(color: Colors.white, fontSize: 13),
+                  ),
+                ),
+              ],
+            ),
+            backgroundColor: const Color(0xFF1E1E24),
+            duration: const Duration(seconds: 4),
+            behavior: SnackBarBehavior.floating,
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          ),
+        );
+      }
+      _selectQuality(targetIdx);
+    }
+  }
+
   void _seekRelative(int seconds, {bool triggerFeedback = true}) {
     _startHideControlsTimer();
     final controller = _videoPlayerController;
     if (controller == null) return;
 
-    final newPos = controller.value.position + Duration(seconds: seconds);
+    // Anchor position based on pending seek target if within active debounce window
+    final basePos = _pendingSeekTarget ?? controller.value.position;
+    final newPos = basePos + Duration(seconds: seconds);
     final clamped = Duration(
       seconds: newPos.inSeconds.clamp(0, controller.value.duration.inSeconds),
     );
+
+    _pendingSeekTarget = clamped;
+    _lastSeekTime = DateTime.now();
+
     setState(() {
       _currentPosition = clamped;
       _isBuffering = true;
+      if (triggerFeedback) {
+        _doubleTapSeekSeconds = (_doubleTapSeekSeconds ?? 0) + seconds;
+      }
     });
-    controller.seekTo(clamped);
 
     if (triggerFeedback) {
-      setState(() => _doubleTapSeekSeconds = seconds);
       _doubleTapTimer?.cancel();
       _doubleTapTimer = Timer(const Duration(milliseconds: 700), () {
         if (mounted) setState(() => _doubleTapSeekSeconds = null);
       });
     }
+
+    // Debounce actual seek call so 3-4 rapid button presses/arrow keys fire ONLY ONE seek!
+    _seekDebounceTimer?.cancel();
+    _seekDebounceTimer = Timer(const Duration(milliseconds: 300), () {
+      final target = _pendingSeekTarget;
+      if (target != null && mounted) {
+        _videoPlayerController?.seekTo(target);
+      }
+    });
   }
 
   void _handleDoubleTapSeek(bool isForward) {
@@ -4721,12 +4817,19 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                               },
                                               onChangeEnd: (val) {
                                                 final target = Duration(seconds: val.toInt());
+                                                _pendingSeekTarget = target;
+                                                _lastSeekTime = DateTime.now();
                                                 setState(() {
                                                   _isDraggingSeekbar = false;
                                                   _currentPosition = target;
                                                   _isBuffering = true;
                                                 });
-                                                _videoPlayerController?.seekTo(target);
+                                                _seekDebounceTimer?.cancel();
+                                                _seekDebounceTimer = Timer(const Duration(milliseconds: 150), () {
+                                                  if (mounted) {
+                                                    _videoPlayerController?.seekTo(target);
+                                                  }
+                                                });
                                                 _startHideControlsTimer();
                                               },
                                             ),

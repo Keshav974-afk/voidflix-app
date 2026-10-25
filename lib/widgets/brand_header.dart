@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 import '../core/constants/theme_constants.dart';
-import '../core/services/tv_mode_service.dart';
 import '../core/services/voidcast_service.dart';
 import 'voidcast_remote_sheet.dart';
 import '../providers/notification_provider.dart';

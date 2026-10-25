@@ -328,7 +328,10 @@ class StreamProxyService {
     try {
       await upstreamResp.pipe(request.response);
     } catch (_) {
-      // Normal disconnection when seeking or changing video streams
+      // Promptly destroy upstream socket on client seek/abort so bandwidth is never wasted on old chunks
+      try {
+        upstreamResp.detachSocket().then((s) => s.destroy()).catchError((_) {});
+      } catch (_) {}
     }
   }
 }

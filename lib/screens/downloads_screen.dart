@@ -629,6 +629,8 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
                 onTap: () {
                   if (isCompleted) {
                     _playOffline(context, item);
+                  } else if (isDownloading) {
+                    downloadProvider.pauseDownload(item.id);
                   } else {
                     downloadProvider.resumeDownload(item.id);
                   }
@@ -987,6 +989,8 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
                   onTap: () {
                     if (isCompleted) {
                       _playOffline(context, item);
+                    } else if (isDownloading) {
+                      downloadProvider.pauseDownload(item.id);
                     } else {
                       downloadProvider.resumeDownload(item.id);
                     }

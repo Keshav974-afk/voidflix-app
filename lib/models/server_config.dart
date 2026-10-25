@@ -88,9 +88,9 @@ class ServerConfig {
     // -------------------------------------------------------------------------
     VideoServer(
       name: "TurboStream",
-      description: "High speed bufferless stream",
-      movieUrl: (id) => "https://player.videasy.to/movie/$id?progress=true",
-      tvUrl: (id, s, e) => "https://player.videasy.to/tv/$id/$s/$e?progress=true",
+      description: "Adaptive fast stream with low-data support (Recommended)",
+      movieUrl: (id) => "https://player.videasy.to/movie/$id?color=e50914&progress=true",
+      tvUrl: (id, s, e) => "https://player.videasy.to/tv/$id/$s/$e?color=e50914&progress=true",
     ),
     VideoServer(
       name: "QuantumX",
@@ -99,8 +99,20 @@ class ServerConfig {
       tvUrl: (id, s, e) => "https://vidfast.vc/tv/$id/$s/$e",
     ),
     VideoServer(
+      name: "VidsrcX",
+      description: "Fast buffer-free adaptive mirror",
+      movieUrl: (id) => "https://vidsrc.xyz/embed/movie/$id",
+      tvUrl: (id, s, e) => "https://vidsrc.xyz/embed/tv/$id/$s/$e",
+    ),
+    VideoServer(
+      name: "SuperEmbed",
+      description: "Adaptive multi-server CDN cluster",
+      movieUrl: (id) => "https://multiembed.mov/?video_id=$id&tmdb=1",
+      tvUrl: (id, s, e) => "https://multiembed.mov/?video_id=$id&tmdb=1&s=$s&e=$e",
+    ),
+    VideoServer(
       name: "FlashPlay",
-      description: "Fast buffer-free server",
+      description: "Fast multi-resolution embed",
       movieUrl: (id) => "https://vidsrc.to/embed/movie/$id",
       tvUrl: (id, s, e) => "https://vidsrc.to/embed/tv/$id/$s/$e",
     ),
@@ -121,18 +133,6 @@ class ServerConfig {
       description: "Global cloud streaming mirror",
       movieUrl: (id) => "https://www.2embed.cc/embed/$id",
       tvUrl: (id, s, e) => "https://www.2embed.cc/embedtv/$id&s=$s&e=$e",
-    ),
-    VideoServer(
-      name: "AuraCine",
-      description: "Multi-quality cinema engine",
-      movieUrl: (id) => "https://vidcore.io/movie/$id",
-      tvUrl: (id, s, e) => "https://vidcore.io/tv/$id/$s/$e",
-    ),
-    VideoServer(
-      name: "NontonGo",
-      description: "Global streaming network",
-      movieUrl: (id) => "https://www.NontonGo.win/embed/movie/$id",
-      tvUrl: (id, s, e) => "https://www.NontonGo.win/embed/tv/$id/$s/$e",
     ),
   ];
 

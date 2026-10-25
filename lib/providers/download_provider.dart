@@ -1146,6 +1146,20 @@ class DownloadProvider extends ChangeNotifier {
     }
   }
 
+  void pauseDownload(String id) {
+    final client = _activeClients.remove(id);
+    client?.close();
+
+    _cancelSystemNotification(id.hashCode.abs());
+
+    final idx = _items.indexWhere((i) => i.id == id);
+    if (idx != -1) {
+      _items[idx] = _items[idx].copyWith(status: 'paused');
+      notifyListeners();
+      _saveDownloads();
+    }
+  }
+
   void cancelDownload(String id) {
     final client = _activeClients.remove(id);
     client?.close();
