@@ -482,9 +482,10 @@ class MainActivity : FlutterActivity() {
             val readBuffer = ByteBuffer.allocateDirect(bufferSize)
             val writeBuffer = ByteBuffer.allocateDirect(bufferSize + 65536)
             val bufferInfo = MediaCodec.BufferInfo()
-            val trackBaseUs = HashMap<Int, Long>()
             val trackLastPts = HashMap<Int, Long>()
+            val isSourceTs = inputPath.endsWith(".ts", ignoreCase = true)
             var videoKeyframeSeen = false
+            var globalStartUs = -1L
             var samplesWritten = 0
 
             while (true) {
@@ -506,30 +507,34 @@ class MainActivity : FlutterActivity() {
                 val isVideo = isVideoTrack[trackIndex] == true
                 val isSyncFrame = (extractor.sampleFlags and MediaExtractor.SAMPLE_FLAG_SYNC) != 0
 
-                // If trimming from an untrimmed source, ensure video starts at a sync frame
-                if (isVideo && !videoKeyframeSeen) {
+                // 1. Audio samples MUST wait until the first video keyframe is reached
+                // This prevents audio leading video or negative relative timestamps which corrupt MediaMuxer
+                if (!videoKeyframeSeen) {
+                    if (!isVideo) {
+                        extractor.advance()
+                        continue
+                    }
                     if (!isSyncFrame) {
                         extractor.advance()
                         continue
                     }
                     videoKeyframeSeen = true
+                    globalStartUs = sampleTimeUs
                 }
 
-                // Check end bounds
+                // 2. Check end bounds
                 if (isPreTrimmed) {
-                    val base = trackBaseUs[trackIndex] ?: sampleTimeUs
-                    if ((sampleTimeUs - base) > durationUs + 2000000L) {
+                    if (isVideo && (sampleTimeUs - globalStartUs) > durationUs + 500000L) {
                         break
                     }
                 } else {
-                    if (sampleTimeUs > endUs) {
+                    if (isVideo && sampleTimeUs > endUs) {
                         break
                     }
                 }
 
-                // Initialize monotonic timestamp base per track
-                val base = trackBaseUs.getOrPut(trackIndex) { sampleTimeUs }
-                val rawPts = (sampleTimeUs - base).coerceAtLeast(0L)
+                // 3. Calculate synchronized monotonic PTS starting from 0 for all tracks
+                val rawPts = (sampleTimeUs - globalStartUs).coerceAtLeast(0L)
                 val lastPts = trackLastPts[trackIndex] ?: -1L
                 val pts = if (rawPts > lastPts) rawPts else lastPts + 1000L
                 trackLastPts[trackIndex] = pts
@@ -541,18 +546,24 @@ class MainActivity : FlutterActivity() {
                 writeBuffer.clear()
 
                 if (isVideo) {
-                    // Check if sample has Annex-B start codes
-                    val hasAnnexB = sampleSize >= 4 && (
-                        (rawBytes[0] == 0.toByte() && rawBytes[1] == 0.toByte() && rawBytes[2] == 0.toByte() && rawBytes[3] == 1.toByte()) ||
-                        (rawBytes[0] == 0.toByte() && rawBytes[1] == 0.toByte() && rawBytes[2] == 1.toByte())
+                    // Only perform Annex-B conversion if the source is MPEG-TS
+                    // MP4 / AVCC files already have standard 4-byte length prefixes
+                    val hasAnnexB = isSourceTs || (isAnnexBVideo[trackIndex] == true) || (
+                        sampleSize >= 4 && (
+                            (rawBytes[0] == 0.toByte() && rawBytes[1] == 0.toByte() && rawBytes[2] == 0.toByte() && rawBytes[3] == 1.toByte()) ||
+                            (rawBytes[0] == 0.toByte() && rawBytes[1] == 0.toByte() && rawBytes[2] == 1.toByte())
+                        )
                     )
 
-                    if (hasAnnexB || isAnnexBVideo[trackIndex] == true) {
-                        // Convert Annex-B to AVCC (4-byte length prefixes)
+                    if (hasAnnexB) {
                         val nals = findAnnexBNalUnits(rawBytes, sampleSize)
-                        for (nal in nals) {
-                            writeBuffer.putInt(nal.length)
-                            writeBuffer.put(rawBytes, nal.offset, nal.length)
+                        if (nals.isNotEmpty()) {
+                            for (nal in nals) {
+                                writeBuffer.putInt(nal.length)
+                                writeBuffer.put(rawBytes, nal.offset, nal.length)
+                            }
+                        } else {
+                            writeBuffer.put(rawBytes, 0, sampleSize)
                         }
                     } else {
                         writeBuffer.put(rawBytes, 0, sampleSize)

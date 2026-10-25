@@ -265,6 +265,24 @@ class WatchPartyService {
     return null;
   }
 
+  Future<WatchPartyRoom?> sendMessage({
+    required String roomCode,
+    required String memberId,
+    required String memberName,
+    required String text,
+    bool isPlaying = true,
+    double currentTime = 0.0,
+  }) async {
+    return syncPlayback(
+      roomCode: roomCode,
+      memberId: memberId,
+      isPlaying: isPlaying,
+      currentTime: currentTime,
+      chatText: text,
+      chatSender: memberName,
+    );
+  }
+
   Future<void> leaveRoom(String roomCode, String memberId) async {
     try {
       final cleanCode = roomCode.trim().toUpperCase();

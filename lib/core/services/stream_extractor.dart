@@ -1393,17 +1393,17 @@ class StreamExtractor {
         return null;
       });
 
-      // Netflix-Style Fast Path: if ultra-fast Telegram or Cinejoy returns in <950ms,
+      // Netflix-Style Fast Path: if ultra-fast Telegram or Cinejoy returns in <650ms,
       // return immediately so the player starts playing in <1 second!
       // The remaining extractors will complete in background and enrich the cache.
       final fastDirect = await Future.any([
         telegramFuture.then((list) => list.isNotEmpty ? list : null),
         cinejoyFuture.then((list) => list.isNotEmpty ? list : null),
-        Future.delayed(const Duration(milliseconds: 950), () => null),
+        Future.delayed(const Duration(milliseconds: 650), () => null),
       ]);
 
       if (fastDirect != null && fastDirect.isNotEmpty) {
-        debugPrint('StreamExtractor: Fast-path ready in <950ms (${fastDirect.first.sourceName}) - instant play!');
+        debugPrint('StreamExtractor: Fast-path ready in <650ms (${fastDirect.first.sourceName}) - instant play!');
         setCachedEntry(key, fastDirect);
 
         // Background worker to enrich cache with all alternate audio & subtitles

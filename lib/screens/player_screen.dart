@@ -687,7 +687,18 @@ class _PlayerScreenState extends State<PlayerScreen> {
           season: _currentSeason,
           episode: _currentEpisode,
           preferredServer: 'Lisbon',
-        );
+        ).timeout(const Duration(milliseconds: 2200), onTimeout: () => <ExtractedStream>[]);
+        if (streams.isEmpty) {
+          // Fast-fallback to working NebulaHD muxed audio server
+          streams = await StreamExtractor.extractCinejoy(
+            type: widget.mediaType,
+            tmdbId: widget.mediaId,
+            title: widget.mediaTitle,
+            season: _currentSeason,
+            episode: _currentEpisode,
+            preferredServer: 'Nebula',
+          );
+        }
       } else if (server.name.contains('Nebula')) {
         streams = await StreamExtractor.extractCinejoy(
           type: widget.mediaType,
@@ -696,7 +707,16 @@ class _PlayerScreenState extends State<PlayerScreen> {
           season: _currentSeason,
           episode: _currentEpisode,
           preferredServer: 'Nebula',
-        );
+        ).timeout(const Duration(milliseconds: 2200), onTimeout: () => <ExtractedStream>[]);
+        if (streams.isEmpty) {
+          // Fast-fallback to direct Meow Telegram streams
+          streams = await StreamExtractor.extractTelegram(
+            type: widget.mediaType,
+            tmdbId: widget.mediaId,
+            season: _currentSeason,
+            episode: _currentEpisode,
+          );
+        }
       } else if (server.name.contains('OrionStream')) {
         final all = await StreamExtractor.extractVidrock(
           type: widget.mediaType,
@@ -4889,13 +4909,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                             label: 'Clip',
                                             onTap: _openClipMoment,
                                           ),
-                                        _NetflixBarButton(
-                                          icon: _isMuted || _volume == 0
-                                              ? Icons.volume_off_rounded
-                                              : (_volume > 0.5 ? Icons.volume_up_rounded : Icons.volume_down_rounded),
-                                          label: _isMuted ? 'Mute' : '${(_volume * 100).round()}%',
-                                          onTap: _toggleMute,
-                                        ),
+                                        if (isPc)
+                                          _NetflixBarButton(
+                                            icon: _isMuted || _volume == 0
+                                                ? Icons.volume_off_rounded
+                                                : (_volume > 0.5 ? Icons.volume_up_rounded : Icons.volume_down_rounded),
+                                            label: _isMuted ? 'Mute' : '${(_volume * 100).round()}%',
+                                            onTap: _toggleMute,
+                                          ),
                                         _NetflixBarButton(
                                           icon: Icons.speed_rounded,
                                           label: 'Speed (${_playbackSpeed == 1.0 ? '1x' : '${_playbackSpeed}x'})',
@@ -5132,6 +5153,16 @@ class _PlayerScreenState extends State<PlayerScreen> {
                   top: 16,
                   left: _showControls ? 60 : 20,
                   child: _buildPartyStatusPill(),
+                ),
+
+              // ---------------------------------------------------------------
+              // Layer 14.5: Watch Party Live Emoji Reactions Dock (Right / Bottom)
+              // ---------------------------------------------------------------
+              if (_isNativeMode && _isInParty && !_isClippingMoment && !isTv)
+                Positioned(
+                  bottom: _showControls ? 100 : 26,
+                  right: 20,
+                  child: _buildPartyLiveReactionsDock(),
                 ),
 
               // ---------------------------------------------------------------
@@ -6681,6 +6712,74 @@ class _PlayerScreenState extends State<PlayerScreen> {
       }
     }
     setState(() => _isZoomedToFill = !_isZoomedToFill);
+  }
+
+  Widget _buildPartyLiveReactionsDock() {
+    final reactions = ['🔥', '❤️', '😂', '😱', '🍿', '👏'];
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+      decoration: BoxDecoration(
+        color: const Color(0xEE0B0B12),
+        borderRadius: BorderRadius.circular(24),
+        border: Border.all(color: Colors.white.withValues(alpha: 0.18), width: 0.8),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.6),
+            blurRadius: 14,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          ...reactions.map((emoji) {
+            return Material(
+              color: Colors.transparent,
+              child: InkWell(
+                borderRadius: BorderRadius.circular(16),
+                onTap: () {
+                  if (_partyRoom == null) return;
+                  _partyService.sendMessage(
+                    roomCode: _partyRoom!.roomCode,
+                    memberId: _partyMemberId,
+                    memberName: _partyMemberName,
+                    text: emoji,
+                  );
+                  _showFloatingPartyMessage(WatchPartyMessage(
+                    id: DateTime.now().millisecondsSinceEpoch.toString(),
+                    sender: _partyMemberName,
+                    text: emoji,
+                    timestamp: DateTime.now().millisecondsSinceEpoch,
+                  ));
+                },
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 2),
+                  child: Text(
+                    emoji,
+                    style: const TextStyle(fontSize: 20),
+                  ),
+                ),
+              ),
+            );
+          }),
+          Container(
+            height: 18,
+            width: 1,
+            margin: const EdgeInsets.symmetric(horizontal: 6),
+            color: Colors.white24,
+          ),
+          InkWell(
+            borderRadius: BorderRadius.circular(14),
+            onTap: _openWatchPartySheet,
+            child: const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+              child: Icon(Icons.chat_bubble_outline_rounded, color: Colors.white70, size: 18),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 
   Widget _buildVolumeHud() {

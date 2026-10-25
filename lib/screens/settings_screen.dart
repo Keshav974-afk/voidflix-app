@@ -36,7 +36,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
   bool _downloadWifiOnly = false;
   bool _smartDownloads = true;
   String _cellularDataUsage = 'Automatic';
-  String _downloadQuality = 'Standard';
+  String _downloadQuality = 'High (1080p Full HD)';
+  String _preferredAudioLang = 'Original Audio';
+  String _preferredSubtitleLang = 'English';
   double _cacheSizeMb = 0.0;
   bool _isLoadingCache = true;
 
@@ -111,7 +113,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
         _downloadWifiOnly = prefs.getBool('voidflix_download_wifi_only') ?? false;
         _smartDownloads = prefs.getBool('voidflix_smart_downloads') ?? true;
         _cellularDataUsage = prefs.getString('voidflix_cellular_data') ?? 'Automatic';
-        _downloadQuality = prefs.getString('voidflix_download_quality') ?? 'Standard';
+        _downloadQuality = prefs.getString('voidflix_download_quality') ?? 'High (1080p Full HD)';
+        _preferredAudioLang = prefs.getString('voidflix_preferred_audio_lang') ?? 'Original Audio';
+        _preferredSubtitleLang = prefs.getString('voidflix_preferred_sub_lang') ?? 'English';
         _isDeveloperMode = prefs.getBool('voidflix_developer_mode') ?? false;
       });
     }
@@ -245,8 +249,10 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   void _showDownloadQualitySheet() {
     final options = [
-      {'title': 'Standard', 'desc': 'Downloads faster and uses less storage space.'},
-      {'title': 'High', 'desc': 'Uses more storage space, maximum video sharpness.'},
+      {'title': 'High (1080p Full HD)', 'desc': 'Crisp 1080p Full HD stream with clear audio (Recommended).'},
+      {'title': 'Ultra HD (4K)', 'desc': 'Highest available 4K resolution (uses more storage).'},
+      {'title': 'Standard (720p HD)', 'desc': 'Downloads faster, balanced storage and clarity.'},
+      {'title': 'Data Saver (480p)', 'desc': 'Smallest download footprint, ideal for limited networks.'},
     ];
     showModalBottomSheet(
       context: context,
@@ -269,7 +275,9 @@ class _SettingsScreenState extends State<SettingsScreen> {
             ),
             const Divider(color: Color(0xFF262638)),
             ...options.map((opt) {
-              final isSel = _downloadQuality == opt['title'];
+              final isSel = _downloadQuality == opt['title'] ||
+                  (_downloadQuality == 'High' && opt['title']!.startsWith('High')) ||
+                  (_downloadQuality == 'Standard' && opt['title']!.startsWith('Standard'));
               return ListTile(
                 leading: Icon(
                   isSel ? Icons.radio_button_checked : Icons.radio_button_off,
@@ -281,6 +289,125 @@ class _SettingsScreenState extends State<SettingsScreen> {
                   setState(() => _downloadQuality = opt['title']!);
                   final prefs = await SharedPreferences.getInstance();
                   await prefs.setString('voidflix_download_quality', opt['title']!);
+                  if (ctx.mounted) Navigator.pop(ctx);
+                },
+              );
+            }),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showPreferredAudioSheet() {
+    final audioOptions = [
+      'Original Audio',
+      'English',
+      'Hindi',
+      'Spanish',
+      'French',
+      'German',
+      'Japanese',
+      'Korean',
+      'Telugu',
+      'Tamil',
+      'Malayalam',
+      'Italian',
+      'Portuguese',
+    ];
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF14141E),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => Container(
+        padding: const EdgeInsets.symmetric(vertical: 16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+              child: Text(
+                'Preferred Audio Language',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
+              ),
+            ),
+            const Divider(color: Color(0xFF262638)),
+            Expanded(
+              child: ListView.builder(
+                shrinkWrap: true,
+                itemCount: audioOptions.length,
+                itemBuilder: (context, idx) {
+                  final opt = audioOptions[idx];
+                  final isSel = _preferredAudioLang == opt;
+                  return ListTile(
+                    leading: Icon(
+                      isSel ? Icons.radio_button_checked : Icons.radio_button_off,
+                      color: isSel ? const Color(0xFF0071eb) : Colors.white54,
+                    ),
+                    title: Text(opt, style: TextStyle(color: isSel ? Colors.white : Colors.white70, fontWeight: isSel ? FontWeight.bold : FontWeight.normal)),
+                    onTap: () async {
+                      setState(() => _preferredAudioLang = opt);
+                      final prefs = await SharedPreferences.getInstance();
+                      await prefs.setString('voidflix_preferred_audio_lang', opt);
+                      if (ctx.mounted) Navigator.pop(ctx);
+                    },
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _showPreferredSubtitleSheet() {
+    final subOptions = [
+      'English',
+      'Spanish',
+      'Hindi',
+      'French',
+      'German',
+      'Japanese',
+      'Korean',
+      'Arabic',
+      'Off / None',
+    ];
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF14141E),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) => Container(
+        padding: const EdgeInsets.symmetric(vertical: 16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+              child: Text(
+                'Preferred Subtitles',
+                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
+              ),
+            ),
+            const Divider(color: Color(0xFF262638)),
+            ...subOptions.map((opt) {
+              final isSel = _preferredSubtitleLang == opt;
+              return ListTile(
+                leading: Icon(
+                  isSel ? Icons.radio_button_checked : Icons.radio_button_off,
+                  color: isSel ? const Color(0xFF0071eb) : Colors.white54,
+                ),
+                title: Text(opt, style: TextStyle(color: isSel ? Colors.white : Colors.white70, fontWeight: isSel ? FontWeight.bold : FontWeight.normal)),
+                onTap: () async {
+                  setState(() => _preferredSubtitleLang = opt);
+                  final prefs = await SharedPreferences.getInstance();
+                  await prefs.setString('voidflix_preferred_sub_lang', opt);
                   if (ctx.mounted) Navigator.pop(ctx);
                 },
               );
@@ -676,6 +803,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
             title: 'Download Video Quality',
             subtitle: _downloadQuality,
             onTap: _showDownloadQualitySheet,
+          ),
+          const Divider(height: 1, color: Color(0xFF1E1E1E)),
+          _buildSettingTile(
+            leading: Icons.record_voice_over_outlined,
+            title: 'Preferred Audio Language',
+            subtitle: _preferredAudioLang,
+            onTap: _showPreferredAudioSheet,
+          ),
+          const Divider(height: 1, color: Color(0xFF1E1E1E)),
+          _buildSettingTile(
+            leading: Icons.subtitles_outlined,
+            title: 'Preferred Subtitles',
+            subtitle: _preferredSubtitleLang,
+            onTap: _showPreferredSubtitleSheet,
           ),
           const Divider(height: 1, color: Color(0xFF1E1E1E)),
           _buildSettingTile(

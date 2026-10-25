@@ -1,3 +1,4 @@
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:provider/provider.dart';
@@ -829,32 +830,41 @@ class _DetailScreenState extends State<DetailScreen> {
                       return SizedBox(
                         width: double.infinity,
                         height: 44,
-                        child: ElevatedButton.icon(
-                          onPressed: () {
-                            downloadProvider.startDownload(
-                              mediaId: detail.id,
-                              title: detail.title,
-                              mediaType: widget.mediaType,
-                              season: _selectedSeason,
-                              episode: targetEpNum,
-                              episodeTitle: firstEp?.name,
-                              episodeDescription: firstEp?.overview ?? detail.overview,
-                              posterPath: detail.posterPath,
-                              backdropPath: detail.backdropPath,
-                              stillPath: firstEp?.stillPath,
-                              runtime: firstEp != null && firstEp.runtime > 0 ? firstEp.runtime : (detail.runtime ?? 0),
-                            );
-                          },
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFF262626),
-                            foregroundColor: Colors.white,
-                            elevation: 0,
-                            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
-                          ),
-                          icon: const Icon(Icons.file_download_outlined, color: Colors.white, size: 22),
-                          label: Text(
-                            isTv ? 'Download S$_selectedSeason:E$targetEpNum' : 'Download',
-                            style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.white),
+                        child: Tooltip(
+                          message: 'Tap to download • Long press for quality & audio options',
+                          child: ElevatedButton.icon(
+                            onPressed: () {
+                              downloadProvider.startDownload(
+                                mediaId: detail.id,
+                                title: detail.title,
+                                mediaType: widget.mediaType,
+                                season: _selectedSeason,
+                                episode: targetEpNum,
+                                episodeTitle: firstEp?.name,
+                                episodeDescription: firstEp?.overview ?? detail.overview,
+                                posterPath: detail.posterPath,
+                                backdropPath: detail.backdropPath,
+                                stillPath: firstEp?.stillPath,
+                                runtime: firstEp != null && firstEp.runtime > 0 ? firstEp.runtime : (detail.runtime ?? 0),
+                              );
+                            },
+                            onLongPress: () => _showDownloadOptionsSheet(
+                              detail: detail,
+                              isTv: isTv,
+                              targetEpNum: targetEpNum,
+                              firstEp: firstEp,
+                            ),
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: const Color(0xFF262626),
+                              foregroundColor: Colors.white,
+                              elevation: 0,
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                            ),
+                            icon: const Icon(Icons.file_download_outlined, color: Colors.white, size: 22),
+                            label: Text(
+                              isTv ? 'Download S$_selectedSeason:E$targetEpNum' : 'Download',
+                              style: const TextStyle(fontSize: 15, fontWeight: FontWeight.bold, color: Colors.white),
+                            ),
                           ),
                         ),
                       );
@@ -1542,4 +1552,217 @@ class _DetailScreenState extends State<DetailScreen> {
     ),
   );
 }
+
+  void _showDownloadOptionsSheet({
+    required MediaDetail detail,
+    required bool isTv,
+    required int targetEpNum,
+    TvEpisode? firstEp,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    final savedQ = prefs.getString('voidflix_download_quality') ?? 'High (1080p Full HD)';
+    final savedAudio = prefs.getString('voidflix_preferred_audio_lang') ?? 'Original Audio';
+    final savedSub = prefs.getString('voidflix_preferred_sub_lang') ?? 'English';
+
+    String selectedQuality = savedQ.contains('4K')
+        ? '4K Ultra HD'
+        : savedQ.contains('720')
+            ? '720p HD'
+            : savedQ.contains('480')
+                ? '480p (Data Saver)'
+                : '1080p Full HD';
+    String selectedAudio = savedAudio;
+    String selectedSub = savedSub;
+
+    final qualities = ['1080p Full HD', '4K Ultra HD', '720p HD', '480p (Data Saver)'];
+    final audios = ['Original Audio', 'English', 'Hindi', 'Telugu', 'Tamil', 'Spanish', 'Japanese', 'Korean', 'French', 'German'];
+    final subs = ['English', 'Hindi', 'Spanish', 'French', 'German', 'Off / None'];
+
+    if (!mounted) return;
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF14141E),
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) => StatefulBuilder(
+        builder: (context, setModalState) {
+          return SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
+              child: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        const Text(
+                          'Download Options',
+                          style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
+                        ),
+                        IconButton(
+                          icon: const Icon(Icons.close, color: Colors.white60, size: 20),
+                          onPressed: () => Navigator.pop(ctx),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      isTv
+                          ? '${detail.title} • S$_selectedSeason:E$targetEpNum ${firstEp?.name ?? ""}'
+                          : detail.title,
+                      style: const TextStyle(color: Colors.white70, fontSize: 13),
+                    ),
+                    const Divider(color: Color(0xFF262638), height: 24),
+
+                    // Server Routing Info
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF1E1E2C),
+                        borderRadius: BorderRadius.circular(8),
+                        border: Border.all(color: Colors.white12),
+                      ),
+                      child: const Row(
+                        children: [
+                          Icon(Icons.bolt_rounded, color: Colors.amberAccent, size: 20),
+                          SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'Best Server routing: Meow (Direct MP4) & NebulaHD (Full AAC Audio)',
+                              style: TextStyle(color: Colors.white70, fontSize: 11),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+
+                    // Quality Selection
+                    const Text('Video Quality', style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: qualities.map((q) {
+                        final isSel = selectedQuality == q;
+                        return ChoiceChip(
+                          label: Text(q),
+                          selected: isSel,
+                          selectedColor: AppTheme.primaryRed,
+                          backgroundColor: const Color(0xFF222232),
+                          labelStyle: TextStyle(
+                            color: isSel ? Colors.white : Colors.white70,
+                            fontWeight: isSel ? FontWeight.bold : FontWeight.normal,
+                            fontSize: 12,
+                          ),
+                          onSelected: (val) {
+                            if (val) setModalState(() => selectedQuality = q);
+                          },
+                        );
+                      }).toList(),
+                    ),
+                    const SizedBox(height: 16),
+
+                    // Audio Selection
+                    const Text('Audio Language (Dub)', style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: audios.map((a) {
+                        final isSel = selectedAudio == a;
+                        return ChoiceChip(
+                          label: Text(a),
+                          selected: isSel,
+                          selectedColor: const Color(0xFF0071eb),
+                          backgroundColor: const Color(0xFF222232),
+                          labelStyle: TextStyle(
+                            color: isSel ? Colors.white : Colors.white70,
+                            fontWeight: isSel ? FontWeight.bold : FontWeight.normal,
+                            fontSize: 12,
+                          ),
+                          onSelected: (val) {
+                            if (val) setModalState(() => selectedAudio = a);
+                          },
+                        );
+                      }).toList(),
+                    ),
+                    const SizedBox(height: 16),
+
+                    // Subtitles Selection
+                    const Text('Subtitles', style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold)),
+                    const SizedBox(height: 8),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 8,
+                      children: subs.map((s) {
+                        final isSel = selectedSub == s;
+                        return ChoiceChip(
+                          label: Text(s),
+                          selected: isSel,
+                          selectedColor: const Color(0xFF0071eb),
+                          backgroundColor: const Color(0xFF222232),
+                          labelStyle: TextStyle(
+                            color: isSel ? Colors.white : Colors.white70,
+                            fontWeight: isSel ? FontWeight.bold : FontWeight.normal,
+                            fontSize: 12,
+                          ),
+                          onSelected: (val) {
+                            if (val) setModalState(() => selectedSub = s);
+                          },
+                        );
+                      }).toList(),
+                    ),
+                    const SizedBox(height: 24),
+
+                    // Start Download Action
+                    SizedBox(
+                      width: double.infinity,
+                      height: 48,
+                      child: ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppTheme.primaryRed,
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                        ),
+                        icon: const Icon(Icons.file_download, color: Colors.white, size: 20),
+                        label: Text(
+                          'Download in $selectedQuality',
+                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 15),
+                        ),
+                        onPressed: () {
+                          Navigator.pop(ctx);
+                          final downloadProvider = context.read<DownloadProvider>();
+                          downloadProvider.startDownload(
+                            mediaId: detail.id,
+                            title: detail.title,
+                            mediaType: widget.mediaType,
+                            season: _selectedSeason,
+                            episode: targetEpNum,
+                            episodeTitle: firstEp?.name,
+                            episodeDescription: firstEp?.overview ?? detail.overview,
+                            posterPath: detail.posterPath,
+                            backdropPath: detail.backdropPath,
+                            stillPath: firstEp?.stillPath,
+                            runtime: firstEp != null && firstEp.runtime > 0 ? firstEp.runtime : (detail.runtime ?? 0),
+                            preferredQuality: selectedQuality,
+                            preferredAudio: selectedAudio,
+                            preferredSubtitle: selectedSub,
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        },
+      ),
+    );
+  }
 }

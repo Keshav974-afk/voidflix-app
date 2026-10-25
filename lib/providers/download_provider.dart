@@ -18,13 +18,49 @@ class _DownloadCandidate {
   final Map<String, String> headers;
   final bool isHls;
   final String qualityLabel;
+  final String serverName;
+  final String audioLanguage;
+  final int height;
+  final int score;
 
   const _DownloadCandidate({
     required this.url,
     required this.headers,
     required this.isHls,
     required this.qualityLabel,
+    this.serverName = 'Direct',
+    this.audioLanguage = 'Original',
+    this.height = 1080,
+    this.score = 0,
   });
+
+  _DownloadCandidate copyWith({
+    String? url,
+    Map<String, String>? headers,
+    bool? isHls,
+    String? qualityLabel,
+    String? serverName,
+    String? audioLanguage,
+    int? height,
+    int? score,
+  }) {
+    return _DownloadCandidate(
+      url: url ?? this.url,
+      headers: headers ?? this.headers,
+      isHls: isHls ?? this.isHls,
+      qualityLabel: qualityLabel ?? this.qualityLabel,
+      serverName: serverName ?? this.serverName,
+      audioLanguage: audioLanguage ?? this.audioLanguage,
+      height: height ?? this.height,
+      score: score ?? this.score,
+    );
+  }
+}
+
+class _HlsVariantCandidate {
+  final String url;
+  final int height;
+  const _HlsVariantCandidate({required this.url, required this.height});
 }
 
 class DownloadProvider extends ChangeNotifier {
@@ -231,15 +267,22 @@ class DownloadProvider extends ChangeNotifier {
     return false;
   }
 
-  /// Retrieves user preferred audio and subtitle languages from active profile settings
-  Future<List<String>> _getPreferredLanguages() async {
+/// Retrieves user preferred audio languages from app settings and active profile
+  Future<List<String>> _getPreferredAudioLanguages() async {
     try {
       final prefs = await SharedPreferences.getInstance();
+      final appAudioPref = prefs.getString('voidflix_preferred_audio_lang');
+      final langs = <String>[];
+      if (appAudioPref != null &&
+          appAudioPref.isNotEmpty &&
+          appAudioPref != 'Original Audio' &&
+          !appAudioPref.toLowerCase().contains('all languages')) {
+        langs.add(appAudioPref);
+      }
       final activeId = prefs.getString('voidflix_active_profile');
       if (activeId != null) {
         final audioLangPref = prefs.getString('profile_${activeId}_audio_lang');
         final profilesListStr = prefs.getString('voidflix_profiles_list');
-        final langs = <String>[];
         if (audioLangPref != null && audioLangPref.isNotEmpty) {
           final parts = audioLangPref
               .split(',')
@@ -252,7 +295,6 @@ class DownloadProvider extends ChangeNotifier {
           for (final item in list) {
             if (item is Map<String, dynamic> && item['id'] == activeId) {
               if (item['preferredAudioLang'] != null) langs.add(item['preferredAudioLang'] as String);
-              if (item['preferredSubtitleLang'] != null) langs.add(item['preferredSubtitleLang'] as String);
               if (item['preferredLanguages'] is List) {
                 langs.addAll((item['preferredLanguages'] as List).map((e) => e.toString()));
               }
@@ -260,10 +302,47 @@ class DownloadProvider extends ChangeNotifier {
             }
           }
         }
-        return langs.toSet().toList();
       }
+      return langs.toSet().toList();
     } catch (_) {}
     return const [];
+  }
+
+  /// Retrieves user preferred subtitle language
+  Future<String?> _getPreferredSubtitleLanguage() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final appSubPref = prefs.getString('voidflix_preferred_sub_lang');
+      if (appSubPref != null && appSubPref.isNotEmpty && appSubPref != 'Off / None' && appSubPref != 'None') {
+        return appSubPref;
+      }
+      final activeId = prefs.getString('voidflix_active_profile');
+      if (activeId != null) {
+        final profilesListStr = prefs.getString('voidflix_profiles_list');
+        if (profilesListStr != null && profilesListStr.isNotEmpty) {
+          final list = jsonDecode(profilesListStr) as List<dynamic>;
+          for (final item in list) {
+            if (item is Map<String, dynamic> && item['id'] == activeId) {
+              return item['preferredSubtitleLang'] as String?;
+            }
+          }
+        }
+      }
+    } catch (_) {}
+    return null;
+  }
+
+  /// Retrieves target download quality height (2160, 1080, 720, 480)
+  Future<int> _getPreferredQualityHeight() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final q = prefs.getString('voidflix_download_quality') ?? 'High';
+      if (q.contains('4K') || q.contains('2160')) return 2160;
+      if (q.contains('1080') || q == 'High') return 1080;
+      if (q.contains('720') || q == 'Standard') return 720;
+      if (q.contains('480') || q.contains('Data Saver')) return 480;
+    } catch (_) {}
+    return 1080;
   }
 
   /// Calculates language priority score:
@@ -319,6 +398,7 @@ class DownloadProvider extends ChangeNotifier {
     required int episode,
     required Directory downloadDir,
     required List<SubtitleTrack> availableSubs,
+    String? preferredSubLang,
   }) async {
     final List<SubtitleTrack> subsToProcess = [...availableSubs];
 
@@ -382,7 +462,13 @@ class DownloadProvider extends ChangeNotifier {
 
     if (subsToProcess.isEmpty) return null;
 
-    final preferredLangs = await _getPreferredLanguages();
+    final preferredLangs = <String>[];
+    if (preferredSubLang != null && preferredSubLang.isNotEmpty && preferredSubLang != 'Off / None' && preferredSubLang != 'None') {
+      preferredLangs.add(preferredSubLang);
+    }
+    preferredLangs.addAll(await _getPreferredAudioLanguages());
+    preferredLangs.add('en');
+    preferredLangs.add('English');
 
     String? primarySubPath;
     final downloadedTracksMeta = <Map<String, String>>[];
@@ -473,6 +559,9 @@ class DownloadProvider extends ChangeNotifier {
     String? backdropPath,
     String? stillPath,
     int runtime = 0,
+    String? preferredQuality,
+    String? preferredAudio,
+    String? preferredSubtitle,
   }) async {
     final cleanTitle = sanitizeTitle(title);
     final id = generateId(mediaType, mediaId, season: season, episode: episode);
@@ -555,107 +644,238 @@ class DownloadProvider extends ChangeNotifier {
     );
 
     try {
-      // 2. Build prioritized candidate download stream list
+      // 2. Build prioritized candidate download stream list from the BEST servers
       final candidates = <_DownloadCandidate>[];
+      final availableSubs = <SubtitleTrack>[];
 
-      // A. Direct file resolver (Stremio addon / direct MP4)
-      final directFile = await StreamExtractor.extractDirectFileUrl(
-        type: mediaType,
-        tmdbId: mediaId,
-        season: season,
-        episode: episode,
-      );
-      if (directFile != null && directFile.isNotEmpty) {
-        candidates.add(_DownloadCandidate(
-          url: directFile,
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-          },
-          isHls: directFile.contains('.m3u8'),
-          qualityLabel: '1080p',
-        ));
+      final preferredAudioLangs = preferredAudio != null && preferredAudio.isNotEmpty
+          ? [preferredAudio, ...await _getPreferredAudioLanguages()]
+          : await _getPreferredAudioLanguages();
+
+      final targetHeight = preferredQuality != null
+          ? (preferredQuality.contains('4K') || preferredQuality.contains('2160')
+              ? 2160
+              : preferredQuality.contains('1080')
+                  ? 1080
+                  : preferredQuality.contains('720')
+                      ? 720
+                      : 480)
+          : await _getPreferredQualityHeight();
+
+      // Priority 1: Meow (Telegram VPS 25k Channel Database with multi-audio & multi-quality direct MP4)
+      try {
+        final telegramStreams = await StreamExtractor.extractTelegram(
+          type: mediaType,
+          tmdbId: mediaId,
+          season: season,
+          episode: episode,
+        ).timeout(const Duration(seconds: 4));
+
+        for (final s in telegramStreams) {
+          if (s.subtitles.isNotEmpty) availableSubs.addAll(s.subtitles);
+          for (final q in s.qualities) {
+            candidates.add(_DownloadCandidate(
+              url: q.url,
+              headers: s.headers,
+              isHls: false, // Direct progressive MP4 stream with byte-range 206!
+              qualityLabel: q.label,
+              serverName: 'Meow',
+              audioLanguage: s.language,
+              height: q.height > 0 ? q.height : 1080,
+            ));
+          }
+          if (s.qualities.isEmpty && s.url.isNotEmpty) {
+            candidates.add(_DownloadCandidate(
+              url: s.url,
+              headers: s.headers,
+              isHls: s.type == 'hls' || s.url.contains('.m3u8'),
+              qualityLabel: s.qualityLabel ?? '1080p',
+              serverName: 'Meow',
+              audioLanguage: s.language,
+              height: 1080,
+            ));
+          }
+        }
+      } catch (e) {
+        debugPrint('Download: Meow Telegram candidate error: $e');
       }
 
-      // B. Voidflix backend extraction (matches web proxy)
-      final voidflixStream = await StreamExtractor.extractVoidflixBackend(
-        type: mediaType,
-        tmdbId: mediaId,
-        season: season,
-        episode: episode,
-      );
-      if (voidflixStream != null) {
-        for (final q in voidflixStream.qualities) {
-          final proxiedDownloadUrl = q.url.contains('?')
-              ? '${q.url}&download=${Uri.encodeComponent('$title.mp4')}'
-              : '${q.url}?download=${Uri.encodeComponent('$title.mp4')}';
+      // Priority 2: NebulaHD & Cine4K (Direct High-Speed CDN with Full Muxed Audio)
+      try {
+        final cinejoyStreams = await StreamExtractor.extractCinejoy(
+          type: mediaType,
+          tmdbId: mediaId,
+          season: season,
+          episode: episode,
+          title: cleanTitle,
+        ).timeout(const Duration(seconds: 4));
+
+        for (final s in cinejoyStreams) {
+          if (s.subtitles.isNotEmpty) availableSubs.addAll(s.subtitles);
+          for (final q in s.qualities) {
+            candidates.add(_DownloadCandidate(
+              url: q.url,
+              headers: s.headers,
+              isHls: true,
+              qualityLabel: q.label,
+              serverName: s.sourceName,
+              audioLanguage: s.language,
+              height: q.height > 0 ? q.height : 1080,
+            ));
+          }
+          if (s.qualities.isEmpty && s.url.isNotEmpty) {
+            candidates.add(_DownloadCandidate(
+              url: s.url,
+              headers: s.headers,
+              isHls: true,
+              qualityLabel: s.qualityLabel ?? '1080p Full HD',
+              serverName: s.sourceName,
+              audioLanguage: s.language,
+              height: 1080,
+            ));
+          }
+        }
+      } catch (e) {
+        debugPrint('Download: Cinejoy / NebulaHD candidate error: $e');
+      }
+
+      // Priority 3: Direct File Resolver (Stremio direct MP4 addon)
+      try {
+        final directFile = await StreamExtractor.extractDirectFileUrl(
+          type: mediaType,
+          tmdbId: mediaId,
+          season: season,
+          episode: episode,
+        ).timeout(const Duration(seconds: 4));
+        if (directFile != null && directFile.isNotEmpty) {
           candidates.add(_DownloadCandidate(
-            url: proxiedDownloadUrl,
-            headers: voidflixStream.headers,
-            isHls: q.url.contains('.m3u8') || voidflixStream.type == 'hls',
-            qualityLabel: q.label,
+            url: directFile,
+            headers: {
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+            },
+            isHls: directFile.contains('.m3u8'),
+            qualityLabel: '1080p',
+            serverName: 'DirectFile',
+            audioLanguage: 'Original',
+            height: 1080,
           ));
         }
-        candidates.add(_DownloadCandidate(
-          url: voidflixStream.url,
-          headers: voidflixStream.headers,
-          isHls: voidflixStream.type == 'hls' || voidflixStream.url.contains('.m3u8'),
-          qualityLabel: voidflixStream.qualityLabel ?? 'HD',
-        ));
-      }
+      } catch (_) {}
 
-      // C. General stream extraction (Vidlink / Vidrock)
-      final generalStreams = await StreamExtractor.extractAll(
-        type: mediaType,
-        tmdbId: mediaId,
-        season: season,
-        episode: episode,
-      );
-
-      // Prioritize streams matching user selected audio language
-      final profileLangs = await _getPreferredLanguages();
-      if (profileLangs.isNotEmpty) {
-        generalStreams.sort((a, b) {
-          final aScore = _getLangScore(a.language, profileLangs);
-          final bScore = _getLangScore(b.language, profileLangs);
-          return bScore.compareTo(aScore);
-        });
-      }
-
-      for (final s in generalStreams) {
-        for (final q in s.qualities) {
-          candidates.add(_DownloadCandidate(
-            url: q.url,
-            headers: s.headers,
-            isHls: q.url.contains('.m3u8') || s.type == 'hls',
-            qualityLabel: q.label,
-          ));
+      // Priority 4: Vidlink & Vidrock
+      try {
+        final vidlinkStream = await StreamExtractor.extractVidlink(
+          type: mediaType,
+          tmdbId: mediaId,
+          season: season,
+          episode: episode,
+        ).timeout(const Duration(seconds: 4));
+        if (vidlinkStream != null) {
+          if (vidlinkStream.subtitles.isNotEmpty) availableSubs.addAll(vidlinkStream.subtitles);
+          for (final q in vidlinkStream.qualities) {
+            candidates.add(_DownloadCandidate(
+              url: q.url,
+              headers: vidlinkStream.headers,
+              isHls: q.url.contains('.m3u8') || vidlinkStream.type == 'hls',
+              qualityLabel: q.label,
+              serverName: 'Vidlink',
+              audioLanguage: vidlinkStream.language,
+              height: q.height > 0 ? q.height : 1080,
+            ));
+          }
         }
-        candidates.add(_DownloadCandidate(
-          url: s.url,
-          headers: s.headers,
-          isHls: s.type == 'hls' || s.url.contains('.m3u8'),
-          qualityLabel: s.qualityLabel ?? 'Auto',
-        ));
-      }
+      } catch (_) {}
+
+      // Priority 5: Voidflix backend extraction
+      try {
+        final voidflixStream = await StreamExtractor.extractVoidflixBackend(
+          type: mediaType,
+          tmdbId: mediaId,
+          season: season,
+          episode: episode,
+        ).timeout(const Duration(seconds: 4));
+        if (voidflixStream != null) {
+          if (voidflixStream.subtitles.isNotEmpty) availableSubs.addAll(voidflixStream.subtitles);
+          for (final q in voidflixStream.qualities) {
+            final proxiedDownloadUrl = q.url.contains('?')
+                ? '${q.url}&download=${Uri.encodeComponent('$title.mp4')}'
+                : '${q.url}?download=${Uri.encodeComponent('$title.mp4')}';
+            candidates.add(_DownloadCandidate(
+              url: proxiedDownloadUrl,
+              headers: voidflixStream.headers,
+              isHls: q.url.contains('.m3u8') || voidflixStream.type == 'hls',
+              qualityLabel: q.label,
+              serverName: 'Voidflix',
+              audioLanguage: voidflixStream.language,
+              height: q.height > 0 ? q.height : 1080,
+            ));
+          }
+        }
+      } catch (_) {}
 
       if (candidates.isEmpty) {
         throw Exception('No stream candidates available for offline download.');
       }
 
-      // Collect all available subtitles from extracted sources
-      final availableSubs = <SubtitleTrack>[];
-      if (voidflixStream != null && voidflixStream.subtitles.isNotEmpty) {
-        availableSubs.addAll(voidflixStream.subtitles);
-      }
-      for (final s in generalStreams) {
-        for (final sub in s.subtitles) {
-          if (!availableSubs.any((existing) => existing.url == sub.url)) {
-            availableSubs.add(sub);
+      // Score and sort candidates based on user preferences and server quality
+      int scoreCandidate(_DownloadCandidate c) {
+        int score = 0;
+
+        // 1. Audio Language Match (Weight: 3000 points)
+        if (preferredAudioLangs.isNotEmpty) {
+          final topPref = preferredAudioLangs.first;
+          if (LanguageUtils.matches(c.audioLanguage, topPref) ||
+              LanguageUtils.matches(c.qualityLabel, topPref)) {
+            score += 3000;
+          } else {
+            for (int i = 1; i < preferredAudioLangs.length; i++) {
+              if (LanguageUtils.matches(c.audioLanguage, preferredAudioLangs[i]) ||
+                  LanguageUtils.matches(c.qualityLabel, preferredAudioLangs[i])) {
+                score += (2500 - (i * 200));
+                break;
+              }
+            }
           }
         }
+        if (LanguageUtils.matches(c.audioLanguage, 'en') ||
+            LanguageUtils.matches(c.audioLanguage, 'english') ||
+            c.qualityLabel.toLowerCase().contains('english')) {
+          score += 400; // English fallback bonus
+        }
+
+        // 2. Video Quality Match (Weight: 2000 points)
+        if (c.height == targetHeight) {
+          score += 2000;
+        } else if (c.height > 0) {
+          final diff = (c.height - targetHeight).abs();
+          score += (1500 - diff).clamp(100, 1500);
+        }
+
+        // 3. Best Server Weight
+        if (c.serverName == 'Meow') {
+          score += 1200; // Slot #1: Direct MP4 from 25k Telegram channel, fastest progressive download
+        } else if (c.serverName.contains('NebulaHD')) {
+          score += 900; // Slot #2: Full muxed AAC stereo audio HLS
+        } else if (c.serverName.contains('Cine4K')) {
+          score += 700;
+        } else if (c.serverName == 'Vidlink') {
+          score += 600;
+        } else if (!c.isHls) {
+          score += 500; // Direct MP4 bonus over HLS segments
+        } else {
+          score += 300;
+        }
+
+        return score;
       }
 
-      // Download and cache offline subtitles in background
+      final scoredCandidates = candidates
+          .map((c) => c.copyWith(score: scoreCandidate(c)))
+          .toList()
+        ..sort((a, b) => b.score.compareTo(a.score));
+
+      // Download and cache offline subtitles in background respecting user preference
+      final preferredSubLang = preferredSubtitle ?? await _getPreferredSubtitleLanguage();
       _downloadLocalSubtitle(
         id: id,
         mediaType: mediaType,
@@ -664,6 +884,7 @@ class DownloadProvider extends ChangeNotifier {
         episode: episode,
         downloadDir: downloadDir,
         availableSubs: availableSubs,
+        preferredSubLang: preferredSubLang,
       ).then((savedSubPath) {
         if (savedSubPath != null) {
           final idx = _items.indexWhere((i) => i.id == id);
@@ -679,7 +900,7 @@ class DownloadProvider extends ChangeNotifier {
       bool downloadSuccess = false;
       String chosenQuality = 'HD';
 
-      for (final candidate in candidates) {
+      for (final candidate in scoredCandidates) {
         if (!_activeClients.containsKey(id)) {
           // Cancelled by user
           return;
@@ -696,6 +917,7 @@ class DownloadProvider extends ChangeNotifier {
             segmentsDirPath: segmentsDirPath,
             downloadId: id,
             title: cleanTitle,
+            targetHeight: targetHeight,
             onProgress: (p, bytes) {
               _updateProgress(id, p, bytes);
             },
@@ -716,6 +938,11 @@ class DownloadProvider extends ChangeNotifier {
 
         if (downloadSuccess) {
           chosenQuality = candidate.qualityLabel;
+          if (candidate.audioLanguage.isNotEmpty &&
+              candidate.audioLanguage != 'Original' &&
+              !chosenQuality.toLowerCase().contains(candidate.audioLanguage.toLowerCase())) {
+            chosenQuality = '$chosenQuality • ${candidate.audioLanguage}';
+          }
           break;
         }
       }
@@ -831,6 +1058,7 @@ class DownloadProvider extends ChangeNotifier {
     required String segmentsDirPath,
     required String downloadId,
     required String title,
+    int targetHeight = 1080,
     required Function(double progress, int bytes) onProgress,
   }) async {
     final client = _activeClients[downloadId];
@@ -849,31 +1077,63 @@ class DownloadProvider extends ChangeNotifier {
       var playlistContent = res.body;
       var playlistBaseUri = Uri.parse(m3u8Url);
 
-      // Handle Master Playlist (pick highest quality stream variant)
+      // Handle Master Playlist (pick variant matching user's preferred quality)
       if (playlistContent.contains('#EXT-X-STREAM-INF')) {
         final lines = LineSplitter.split(playlistContent).toList();
-        String? bestVariantUrl;
+        final variants = <_HlsVariantCandidate>[];
+        String? currentInfo;
         for (int i = 0; i < lines.length; i++) {
           final line = lines[i].trim();
-          if (line.startsWith('#EXT-X-STREAM-INF')) {
-            for (int j = i + 1; j < lines.length; j++) {
-              final nextLine = lines[j].trim();
-              if (nextLine.isNotEmpty && !nextLine.startsWith('#')) {
-                bestVariantUrl = playlistBaseUri.resolve(nextLine).toString();
-                break;
-              }
-            }
-            if (bestVariantUrl != null) break;
+          if (line.startsWith('#EXT-X-STREAM-INF:')) {
+            currentInfo = line;
+          } else if (line.isNotEmpty && !line.startsWith('#')) {
+            final variantUrl = playlistBaseUri.resolve(line).toString();
+            final resMatch = RegExp(r'RESOLUTION=\d+x(\d+)').firstMatch(currentInfo ?? '');
+            final h = resMatch != null
+                ? int.tryParse(resMatch.group(1)!) ?? 1080
+                : (line.contains('4k')
+                    ? 2160
+                    : line.contains('1080')
+                        ? 1080
+                        : line.contains('720')
+                            ? 720
+                            : 480);
+            variants.add(_HlsVariantCandidate(url: variantUrl, height: h));
+            currentInfo = null;
           }
         }
 
-        if (bestVariantUrl != null) {
+        if (variants.isNotEmpty) {
+          variants.sort((a, b) {
+            final diffA = (a.height - targetHeight).abs();
+            final diffB = (b.height - targetHeight).abs();
+            return diffA.compareTo(diffB);
+          });
+          final bestVariantUrl = variants.first.url;
           final subRes = await client
               .get(Uri.parse(bestVariantUrl), headers: reqHeaders)
               .timeout(const Duration(seconds: 12));
           if (subRes.statusCode == 200) {
             playlistContent = subRes.body;
             playlistBaseUri = Uri.parse(bestVariantUrl);
+          }
+        }
+      }
+
+      // Audio health check: Reject if audio CDN is 502/broken
+      final audioMatches = RegExp(r'#EXT-X-MEDIA:TYPE=AUDIO.*?URI="([^"]+)"').allMatches(playlistContent);
+      if (audioMatches.isNotEmpty) {
+        final firstAudioUri = audioMatches.first.group(1);
+        if (firstAudioUri != null) {
+          final resolvedAudio = playlistBaseUri.resolve(firstAudioUri);
+          try {
+            final aCheck = await client.get(resolvedAudio, headers: reqHeaders).timeout(const Duration(seconds: 2));
+            if (aCheck.statusCode >= 400) {
+              debugPrint('HLS audio CDN rejected with HTTP ${aCheck.statusCode} - skipping broken audio server');
+              return false;
+            }
+          } catch (_) {
+            return false;
           }
         }
       }
@@ -893,6 +1153,27 @@ class DownloadProvider extends ChangeNotifier {
       final segDir = Directory(segmentsDirPath);
       if (!segDir.existsSync()) {
         await segDir.create(recursive: true);
+      }
+
+      // Check for fragmented MP4 initialization segment (fMP4 / NebulaHD)
+      final mapMatch = RegExp(r'#EXT-X-MAP:URI="([^"]+)"').firstMatch(playlistContent);
+      File? initFile;
+      if (mapMatch != null) {
+        final initUri = playlistBaseUri.resolve(mapMatch.group(1)!);
+        final initF = File('${segDir.path}/init.mp4');
+        if (!initF.existsSync() || initF.lengthSync() == 0) {
+          try {
+            final initRes = await client.get(initUri, headers: reqHeaders).timeout(const Duration(seconds: 15));
+            if (initRes.statusCode == 200 && initRes.bodyBytes.isNotEmpty) {
+              await initF.writeAsBytes(initRes.bodyBytes, flush: true);
+              initFile = initF;
+            }
+          } catch (e) {
+            debugPrint('Failed to download fMP4 init segment: $e');
+          }
+        } else {
+          initFile = initF;
+        }
       }
 
       // Check existing downloaded segments to resume exactly from where left off
@@ -1005,6 +1286,11 @@ class DownloadProvider extends ChangeNotifier {
       // High-efficiency stream piping into .part file without heap memory spikes
       final partFile = File(partPath);
       final sink = partFile.openWrite(mode: FileMode.write);
+
+      // Prepend fMP4 init segment if present (ensures valid, playable MP4 with audio)
+      if (initFile != null && initFile.existsSync()) {
+        await sink.addStream(initFile.openRead());
+      }
 
       for (int i = 0; i < segmentUris.length; i++) {
         final segFileName = 'seg_${i.toString().padLeft(6, '0')}.ts';

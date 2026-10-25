@@ -209,6 +209,25 @@ class ClipExportService {
                 final segDir = Directory('${cacheDir.path}/clip_segs_${DateTime.now().millisecondsSinceEpoch}');
                 await segDir.create(recursive: true);
 
+                // Check for fragmented MP4 initialization segment (#EXT-X-MAP:URI="init.mp4")
+                final mapMatch = RegExp(r'#EXT-X-MAP:URI="([^"]+)"').firstMatch(playlistContent);
+                File? initFile;
+                bool isFmp4 = mapMatch != null;
+
+                if (mapMatch != null) {
+                  final initUri = playlistBaseUri.resolve(mapMatch.group(1)!);
+                  final initF = File('${segDir.path}/init.mp4');
+                  try {
+                    final initRes = await client.get(initUri, headers: headers).timeout(const Duration(seconds: 15));
+                    if (initRes.statusCode == 200 && initRes.bodyBytes.isNotEmpty) {
+                      await initF.writeAsBytes(initRes.bodyBytes, flush: true);
+                      initFile = initF;
+                    }
+                  } catch (e) {
+                    debugPrint('ClipExportService: Error downloading fMP4 init segment: $e');
+                  }
+                }
+
                 // Multi-worker parallel segment downloader (concurrency = 6)
                 const concurrency = 6;
                 int queueCursor = 0;
@@ -245,9 +264,15 @@ class ClipExportService {
                   await Future.wait(List.generate(workerCount, (_) => runWorker()));
                 }
 
-                // High-efficiency stream piping into tempSourceFile
-                tempSourceFile = File('${cacheDir.path}/temp_clip_${DateTime.now().millisecondsSinceEpoch}.ts');
+                // High-efficiency stream piping into tempSourceFile (with init.mp4 prepended if fMP4)
+                final ext = isFmp4 ? 'mp4' : 'ts';
+                tempSourceFile = File('${cacheDir.path}/temp_clip_${DateTime.now().millisecondsSinceEpoch}.$ext');
                 final sink = tempSourceFile.openWrite(mode: FileMode.write);
+
+                if (initFile != null && initFile.existsSync()) {
+                  await sink.addStream(initFile.openRead());
+                }
+
                 for (int i = 0; i < targetSegments.length; i++) {
                   final segFile = File('${segDir.path}/seg_${i.toString().padLeft(5, '0')}.ts');
                   if (segFile.existsSync()) {
@@ -330,7 +355,7 @@ class ClipExportService {
               ? tempSourceFile
               : (File(inputVideoPath).existsSync() ? File(inputVideoPath) : null);
 
-          if (sourceFile != null && sourceFile.existsSync()) {
+          if (sourceFile != null && sourceFile.existsSync() && sourceFile.path.endsWith('.mp4')) {
             try {
               await sourceFile.copy(outputFile.path);
               try {
