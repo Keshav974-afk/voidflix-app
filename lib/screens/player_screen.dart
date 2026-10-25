@@ -1354,6 +1354,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
     final clamped = Duration(
       seconds: newPos.inSeconds.clamp(0, controller.value.duration.inSeconds),
     );
+    setState(() {
+      _currentPosition = clamped;
+      _isBuffering = true;
+    });
     controller.seekTo(clamped);
 
     if (triggerFeedback) {
@@ -1374,16 +1378,21 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
     _lastDoubleTapTime = now;
 
-    _seekRelative(isForward ? 10 : -10, triggerFeedback: false);
-
+    // Show visual ripple feedback immediately (+10s, +20s, +30s...)
     setState(() => _doubleTapSeekSeconds = _cumulativeSeekSeconds);
     _doubleTapTimer?.cancel();
-    _doubleTapTimer = Timer(const Duration(milliseconds: 750), () {
+
+    // Debounce the actual seek call so 3 rapid double-taps fire ONLY ONE consolidated seek request!
+    _doubleTapTimer = Timer(const Duration(milliseconds: 350), () {
       if (mounted) {
+        final totalSec = _cumulativeSeekSeconds;
         setState(() {
           _doubleTapSeekSeconds = null;
           _cumulativeSeekSeconds = 0;
         });
+        if (totalSec != 0) {
+          _seekRelative(totalSec, triggerFeedback: false);
+        }
       }
     });
   }
@@ -4711,8 +4720,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                                 setState(() => _dragPositionSec = val);
                                               },
                                               onChangeEnd: (val) {
-                                                setState(() => _isDraggingSeekbar = false);
-                                                _videoPlayerController?.seekTo(Duration(seconds: val.toInt()));
+                                                final target = Duration(seconds: val.toInt());
+                                                setState(() {
+                                                  _isDraggingSeekbar = false;
+                                                  _currentPosition = target;
+                                                  _isBuffering = true;
+                                                });
+                                                _videoPlayerController?.seekTo(target);
                                                 _startHideControlsTimer();
                                               },
                                             ),
