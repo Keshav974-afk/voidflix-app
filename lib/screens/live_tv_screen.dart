@@ -174,20 +174,55 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
     );
   }
 
+  static String _resolveCleanStreamUrl(SportsStream stream, String title) {
+    // 1. If the stream provides explicit manifest and clearKeys
+    if (stream.manifest != null && stream.keyId != null && stream.key != null) {
+      return 'https://voidflix.org/dash-player.html?manifest=${Uri.encodeComponent(stream.manifest!)}&keyid=${stream.keyId}&key=${stream.key}&title=${Uri.encodeComponent(title)}';
+    }
+
+    final raw = stream.url;
+
+    // 2. If already pointing to voidflix.org/dash-player.html
+    if (raw.contains('voidflix.org/dash-player.html')) {
+      if (!raw.contains('title=') && title.isNotEmpty) {
+        return '$raw&title=${Uri.encodeComponent(title)}';
+      }
+      return raw;
+    }
+
+    // 3. If raw URL has DASH mpd with clearKeys
+    if (raw.contains('dash/mpd') || raw.contains('cenc.mpd') || raw.contains('manifest=')) {
+      final mManifest = RegExp(r'manifest=([^&]+)').firstMatch(raw);
+      final mKid = RegExp(r'keyid=([^&]+)').firstMatch(raw);
+      final mKey = RegExp(r'key=([^&]+)').firstMatch(raw);
+      if (mManifest != null && mKid != null && mKey != null) {
+        final mpd = Uri.decodeComponent(mManifest.group(1)!);
+        return 'https://voidflix.org/dash-player.html?manifest=${Uri.encodeComponent(mpd)}&keyid=${mKid.group(1)}&key=${mKey.group(1)}&title=${Uri.encodeComponent(title)}';
+      }
+    }
+
+    return raw;
+  }
+
   List<LiveChannel> get _sportsChannels {
     final list = <LiveChannel>[];
     for (final match in _matches) {
       if (match.streams.isEmpty) continue;
+      // Prioritize DASH / clean player feeds over broken HLS
       final primaryStream = match.streams.firstWhere(
-        (s) => s.isDirect && s.type == 'hls',
-        orElse: () => match.streams.first,
+        (s) => s.type == 'dash' || s.url.contains('dash-player.html'),
+        orElse: () => match.streams.firstWhere(
+          (s) => s.isDirect,
+          orElse: () => match.streams.first,
+        ),
       );
+      final resolvedUrl = _resolveCleanStreamUrl(primaryStream, match.title);
       list.add(LiveChannel(
         id: match.id,
         name: match.title,
         category: match.category,
-        streamUrl: primaryStream.url,
-        directStreamUrl: primaryStream.isDirect ? primaryStream.url : null,
+        streamUrl: resolvedUrl,
+        directStreamUrl: (primaryStream.type == 'hls' && primaryStream.isDirect) ? primaryStream.url : resolvedUrl,
         description: '${match.category} • ${match.formattedStatus} • ${match.streams.length} stream(s)',
         httpHeaders: primaryStream.headers,
       ));
@@ -214,12 +249,13 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
 
   void _watchMatchStream(SportsMatch match, SportsStream s) {
     final matchChannels = match.streams.map((stream) {
+      final resolvedUrl = _resolveCleanStreamUrl(stream, match.title);
       return LiveChannel(
         id: '${match.id}_${stream.id}',
         name: '${match.title} (${stream.label})',
         category: match.category,
-        streamUrl: stream.url,
-        directStreamUrl: stream.isDirect ? stream.url : null,
+        streamUrl: resolvedUrl,
+        directStreamUrl: (stream.type == 'hls' && stream.isDirect) ? stream.url : resolvedUrl,
         description: '${match.category} • ${match.formattedStatus}',
         httpHeaders: stream.headers,
       );
@@ -1703,6 +1739,18 @@ class _LiveChannelPlayerScreenState extends State<LiveChannelPlayerScreen> {
             playUrl = 'https://rockyembed.st/source/streamed1.php?hd=33&id=${parts[0]}&no=1';
           }
         }
+        // Route any DASH / ClearKey stream through our own clean embedded zero-ad player
+        if (playUrl.contains('manifest=') && (playUrl.contains('keyid=') || playUrl.contains('key='))) {
+          if (!playUrl.contains('voidflix.org/dash-player.html')) {
+            final mManifest = RegExp(r'manifest=([^&]+)').firstMatch(playUrl);
+            final mKid = RegExp(r'keyid=([^&]+)').firstMatch(playUrl);
+            final mKey = RegExp(r'key=([^&]+)').firstMatch(playUrl);
+            if (mManifest != null && mKid != null && mKey != null) {
+              final mpd = Uri.decodeComponent(mManifest.group(1)!);
+              playUrl = 'https://voidflix.org/dash-player.html?manifest=${Uri.encodeComponent(mpd)}&keyid=${mKid.group(1)}&key=${mKey.group(1)}&title=${Uri.encodeComponent(_currentChannel.name)}';
+            }
+          }
+        }
 
         final controller = WebViewController()
           ..setJavaScriptMode(JavaScriptMode.unrestricted)
@@ -1752,22 +1800,37 @@ class _LiveChannelPlayerScreenState extends State<LiveChannelPlayerScreen> {
 
   Future<void> _launchDesktopPlayer(String streamUrl, {bool forceBrowser = false}) async {
     try {
+      var targetUrl = streamUrl;
+      // Route any DASH / ClearKey stream through our own clean zero-ad player
+      if (targetUrl.contains('manifest=') && (targetUrl.contains('keyid=') || targetUrl.contains('key='))) {
+        if (!targetUrl.contains('voidflix.org/dash-player.html')) {
+          final mManifest = RegExp(r'manifest=([^&]+)').firstMatch(targetUrl);
+          final mKid = RegExp(r'keyid=([^&]+)').firstMatch(targetUrl);
+          final mKey = RegExp(r'key=([^&]+)').firstMatch(targetUrl);
+          if (mManifest != null && mKid != null && mKey != null) {
+            final mpd = Uri.decodeComponent(mManifest.group(1)!);
+            targetUrl = 'https://voidflix.org/dash-player.html?manifest=${Uri.encodeComponent(mpd)}&keyid=${mKid.group(1)}&key=${mKey.group(1)}&title=${Uri.encodeComponent(_currentChannel.name)}';
+          }
+        }
+      }
+
       if (!forceBrowser && !kIsWeb && Platform.isWindows) {
         // Try Edge App Mode (Dedicated, borderless 1080p window)
+        // CRITICAL: Double quote argument so cmd.exe never splits on & key parameters!
         try {
-          final res = await Process.run('cmd', ['/c', 'start', '""', 'msedge', '--app=$streamUrl']);
+          final res = await Process.run('cmd', ['/c', 'start', '""', 'msedge', '"--app=$targetUrl"']);
           if (res.exitCode == 0) return;
         } catch (_) {}
 
-        // Try Chrome App Mode
+        // Try Chrome App Mode with double quoted argument
         try {
-          final res = await Process.run('cmd', ['/c', 'start', '""', 'chrome', '--app=$streamUrl']);
+          final res = await Process.run('cmd', ['/c', 'start', '""', 'chrome', '"--app=$targetUrl"']);
           if (res.exitCode == 0) return;
         } catch (_) {}
       }
 
       // Default browser launch via url_launcher
-      final uri = Uri.parse(streamUrl);
+      final uri = Uri.parse(targetUrl);
       if (await canLaunchUrl(uri)) {
         await launchUrl(uri, mode: LaunchMode.externalApplication);
       }
