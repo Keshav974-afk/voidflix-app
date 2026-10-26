@@ -1679,6 +1679,15 @@ class _LiveChannelPlayerScreenState extends State<LiveChannelPlayerScreen> {
     // 2. Mobile web embed fallback (when supported)
     else {
       try {
+        var playUrl = streamUrl;
+        // Direct resolution for golf stream wrapper to eliminate sandbox detection overlay
+        if (playUrl.contains('embed.st/embed/golf/')) {
+          final parts = playUrl.split('embed/golf/')[1].split('/');
+          if (parts.isNotEmpty && parts[0].isNotEmpty) {
+            playUrl = 'https://rockyembed.st/source/streamed1.php?hd=33&id=${parts[0]}&no=1';
+          }
+        }
+
         final controller = WebViewController()
           ..setJavaScriptMode(JavaScriptMode.unrestricted)
           ..setUserAgent(EmbedShield.userAgent)
@@ -1708,7 +1717,7 @@ class _LiveChannelPlayerScreenState extends State<LiveChannelPlayerScreen> {
           ),
         );
 
-        controller.loadRequest(Uri.parse(streamUrl));
+        controller.loadRequest(Uri.parse(playUrl));
         _webViewController = controller;
       } catch (_) {
         if (mounted) setState(() => _isLoading = false);

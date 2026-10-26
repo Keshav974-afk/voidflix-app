@@ -120,20 +120,38 @@ class EmbedShield {
     }
   }, true);
 
-  // Remove full-screen invisible popunder overlay elements
+  // Remove full-screen invisible popunder overlay elements & sandbox warnings
   function cleanOverlays() {
     try {
-      var all = document.querySelectorAll('div, a, iframe');
+      var all = document.querySelectorAll('div, a, iframe, section, p, span');
       for (var i = 0; i < all.length; i++) {
         var el = all[i];
-        if (el.tagName === 'IFRAME' && (el.src.indexOf('/ad') !== -1 || el.id === 'close')) {
+
+        // 1. Never remove the legitimate stream player iframe
+        if (el.tagName === 'IFRAME') {
+          if (el.hasAttribute('sandbox')) {
+            el.removeAttribute('sandbox');
+            console.log('[Voidflix] Stripped sandbox attribute from iframe');
+          }
+          if (el.src && (isAdUrl(el.src) || el.id === 'close')) {
+            el.remove();
+          }
+          continue;
+        }
+
+        // 2. Kill any element containing "sandbox" warning text
+        var txt = (el.textContent || '').toLowerCase();
+        if (txt.includes('remove sandbox') || txt.includes('sandbox attributes') || (txt.includes('sandbox') && txt.includes('iframe'))) {
+          console.log('[Voidflix] Purged sandbox warning element:', el.tagName);
           el.remove();
           continue;
         }
+
+        // 3. Kill transparent / full-screen clickjackers or extreme z-index blockers
         var style = window.getComputedStyle(el);
         if (style.position === 'fixed' || style.position === 'absolute') {
           var z = parseInt(style.zIndex, 10);
-          if (z > 500 && (el.clientWidth > window.innerWidth * 0.8) && (el.clientHeight > window.innerHeight * 0.8) && !el.querySelector('video')) {
+          if (z >= 999999 || (z > 500 && (el.clientWidth > window.innerWidth * 0.8) && (el.clientHeight > window.innerHeight * 0.8) && !el.querySelector('video') && !el.querySelector('iframe'))) {
             el.remove();
           }
         }
@@ -141,8 +159,47 @@ class EmbedShield {
     } catch(e) {}
   }
 
+  // Intercept and prevent sandbox attribute from ever being attached to any iframe
+  try {
+    var origSetAttr = Element.prototype.setAttribute;
+    Element.prototype.setAttribute = function(name, val) {
+      if (this.tagName === 'IFRAME' && name && name.toLowerCase() === 'sandbox') {
+        console.log('[Voidflix] Intercepted setAttribute sandbox on iframe');
+        return;
+      }
+      return origSetAttr.apply(this, arguments);
+    };
+  } catch(e) {}
+
+  // Auto-promote inner stream iframes (e.g. rockyembed inside embed.st) so they run in the top window
+  try {
+    function promoteInnerPlayer() {
+      if (window.top !== window.self) return; // Only run on top-level page
+      var iframes = document.querySelectorAll('iframe');
+      for (var j = 0; j < iframes.length; j++) {
+        var ifr = iframes[j];
+        if (ifr.src && (ifr.src.includes('rockyembed.st') || ifr.src.includes('source/streamed') || ifr.src.includes('embedme'))) {
+          console.log('[Voidflix] Auto-promoting inner stream iframe to direct window:', ifr.src);
+          window.location.replace(ifr.src);
+          break;
+        }
+      }
+    }
+    promoteInnerPlayer();
+    setTimeout(promoteInnerPlayer, 400);
+  } catch(e) {}
+
+  // Clear any cached isSandboxed flags in localStorage
+  try {
+    for (var k in localStorage) {
+      if (localStorage.hasOwnProperty(k) && typeof localStorage.getItem(k) === 'string' && localStorage.getItem(k).includes('isSandboxed')) {
+        localStorage.removeItem(k);
+      }
+    }
+  } catch(e) {}
+
   cleanOverlays();
-  setInterval(cleanOverlays, 2000);
+  setInterval(cleanOverlays, 300);
 
   function notifyTap() {
     try { if (window.VoidflixBridge) { window.VoidflixBridge.postMessage('screen_tapped'); } } catch(e) {}
