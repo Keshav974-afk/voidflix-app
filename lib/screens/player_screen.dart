@@ -759,7 +759,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
           season: _currentSeason,
           episode: _currentEpisode,
           preferredAudioLang: preferredAudio,
-        ).timeout(const Duration(milliseconds: 8500), onTimeout: () => <ExtractedStream>[]);
+        ).timeout(const Duration(milliseconds: 12000), onTimeout: () => <ExtractedStream>[]);
 
         if (streams.isEmpty) {
           // Fast-fallback 1: Screenfetch (Filmpire HLS via voidflix.org)
@@ -959,7 +959,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
           season: _currentSeason,
           episode: _currentEpisode,
           preferredAudioLang: preferredAudio,
-        ).timeout(const Duration(milliseconds: 7000), onTimeout: () => <ExtractedStream>[]);
+        ).timeout(const Duration(milliseconds: 12000), onTimeout: () => <ExtractedStream>[]);
 
         if (streams.isEmpty) {
           final sfStreams = await StreamExtractor.extractScreenfetch(

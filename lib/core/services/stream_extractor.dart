@@ -1389,8 +1389,6 @@ class StreamExtractor {
     final domains = [
       'https://net79.cc',
       'https://net27.cc',
-      'https://net77.in',
-      'https://net77.net.in',
     ];
 
     bool isSubtitleOnlyVariant(String raw) {
@@ -1557,38 +1555,34 @@ class StreamExtractor {
           primaryDubId = defaultDubId;
         }
 
-        // 1. Fetch primary dub stream first
-        final primaryStream = await fetchDubStream(primaryDubId.isNotEmpty ? primaryDubId : null, primaryDubLabel);
+        // 1. Concurrently fetch primary dub AND all other available dub variants in parallel!
+        final otherDubs = <Map<String, String>>[];
+        final seenLangs = <String>{primaryDubLabel.toLowerCase()};
+
+        for (final d in availableDubs) {
+          final dId = d['dubId']!;
+          if (dId == primaryDubId) continue;
+          final clean = cleanDubLang(d['language']!);
+          if (!seenLangs.contains(clean.toLowerCase())) {
+            seenLangs.add(clean.toLowerCase());
+            otherDubs.add({'dubId': dId, 'language': clean});
+          }
+        }
+
+        final allDubTasks = <Future<ExtractedStream?>>[
+          fetchDubStream(primaryDubId.isNotEmpty ? primaryDubId : null, primaryDubLabel),
+          ...otherDubs.take(12).map((d) => fetchDubStream(d['dubId'], d['language']!)),
+        ];
+
+        final allStreamResults = await Future.wait(allDubTasks);
+        final primaryStream = allStreamResults.first;
         if (primaryStream == null) continue;
 
         final results = <ExtractedStream>[primaryStream];
-
-        // 2. Concurrently fetch all other available dub variants (Hindi, French, Spanish, Tamil, Telugu, etc.)!
-        if (availableDubs.isNotEmpty) {
-          final otherDubs = <Map<String, String>>[];
-          final seenLangs = <String>{primaryDubLabel.toLowerCase()};
-
-          for (final d in availableDubs) {
-            final dId = d['dubId']!;
-            if (dId == primaryDubId) continue;
-            final clean = cleanDubLang(d['language']!);
-            if (!seenLangs.contains(clean.toLowerCase())) {
-              seenLangs.add(clean.toLowerCase());
-              otherDubs.add({'dubId': dId, 'language': clean});
-            }
-          }
-
-          if (otherDubs.isNotEmpty) {
-            try {
-              final extraStreams = await Future.wait(
-                otherDubs.take(12).map((d) => fetchDubStream(d['dubId'], d['language']!)),
-              );
-              for (final s in extraStreams) {
-                if (s != null) {
-                  results.add(s);
-                }
-              }
-            } catch (_) {}
+        for (int i = 1; i < allStreamResults.length; i++) {
+          final s = allStreamResults[i];
+          if (s != null) {
+            results.add(s);
           }
         }
 
@@ -1650,7 +1644,7 @@ class StreamExtractor {
         season: season,
         episode: episode,
         preferredAudioLang: preferredAudioLang,
-      ).timeout(const Duration(milliseconds: 7500), onTimeout: () => <ExtractedStream>[]);
+      ).timeout(const Duration(milliseconds: 12000), onTimeout: () => <ExtractedStream>[]);
 
       if (nmStreams.isNotEmpty) {
         debugPrint('StreamExtractor: Successfully connected to NetMirror first (${nmStreams.length} streams/dubs ready!)');
