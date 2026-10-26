@@ -1,0 +1,53 @@
+name: Build Linux Flutter Release
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-linux:
+    name: Build Linux Desktop Release
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Linux build dependencies
+        run: |
+          sudo apt-get update -y
+          sudo apt-get install -y clang cmake ninja-build pkg-config libgtk-3-dev liblzma-dev libstdc++-12-dev
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: 'stable'
+          cache: true
+
+      - name: Enable Linux Desktop
+        run: flutter config --enable-linux-desktop
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build Linux Release
+        run: flutter build linux --release
+
+      - name: Package Standalone Tarball
+        run: |
+          tar -C build/linux/x64/release/bundle -czvf Voidflix-Linux-x86_64-v0.4.tar.gz .
+
+      - name: Upload Linux Release Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Voidflix-Linux-x86_64
+          path: Voidflix-Linux-x86_64-v0.4.tar.gz
+
+      - name: Upload Raw Release Bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: Voidflix-Linux-Bundle
+          path: build/linux/x64/release/bundle/
