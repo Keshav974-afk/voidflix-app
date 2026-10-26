@@ -6,6 +6,7 @@ class LiveChannel {
   final String? directStreamUrl;
   final String? logoUrl;
   final String? description;
+  final Map<String, String>? httpHeaders;
 
   const LiveChannel({
     required this.id,
@@ -15,6 +16,7 @@ class LiveChannel {
     this.directStreamUrl,
     this.logoUrl,
     this.description,
+    this.httpHeaders,
   });
 
   /// The active URL for in-app video playback
@@ -30,6 +32,7 @@ class LiveChannel {
 class LiveData {
   static const List<String> categories = [
     "All",
+    "Cricket (Live)",
     "Sports",
     "News",
     "Movies",

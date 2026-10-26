@@ -7,6 +7,8 @@ import '../core/constants/theme_constants.dart';
 import '../core/services/tv_mode_service.dart';
 import '../core/utils/platform_utils.dart';
 import '../models/live_channel.dart';
+import '../models/sports_match.dart';
+import '../core/services/sports_service.dart';
 import '../widgets/tv_back_button.dart';
 import '../widgets/tv_focusable.dart';
 
@@ -18,12 +20,72 @@ class LiveTvScreen extends StatefulWidget {
 }
 
 class _LiveTvScreenState extends State<LiveTvScreen> {
-  String _selectedCategory = "All";
+  String _selectedCategory = "Cricket (Live)";
   int _focusedChannelIndex = 0;
   final ScrollController _channelScrollController = ScrollController();
 
+  List<SportsMatch> _cricketMatches = [];
+  bool _isLoadingCricket = false;
+  String? _cricketError;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadCricketMatches();
+  }
+
+  Future<void> _loadCricketMatches({bool forceRefresh = false}) async {
+    if (_isLoadingCricket) return;
+    setState(() {
+      _isLoadingCricket = true;
+      _cricketError = null;
+    });
+
+    try {
+      final matches = await SportsService().fetchMatches(
+        category: 'cricket',
+        forceRefresh: forceRefresh,
+      );
+      if (mounted) {
+        setState(() {
+          _cricketMatches = matches;
+          _isLoadingCricket = false;
+        });
+      }
+    } catch (e) {
+      if (mounted) {
+        setState(() {
+          _isLoadingCricket = false;
+          _cricketError = e.toString();
+        });
+      }
+    }
+  }
+
+  List<LiveChannel> get _cricketChannels {
+    final list = <LiveChannel>[];
+    for (final match in _cricketMatches) {
+      if (match.streams.isEmpty) continue;
+      final primaryStream = match.streams.firstWhere(
+        (s) => s.isDirect && s.type == 'hls',
+        orElse: () => match.streams.first,
+      );
+      list.add(LiveChannel(
+        id: match.id,
+        name: match.title,
+        category: 'Cricket (Live)',
+        streamUrl: primaryStream.url,
+        directStreamUrl: primaryStream.isDirect ? primaryStream.url : null,
+        description: '${match.category} • ${match.formattedStatus} • ${match.streams.length} stream(s)',
+        httpHeaders: primaryStream.headers,
+      ));
+    }
+    return list;
+  }
+
   List<LiveChannel> get _filteredChannels {
-    if (_selectedCategory == "All") return LiveData.channels;
+    if (_selectedCategory == "Cricket (Live)") return _cricketChannels;
+    if (_selectedCategory == "All") return [..._cricketChannels, ...LiveData.channels];
     return LiveData.channels.where((c) => c.category == _selectedCategory).toList();
   }
 
@@ -36,6 +98,123 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
           initialIndex: _filteredChannels.indexOf(channel),
         ),
       ),
+    );
+  }
+
+  void _showStreamPickerModal(SportsMatch match) {
+    if (match.streams.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No active streams available for this match yet.')),
+      );
+      return;
+    }
+
+    if (match.streams.length == 1) {
+      final s = match.streams.first;
+      _watchChannel(LiveChannel(
+        id: '${match.id}_${s.id}',
+        name: '${match.title} (${s.label})',
+        category: 'Cricket (Live)',
+        streamUrl: s.url,
+        directStreamUrl: s.isDirect ? s.url : null,
+        description: '${match.category} • ${match.formattedStatus}',
+        httpHeaders: s.headers,
+      ));
+      return;
+    }
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: const Color(0xFF14141B),
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      ),
+      builder: (ctx) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                      decoration: BoxDecoration(
+                        color: AppTheme.primaryRed,
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        match.isLive ? 'LIVE' : 'UPCOMING',
+                        style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        match.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  '${match.category} • ${match.formattedStatus}',
+                  style: const TextStyle(color: Colors.white60, fontSize: 12),
+                ),
+                const SizedBox(height: 16),
+                const Text(
+                  'SELECT SERVER / STREAM',
+                  style: TextStyle(color: AppTheme.textMuted, fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1.2),
+                ),
+                const SizedBox(height: 8),
+                ...match.streams.map((s) {
+                  return ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: s.isDirect ? AppTheme.primaryRed.withValues(alpha: 0.2) : Colors.white10,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Icon(
+                        s.isDirect ? Icons.hd_rounded : Icons.link_rounded,
+                        color: s.isDirect ? AppTheme.primaryRed : Colors.white70,
+                        size: 20,
+                      ),
+                    ),
+                    title: Text(
+                      s.label,
+                      style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600),
+                    ),
+                    subtitle: Text(
+                      s.isDirect ? 'Direct High-Bitrate Native Feed' : 'Mirror Feed',
+                      style: const TextStyle(color: Colors.white54, fontSize: 11),
+                    ),
+                    trailing: const Icon(Icons.play_arrow_rounded, color: Colors.white70),
+                    onTap: () {
+                      Navigator.of(ctx).pop();
+                      _watchChannel(LiveChannel(
+                        id: '${match.id}_${s.id}',
+                        name: '${match.title} (${s.label})',
+                        category: 'Cricket (Live)',
+                        streamUrl: s.url,
+                        directStreamUrl: s.isDirect ? s.url : null,
+                        description: '${match.category} • ${match.formattedStatus}',
+                        httpHeaders: s.headers,
+                      ));
+                    },
+                  );
+                }),
+              ],
+            ),
+          ),
+        );
+      },
     );
   }
 
@@ -661,96 +840,270 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
           ),
           const SizedBox(height: 14),
 
-          // Channels Grid
-          LayoutBuilder(
-            builder: (context, constraints) {
-              final count = (constraints.maxWidth / 200).floor().clamp(2, 6);
-              return GridView.builder(
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                  crossAxisCount: count,
-                  childAspectRatio: 1.45,
-                  crossAxisSpacing: 10,
-                  mainAxisSpacing: 10,
+          // Channels Grid / Live Cricket Fixtures
+          if (_selectedCategory == "Cricket (Live)" && _isLoadingCricket) ...[
+            const Center(
+              child: Padding(
+                padding: EdgeInsets.symmetric(vertical: 40),
+                child: Column(
+                  children: [
+                    CircularProgressIndicator(color: AppTheme.primaryRed),
+                    SizedBox(height: 12),
+                    Text(
+                      'Fetching live cricket fixtures & CDN edges…',
+                      style: TextStyle(color: Colors.white70, fontSize: 13),
+                    ),
+                  ],
                 ),
-                itemCount: _filteredChannels.length,
-                itemBuilder: (context, index) {
-                  final ch = _filteredChannels[index];
-
-                  return GestureDetector(
-                    onTap: () => _watchChannel(ch),
-                    child: Container(
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF1E1E1E),
-                        borderRadius: BorderRadius.circular(10),
-                        border: Border.all(color: const Color(0xFF2E2E2E)),
-                        boxShadow: [
-                          BoxShadow(
-                            color: Colors.black.withValues(alpha: 0.4),
-                            blurRadius: 6,
-                            offset: const Offset(0, 3),
+              ),
+            ),
+          ] else if (_selectedCategory == "Cricket (Live)" && _cricketMatches.isEmpty) ...[
+            Center(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(vertical: 40),
+                child: Column(
+                  children: [
+                    const Icon(Icons.sports_cricket_rounded, size: 48, color: Colors.white38),
+                    const SizedBox(height: 12),
+                    Text(
+                      _cricketError != null
+                          ? 'Failed to load live matches: $_cricketError'
+                          : 'No live cricket matches broadcasting right now',
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(color: Colors.white70),
+                    ),
+                    const SizedBox(height: 12),
+                    ElevatedButton.icon(
+                      style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryRed),
+                      onPressed: () => _loadCricketMatches(forceRefresh: true),
+                      icon: const Icon(Icons.refresh_rounded, color: Colors.white),
+                      label: const Text('Refresh Fixtures', style: TextStyle(color: Colors.white)),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ] else if (_selectedCategory == "Cricket (Live)") ...[
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final count = (constraints.maxWidth / 320).floor().clamp(1, 4);
+                return GridView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: count,
+                    childAspectRatio: 1.6,
+                    crossAxisSpacing: 12,
+                    mainAxisSpacing: 12,
+                  ),
+                  itemCount: _cricketMatches.length,
+                  itemBuilder: (context, index) {
+                    final match = _cricketMatches[index];
+                    return GestureDetector(
+                      onTap: () => _showStreamPickerModal(match),
+                      child: Container(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            colors: [
+                              const Color(0xFF1F1F2A),
+                              match.isLive ? const Color(0xFF2E1515) : const Color(0xFF14141B),
+                            ],
                           ),
-                        ],
-                      ),
-                      padding: const EdgeInsets.all(12),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
-                                decoration: BoxDecoration(
-                                  color: Colors.red.withValues(alpha: 0.2),
-                                  borderRadius: BorderRadius.circular(4),
-                                ),
-                                child: const Text(
-                                  'LIVE',
-                                  style: TextStyle(
-                                    fontSize: 9,
-                                    color: Colors.redAccent,
-                                    fontWeight: FontWeight.bold,
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: match.isLive ? AppTheme.primaryRed.withValues(alpha: 0.6) : Colors.white12,
+                            width: 1.2,
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.5),
+                              blurRadius: 8,
+                              offset: const Offset(0, 4),
+                            ),
+                          ],
+                        ),
+                        padding: const EdgeInsets.all(14),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                                  decoration: BoxDecoration(
+                                    color: match.isLive ? Colors.red : Colors.white10,
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      if (match.isLive) ...[
+                                        const Icon(Icons.fiber_manual_record, color: Colors.white, size: 8),
+                                        const SizedBox(width: 4),
+                                      ],
+                                      Text(
+                                        match.formattedStatus,
+                                        style: TextStyle(
+                                          color: match.isLive ? Colors.white : Colors.white70,
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ],
                                   ),
                                 ),
-                              ),
-                              const Icon(Icons.play_circle_outline, color: Colors.white70, size: 22),
-                            ],
-                          ),
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                ch.name,
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  color: Colors.white,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 13,
+                                Text(
+                                  '${match.streams.length} Stream${match.streams.length == 1 ? '' : 's'}',
+                                  style: const TextStyle(color: Colors.white54, fontSize: 11, fontWeight: FontWeight.w500),
                                 ),
+                              ],
+                            ),
+                            Text(
+                              match.title,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.bold,
+                                fontSize: 14,
+                                height: 1.25,
                               ),
-                              const SizedBox(height: 2),
-                              Text(
-                                ch.category,
-                                style: const TextStyle(
-                                  color: AppTheme.textMuted,
-                                  fontSize: 11,
+                            ),
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Expanded(
+                                  child: Text(
+                                    match.category,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(color: AppTheme.textMuted, fontSize: 11),
+                                  ),
                                 ),
-                              ),
-                            ],
-                          ),
-                        ],
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                                  decoration: BoxDecoration(
+                                    color: AppTheme.primaryRed,
+                                    borderRadius: BorderRadius.circular(6),
+                                  ),
+                                  child: const Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(Icons.play_arrow_rounded, color: Colors.white, size: 16),
+                                      SizedBox(width: 4),
+                                      Text(
+                                        'WATCH',
+                                        style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
                       ),
-                    ),
-                  );
-                },
-              );
-            },
-          ),
+                    );
+                  },
+                );
+              },
+            ),
+          ] else ...[
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final count = (constraints.maxWidth / 200).floor().clamp(2, 6);
+                return GridView.builder(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  padding: const EdgeInsets.symmetric(horizontal: 12),
+                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                    crossAxisCount: count,
+                    childAspectRatio: 1.45,
+                    crossAxisSpacing: 10,
+                    mainAxisSpacing: 10,
+                  ),
+                  itemCount: _filteredChannels.length,
+                  itemBuilder: (context, index) {
+                    final ch = _filteredChannels[index];
+
+                    return GestureDetector(
+                      onTap: () => _watchChannel(ch),
+                      child: Container(
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF1E1E1E),
+                          borderRadius: BorderRadius.circular(10),
+                          border: Border.all(color: const Color(0xFF2E2E2E)),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.4),
+                              blurRadius: 6,
+                              offset: const Offset(0, 3),
+                            ),
+                          ],
+                        ),
+                        padding: const EdgeInsets.all(12),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                  decoration: BoxDecoration(
+                                    color: Colors.red.withValues(alpha: 0.2),
+                                    borderRadius: BorderRadius.circular(4),
+                                  ),
+                                  child: const Text(
+                                    'LIVE',
+                                    style: TextStyle(
+                                      fontSize: 9,
+                                      color: Colors.redAccent,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                                ),
+                                const Icon(Icons.play_circle_outline, color: Colors.white70, size: 22),
+                              ],
+                            ),
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  ch.name,
+                                  maxLines: 1,
+                                  overflow: TextOverflow.ellipsis,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontWeight: FontWeight.bold,
+                                    fontSize: 13,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                Text(
+                                  ch.category,
+                                  style: const TextStyle(
+                                    color: AppTheme.textMuted,
+                                    fontSize: 11,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  },
+                );
+              },
+            ),
+          ],
           const SizedBox(height: 36),
         ],
       ),
@@ -759,6 +1112,8 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
 
   IconData _getCategoryIcon(String cat) {
     switch (cat.toLowerCase()) {
+      case 'cricket (live)':
+        return Icons.sports_cricket_rounded;
       case 'sports':
         return Icons.sports_soccer_rounded;
       case 'news':
@@ -835,6 +1190,7 @@ class _LiveChannelPlayerScreenState extends State<LiveChannelPlayerScreen> {
       try {
         final controller = VideoPlayerController.networkUrl(
           Uri.parse(streamUrl),
+          httpHeaders: _currentChannel.httpHeaders ?? const {},
           videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
         );
         _videoPlayerController = controller;
