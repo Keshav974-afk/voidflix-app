@@ -20,6 +20,7 @@ import '../core/services/subtitle_service.dart';
 import '../core/services/stream_proxy_service.dart';
 import '../core/services/app_logger.dart';
 import '../core/services/watch_party_service.dart';
+import '../core/utils/embed_shield.dart';
 import '../core/utils/language_utils.dart';
 import '../core/utils/platform_utils.dart';
 import '../models/media_detail.dart';
@@ -1539,74 +1540,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   bool _shouldBlockNavigation(String url) {
-    final lower = url.toLowerCase();
-    if (lower.startsWith('intent:') ||
-        lower.startsWith('market:') ||
-        lower.startsWith('vnd:') ||
-        lower.startsWith('whatsapp:') ||
-        lower.startsWith('tg:') ||
-        lower.startsWith('mailto:') ||
-        lower.startsWith('tel:') ||
-        lower.startsWith('sms:') ||
-        lower.endsWith('.apk')) {
-      return true;
-    }
-
-    const blocked = [
-      'adsterra', 'popads', 'propellerads', 'exoclick', 'bet365', '1xbet',
-      'betway', 'casino', 'adcash', 'trafficjunky', 'onclickmega', 'doubleclick',
-      'adnxs', 'popcash', 'hilltopads', 'monetag'
-    ];
-    for (final b in blocked) {
-      if (lower.contains(b)) return true;
-    }
-    return false;
+    return EmbedShield.shouldBlockNavigation(url);
   }
 
-  static const String _cleanAntiPopupScript = '''
-(function() {
-  try {
-    window.open = function() { return null; };
-    Object.defineProperty(window, 'open', { value: function() { return null; }, writable: false, configurable: false });
-    window.alert = function() {};
-    window.confirm = function() { return false; };
-    window.prompt = function() { return null; };
-  } catch(e) {}
-  try {
-    var links = document.querySelectorAll('a[target="_blank"]');
-    for (var i = 0; i < links.length; i++) { links[i].removeAttribute('target'); }
-  } catch(e) {}
-  function notifyTap() {
-    try { if (window.VoidflixBridge) { window.VoidflixBridge.postMessage('screen_tapped'); } } catch(e) {}
-  }
-  window.addEventListener('click', notifyTap, true);
-  window.addEventListener('touchend', notifyTap, true);
-  function hookVideo() {
-    try {
-      var vids = document.querySelectorAll('video');
-      for (var i = 0; i < vids.length; i++) {
-        var v = vids[i];
-        if (!v._vfHooked) {
-          v._vfHooked = true;
-          v.addEventListener('ended', function() {
-            if (window.VoidflixBridge) { window.VoidflixBridge.postMessage('video_ended'); }
-          });
-          v.addEventListener('timeupdate', function() {
-            if (v.duration && v.duration > 15 && v.currentTime >= v.duration - 2) {
-              if (!v._vfEndedPosted) {
-                v._vfEndedPosted = true;
-                if (window.VoidflixBridge) { window.VoidflixBridge.postMessage('video_ended'); }
-              }
-            }
-          });
-        }
-      }
-    } catch(e) {}
-  }
-  hookVideo();
-  setInterval(hookVideo, 3000);
-})();
-''';
+  static const String _cleanAntiPopupScript = EmbedShield.antiPopupScript;
 
   // ---------------------------------------------------------------------------
   // Controls, Gestures & Locking

@@ -9,6 +9,7 @@ import '../core/utils/platform_utils.dart';
 import '../models/live_channel.dart';
 import '../models/sports_match.dart';
 import '../core/services/sports_service.dart';
+import '../core/utils/embed_shield.dart';
 import '../widgets/tv_back_button.dart';
 import '../widgets/tv_focusable.dart';
 
@@ -28,10 +29,17 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
   bool _isLoadingCricket = false;
   String? _cricketError;
 
+  Timer? _countdownTicker;
+
   @override
   void initState() {
     super.initState();
     _loadCricketMatches();
+    _countdownTicker = Timer.periodic(const Duration(seconds: 1), (_) {
+      if (mounted && _selectedCategory == "Cricket (Live)") {
+        setState(() {});
+      }
+    });
   }
 
   Future<void> _loadCricketMatches({bool forceRefresh = false}) async {
@@ -105,6 +113,121 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
     if (match.streams.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('No active streams available for this match yet.')),
+      );
+      return;
+    }
+
+    final hasStarted = match.hasStarted || match.isLive;
+
+    // PRE-MATCH GATE: If the match has not started yet, do not attempt to play!
+    // Show pre-match countdown studio so the user sees time left and playback unlocks at start time.
+    if (!hasStarted) {
+      showModalBottomSheet(
+        context: context,
+        backgroundColor: const Color(0xFF14141B),
+        shape: const RoundedRectangleBorder(
+          borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+        ),
+        builder: (ctx) {
+          return SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 20),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.center,
+                children: [
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: Colors.amber.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: Colors.amber.withValues(alpha: 0.4)),
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.timer_outlined, color: Colors.amber, size: 14),
+                        SizedBox(width: 6),
+                        Text(
+                          'PRE-MATCH COUNTDOWN',
+                          style: TextStyle(color: Colors.amber, fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    match.title,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    '${match.category} • Scheduled Kickoff',
+                    style: const TextStyle(color: Colors.white60, fontSize: 12),
+                  ),
+                  const SizedBox(height: 16),
+                  Container(
+                    width: double.infinity,
+                    padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
+                    decoration: BoxDecoration(
+                      gradient: LinearGradient(
+                        colors: [Colors.black54, Colors.amber.withValues(alpha: 0.08)],
+                      ),
+                      borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: Colors.white12),
+                    ),
+                    child: Column(
+                      children: [
+                        const Text(
+                          'BROADCAST STARTS IN',
+                          style: TextStyle(color: Colors.white38, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1.5),
+                        ),
+                        const SizedBox(height: 8),
+                        Text(
+                          match.formattedStatus.replaceFirst('Starts in ', ''),
+                          style: const TextStyle(
+                            color: Colors.amber,
+                            fontSize: 28,
+                            fontWeight: FontWeight.w900,
+                            fontFamily: 'monospace',
+                            letterSpacing: 2,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  Row(
+                    children: [
+                      const Icon(Icons.lock_outline_rounded, color: Colors.amber, size: 18),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          'Streams are locked until kickoff. Playback unlocks automatically once live coverage begins.',
+                          style: TextStyle(color: Colors.white.withValues(alpha: 0.7), fontSize: 12),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 20),
+                  SizedBox(
+                    width: double.infinity,
+                    child: ElevatedButton(
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.white12,
+                        padding: const EdgeInsets.symmetric(vertical: 13),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                      ),
+                      onPressed: () => Navigator.of(ctx).pop(),
+                      child: const Text('I will wait for Match Start', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          );
+        },
       );
       return;
     }
@@ -220,6 +343,7 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
 
   @override
   void dispose() {
+    _countdownTicker?.cancel();
     _channelScrollController.dispose();
     super.dispose();
   }
@@ -936,8 +1060,13 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
                                 Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
                                   decoration: BoxDecoration(
-                                    color: match.isLive ? Colors.red : Colors.white10,
+                                    color: match.isLive
+                                        ? Colors.red
+                                        : (match.hasStarted ? Colors.white10 : Colors.amber.withValues(alpha: 0.15)),
                                     borderRadius: BorderRadius.circular(4),
+                                    border: (!match.isLive && !match.hasStarted)
+                                        ? Border.all(color: Colors.amber.withValues(alpha: 0.3))
+                                        : null,
                                   ),
                                   child: Row(
                                     mainAxisSize: MainAxisSize.min,
@@ -945,11 +1074,16 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
                                       if (match.isLive) ...[
                                         const Icon(Icons.fiber_manual_record, color: Colors.white, size: 8),
                                         const SizedBox(width: 4),
+                                      ] else if (!match.hasStarted) ...[
+                                        const Icon(Icons.timer_outlined, color: Colors.amber, size: 10),
+                                        const SizedBox(width: 4),
                                       ],
                                       Text(
                                         match.formattedStatus,
                                         style: TextStyle(
-                                          color: match.isLive ? Colors.white : Colors.white70,
+                                          color: match.isLive
+                                              ? Colors.white
+                                              : (match.hasStarted ? Colors.white70 : Colors.amber),
                                           fontSize: 10,
                                           fontWeight: FontWeight.bold,
                                         ),
@@ -988,17 +1122,21 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
                                 Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
                                   decoration: BoxDecoration(
-                                    color: AppTheme.primaryRed,
+                                    color: (match.isLive || match.hasStarted) ? AppTheme.primaryRed : Colors.amber.shade700,
                                     borderRadius: BorderRadius.circular(6),
                                   ),
-                                  child: const Row(
+                                  child: Row(
                                     mainAxisSize: MainAxisSize.min,
                                     children: [
-                                      Icon(Icons.play_arrow_rounded, color: Colors.white, size: 16),
-                                      SizedBox(width: 4),
+                                      Icon(
+                                        (match.isLive || match.hasStarted) ? Icons.play_arrow_rounded : Icons.timer_outlined,
+                                        color: Colors.white,
+                                        size: 16,
+                                      ),
+                                      const SizedBox(width: 4),
                                       Text(
-                                        'WATCH',
-                                        style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
+                                        (match.isLive || match.hasStarted) ? 'WATCH' : 'PRE-MATCH',
+                                        style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
                                       ),
                                     ],
                                   ),
@@ -1218,20 +1356,37 @@ class _LiveChannelPlayerScreenState extends State<LiveChannelPlayerScreen> {
     // 2. Mobile web embed fallback (when supported)
     else {
       try {
-        _webViewController = WebViewController()
+        final controller = WebViewController()
           ..setJavaScriptMode(JavaScriptMode.unrestricted)
-          ..setBackgroundColor(Colors.black)
-          ..setNavigationDelegate(
-            NavigationDelegate(
-              onPageFinished: (url) {
-                if (mounted) setState(() => _isLoading = false);
-              },
-              onWebResourceError: (error) {
-                if (mounted) setState(() => _isLoading = false);
-              },
-            ),
-          )
-          ..loadRequest(Uri.parse(streamUrl));
+          ..setUserAgent(EmbedShield.userAgent)
+          ..setBackgroundColor(Colors.black);
+
+        EmbedShield.configureAndroid(controller);
+
+        controller.setNavigationDelegate(
+          NavigationDelegate(
+            onPageStarted: (url) {
+              controller.runJavaScript(EmbedShield.antiPopupScript);
+            },
+            onPageFinished: (url) {
+              if (mounted) setState(() => _isLoading = false);
+              controller.runJavaScript(EmbedShield.antiPopupScript);
+            },
+            onWebResourceError: (error) {
+              if (mounted) setState(() => _isLoading = false);
+            },
+            onNavigationRequest: (request) {
+              if (EmbedShield.shouldBlockNavigation(request.url)) {
+                debugPrint('[LiveTV EmbedShield] Silently absorbed redirect: ${request.url}');
+                return NavigationDecision.prevent;
+              }
+              return NavigationDecision.navigate;
+            },
+          ),
+        );
+
+        controller.loadRequest(Uri.parse(streamUrl));
+        _webViewController = controller;
       } catch (_) {
         if (mounted) setState(() => _isLoading = false);
       }

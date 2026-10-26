@@ -97,6 +97,14 @@ query GetLiveCricket {
       'czernik.org',
       'capitalhospitals.org',
       'quge5.com',
+      'maxdigitaltv.com',
+      'sphub-cors-proxy',
+      'safpar001.workers',
+      'privateemail123466.workers',
+      'playnp?id=',
+      'playbd?id=',
+      'playin?id=',
+      'playlk?id=',
     ];
 
     try {
@@ -118,6 +126,17 @@ query GetLiveCricket {
           final start = DateTime.tryParse(c['startDateTime']?.toString() ?? '') ?? now;
           final duration = (c['duration'] as num?)?.toInt() ?? 240;
           final end = start.add(Duration(minutes: duration));
+
+          // 1. Filter out old matches that have already completed
+          if (now.isAfter(end.add(const Duration(minutes: 30)))) {
+            continue;
+          }
+
+          // 2. Filter out matches scheduled too far into the future (keep next 4 days)
+          if (start.difference(now).inDays > 4) {
+            continue;
+          }
+
           final isLive = now.isAfter(start) && now.isBefore(end);
 
           final streams = <SportsStream>[];
@@ -136,12 +155,12 @@ query GetLiveCricket {
                 streams.add(SportsStream(
                   id: 'dash_$i',
                   type: 'dash',
-                  label: 'Direct ClearKey DASH (1080p)',
-                  url: mpd,
+                  label: 'ClearKey DASH (1080p)',
+                  url: raw, // keep embed wrapper so WebView executes Shaka Player rather than downloading raw .mpd!
                   manifest: mpd,
                   keyId: mKid.group(1),
                   key: mKey.group(1),
-                  isDirect: true,
+                  isDirect: false, // In app, launch via in-app WebView
                 ));
                 continue;
               }

@@ -115,6 +115,8 @@ class SportsMatch {
     );
   }
 
+  bool get hasStarted => DateTime.now().isAfter(startDateTime);
+
   String get formattedStatus {
     final now = DateTime.now();
     final end = startDateTime.add(Duration(minutes: durationMinutes));
@@ -122,9 +124,11 @@ class SportsMatch {
       return 'LIVE NOW';
     } else if (now.isBefore(startDateTime)) {
       final diff = startDateTime.difference(now);
-      if (diff.inDays > 0) return 'Starts in ${diff.inDays}d';
-      if (diff.inHours > 0) return 'Starts in ${diff.inHours}h ${diff.inMinutes % 60}m';
-      return 'Starts in ${diff.inMinutes}m';
+      if (diff.inDays > 0) return 'Starts in ${diff.inDays}d ${diff.inHours % 24}h';
+      final h = diff.inHours.toString().padLeft(2, '0');
+      final m = (diff.inMinutes % 60).toString().padLeft(2, '0');
+      final s = (diff.inSeconds % 60).toString().padLeft(2, '0');
+      return 'Starts in $h:$m:$s';
     } else {
       return 'Completed';
     }
