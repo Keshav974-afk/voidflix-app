@@ -47,6 +47,7 @@ class BrandHeader extends StatelessWidget implements PreferredSizeWidget {
   void _showCategoriesSheet(BuildContext context) {
     final allCategories = [
       {'name': 'All Categories', 'index': 0},
+      {'name': '🏏 Live Sports & Cricket', 'index': 6},
       {'name': 'TV Shows', 'index': 1},
       {'name': 'Movies', 'index': 2},
       {'name': 'New & Hot', 'index': 3},
@@ -190,11 +191,12 @@ class BrandHeader extends StatelessWidget implements PreferredSizeWidget {
 
     // Category chips matching Netflix mobile (Screenshot 2)
     final chipData = [
+      {'label': 'Sports', 'target': 6, 'icon': Icons.sports_cricket_rounded},
       {'label': 'Shows', 'target': 1},
       {'label': 'Movies', 'target': 2},
-      {'label': 'Games', 'target': -3},
       {'label': 'New & Hot', 'target': 3},
       {'label': 'Anime', 'target': 4},
+      {'label': 'Games', 'target': -3},
       {'label': 'Categories', 'target': -1},
     ];
 
@@ -204,6 +206,7 @@ class BrandHeader extends StatelessWidget implements PreferredSizeWidget {
     if (activeCategoryIndex == 3) categoryTitle = 'New & Hot';
     if (activeCategoryIndex == 4) categoryTitle = 'Anime';
     if (activeCategoryIndex == 5) categoryTitle = 'Drama';
+    if (activeCategoryIndex == 6) categoryTitle = 'Live Sports';
 
     return Container(
       decoration: BoxDecoration(
@@ -404,10 +407,18 @@ class BrandHeader extends StatelessWidget implements PreferredSizeWidget {
                       child: Container(
                         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
                         decoration: BoxDecoration(
-                          color: isSel ? Colors.white : Colors.black.withValues(alpha: 0.4),
+                          color: isSel
+                              ? Colors.white
+                              : (target == 6
+                                  ? Colors.red.withValues(alpha: 0.22)
+                                  : Colors.black.withValues(alpha: 0.4)),
                           borderRadius: BorderRadius.circular(20),
                           border: Border.all(
-                            color: isSel ? Colors.white : Colors.white.withValues(alpha: 0.25),
+                            color: isSel
+                                ? Colors.white
+                                : (target == 6
+                                    ? Colors.redAccent.withValues(alpha: 0.6)
+                                    : Colors.white.withValues(alpha: 0.25)),
                             width: 1,
                           ),
                         ),
@@ -415,11 +426,19 @@ class BrandHeader extends StatelessWidget implements PreferredSizeWidget {
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
+                              if (chip['icon'] != null && !isSel) ...[
+                                Icon(
+                                  chip['icon'] as IconData,
+                                  color: target == 6 ? Colors.redAccent : Colors.white,
+                                  size: 13,
+                                ),
+                                const SizedBox(width: 4),
+                              ],
                               Text(
                                 isSel ? '$label ✕' : label,
                                 style: TextStyle(
-                                  color: isSel ? Colors.black : Colors.white.withValues(alpha: 0.9),
-                                  fontWeight: isSel ? FontWeight.bold : FontWeight.w500,
+                                  color: isSel ? Colors.black : Colors.white.withValues(alpha: 0.95),
+                                  fontWeight: isSel ? FontWeight.bold : FontWeight.w600,
                                   fontSize: 12,
                                 ),
                               ),

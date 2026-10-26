@@ -308,7 +308,7 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
       {'icon': Icons.tv_rounded, 'label': 'Series'},
       {'icon': Icons.movie_outlined, 'label': 'Movies'},
       {'icon': Icons.add_rounded, 'label': 'My List'},
-      {'icon': Icons.live_tv_rounded, 'label': 'Live TV'},
+      {'icon': Icons.sports_cricket_rounded, 'label': 'Sports & Live TV'},
       {'icon': Icons.cast_connected_rounded, 'label': 'Link Phone'},
       {'icon': Icons.settings_outlined, 'label': 'Settings'},
       {

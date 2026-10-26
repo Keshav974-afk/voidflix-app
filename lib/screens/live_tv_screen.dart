@@ -9,6 +9,9 @@ import '../core/utils/platform_utils.dart';
 import '../models/live_channel.dart';
 import '../models/sports_match.dart';
 import '../core/services/sports_service.dart';
+import '../core/services/sports_reminder_service.dart';
+import '../providers/notification_provider.dart';
+import 'package:provider/provider.dart';
 import '../core/utils/embed_shield.dart';
 import '../widgets/tv_back_button.dart';
 import '../widgets/tv_focusable.dart';
@@ -211,17 +214,81 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
                     ],
                   ),
                   const SizedBox(height: 20),
-                  SizedBox(
-                    width: double.infinity,
-                    child: ElevatedButton(
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.white12,
-                        padding: const EdgeInsets.symmetric(vertical: 13),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                      ),
-                      onPressed: () => Navigator.of(ctx).pop(),
-                      child: const Text('I will wait for Match Start', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
-                    ),
+                  StatefulBuilder(
+                    builder: (modalCtx, setModalState) {
+                      final isReminded = SportsReminderService().isReminded(match.id);
+                      return Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          InkWell(
+                            borderRadius: BorderRadius.circular(10),
+                            onTap: () async {
+                              final notif = Provider.of<NotificationProvider>(context, listen: false);
+                              final messenger = ScaffoldMessenger.of(context);
+                              final enabled = await SportsReminderService().toggleReminder(
+                                context: context,
+                                match: match,
+                                notifProvider: notif,
+                              );
+                              setModalState(() {});
+                              if (mounted) setState(() {});
+                              messenger.showSnackBar(
+                                SnackBar(
+                                  backgroundColor: const Color(0xFF1E1E28),
+                                  content: Text(
+                                    enabled
+                                        ? 'Notification enabled. You will receive an alert at kickoff.'
+                                        : 'Reminder removed.',
+                                    style: const TextStyle(color: Colors.white, fontSize: 13),
+                                  ),
+                                  duration: const Duration(seconds: 2),
+                                ),
+                              );
+                            },
+                            child: Container(
+                              width: double.infinity,
+                              padding: const EdgeInsets.symmetric(vertical: 14),
+                              decoration: BoxDecoration(
+                                color: isReminded ? const Color(0xFF2E2413) : const Color(0xFF1C1C26),
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(
+                                  color: isReminded ? Colors.amber.withValues(alpha: 0.6) : Colors.white24,
+                                  width: 1.2,
+                                ),
+                              ),
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Icon(
+                                    isReminded ? Icons.notifications_active_rounded : Icons.notifications_none_rounded,
+                                    color: isReminded ? Colors.amber : Colors.white,
+                                    size: 18,
+                                  ),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                    isReminded ? 'Reminder Active • Alert at Kickoff' : 'Notify Me When Match Starts',
+                                    style: TextStyle(
+                                      color: isReminded ? Colors.amber : Colors.white,
+                                      fontSize: 13,
+                                      fontWeight: FontWeight.bold,
+                                      letterSpacing: 0.3,
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          SizedBox(
+                            width: double.infinity,
+                            child: TextButton(
+                              onPressed: () => Navigator.of(ctx).pop(),
+                              child: const Text('Close', style: TextStyle(color: Colors.white54, fontSize: 13)),
+                            ),
+                          ),
+                        ],
+                      );
+                    },
                   ),
                 ],
               ),
@@ -1091,10 +1158,73 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
                                     ],
                                   ),
                                 ),
-                                Text(
-                                  '${match.streams.length} Stream${match.streams.length == 1 ? '' : 's'}',
-                                  style: const TextStyle(color: Colors.white54, fontSize: 11, fontWeight: FontWeight.w500),
-                                ),
+                                if (!match.hasStarted) ...[
+                                  Builder(
+                                    builder: (cardCtx) {
+                                      final isReminded = SportsReminderService().isReminded(match.id);
+                                      return GestureDetector(
+                                        onTap: () async {
+                                          final notif = Provider.of<NotificationProvider>(context, listen: false);
+                                          final messenger = ScaffoldMessenger.of(context);
+                                          final enabled = await SportsReminderService().toggleReminder(
+                                            context: context,
+                                            match: match,
+                                            notifProvider: notif,
+                                          );
+                                          if (mounted) {
+                                            setState(() {});
+                                            messenger.showSnackBar(
+                                              SnackBar(
+                                                backgroundColor: const Color(0xFF1E1E28),
+                                                content: Text(
+                                                  enabled
+                                                      ? 'Reminder set for ${match.title}'
+                                                      : 'Reminder removed',
+                                                  style: const TextStyle(color: Colors.white, fontSize: 12),
+                                                ),
+                                                duration: const Duration(seconds: 2),
+                                              ),
+                                            );
+                                          }
+                                        },
+                                        child: Container(
+                                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3.5),
+                                          decoration: BoxDecoration(
+                                            color: isReminded ? Colors.amber.withValues(alpha: 0.18) : Colors.white10,
+                                            borderRadius: BorderRadius.circular(5),
+                                            border: Border.all(
+                                              color: isReminded ? Colors.amber.withValues(alpha: 0.5) : Colors.white12,
+                                            ),
+                                          ),
+                                          child: Row(
+                                            mainAxisSize: MainAxisSize.min,
+                                            children: [
+                                              Icon(
+                                                isReminded ? Icons.notifications_active_rounded : Icons.notifications_none_rounded,
+                                                color: isReminded ? Colors.amber : Colors.white70,
+                                                size: 13,
+                                              ),
+                                              const SizedBox(width: 4),
+                                              Text(
+                                                isReminded ? 'Reminded' : 'Remind Me',
+                                                style: TextStyle(
+                                                  color: isReminded ? Colors.amber : Colors.white70,
+                                                  fontSize: 10,
+                                                  fontWeight: FontWeight.w600,
+                                                ),
+                                              ),
+                                            ],
+                                          ),
+                                        ),
+                                      );
+                                    },
+                                  ),
+                                ] else ...[
+                                  Text(
+                                    '${match.streams.length} Stream${match.streams.length == 1 ? '' : 's'}',
+                                    style: const TextStyle(color: Colors.white54, fontSize: 11, fontWeight: FontWeight.w500),
+                                  ),
+                                ],
                               ],
                             ),
                             Text(

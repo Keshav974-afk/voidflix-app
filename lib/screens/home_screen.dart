@@ -15,6 +15,7 @@ import '../widgets/media_row.dart';
 import '../widgets/top10_row.dart';
 import 'downloads_screen.dart';
 import 'player_screen.dart';
+import 'live_tv_screen.dart';
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -84,6 +85,7 @@ class _HomeScreenState extends State<HomeScreen> {
           ]
         : [
             {'name': 'All', 'type': 'all', 'id': 0},
+            {'name': '🏏 Live Sports & Cricket', 'type': 'sports', 'id': -99},
             {'name': 'Action & Adventure', 'type': 'movie', 'id': 28},
             {'name': 'Anime & Animation', 'type': 'tv', 'id': 16},
             {'name': 'Comedy Hits', 'type': 'movie', 'id': 35},
@@ -145,6 +147,12 @@ class _HomeScreenState extends State<HomeScreen> {
                         trailing: const Icon(Icons.chevron_right, color: Colors.white38),
                         onTap: () {
                           Navigator.pop(ctx);
+                          if (type == 'sports') {
+                            Navigator.of(context).push(
+                              MaterialPageRoute(builder: (_) => const LiveTvScreen()),
+                            );
+                            return;
+                          }
                           if (id != 0) {
                             mediaProvider.fetchByGenre(type, id);
                           }
@@ -251,14 +259,48 @@ class _HomeScreenState extends State<HomeScreen> {
                     right: 16,
                     bottom: 8,
                   ),
-                  child: Row(
-                    children: [
-                      _buildFilterChip('All'),
-                      const SizedBox(width: 8),
-                      _buildFilterChip('TV Shows'),
-                      const SizedBox(width: 8),
-                      _buildFilterChip('Movies'),
-                      const SizedBox(width: 8),
+                  child: SingleChildScrollView(
+                    scrollDirection: Axis.horizontal,
+                    physics: const BouncingScrollPhysics(),
+                    child: Row(
+                      children: [
+                        _buildFilterChip('All'),
+                        const SizedBox(width: 8),
+                        GestureDetector(
+                          onTap: () {
+                            Navigator.of(context).push(
+                              MaterialPageRoute(builder: (_) => const LiveTvScreen()),
+                            );
+                          },
+                          child: Container(
+                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+                            decoration: BoxDecoration(
+                              color: Colors.red.withValues(alpha: 0.2),
+                              borderRadius: BorderRadius.circular(20),
+                              border: Border.all(color: Colors.redAccent.withValues(alpha: 0.6)),
+                            ),
+                            child: const Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                Icon(Icons.sports_cricket_rounded, color: Colors.redAccent, size: 14),
+                                SizedBox(width: 5),
+                                Text(
+                                  'Sports',
+                                  style: TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        _buildFilterChip('TV Shows'),
+                        const SizedBox(width: 8),
+                        _buildFilterChip('Movies'),
+                        const SizedBox(width: 8),
                       GestureDetector(
                         onTap: () => _showCategoriesPicker(context, mediaProvider, isKids: isKids),
                         child: Container(
@@ -288,6 +330,7 @@ class _HomeScreenState extends State<HomeScreen> {
                     ],
                   ),
                 ),
+              ),
 
                 // Offline Notice Banner if cached feed is active but network disconnected
                 if (_isOffline && completedDownloads.isNotEmpty)

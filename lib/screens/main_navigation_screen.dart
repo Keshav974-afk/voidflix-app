@@ -138,13 +138,13 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
 
     final navLinks = [
       {'label': 'Home', 'cat': 0, 'tab': 0},
+      {'label': 'Sports', 'cat': 6, 'tab': 0},
       {'label': 'Shows', 'cat': 1, 'tab': 0},
       {'label': 'Movies', 'cat': 2, 'tab': 0},
       {'label': 'Games', 'cat': 0, 'tab': 1},
       {'label': 'New & Popular', 'cat': 3, 'tab': 0},
       {'label': 'My Voidflix', 'cat': 0, 'tab': 3},
       {'label': 'Browse by Languages', 'cat': 4, 'tab': 0},
-      {'label': 'Live TV', 'cat': 6, 'tab': 0},
     ];
 
     return PreferredSize(
