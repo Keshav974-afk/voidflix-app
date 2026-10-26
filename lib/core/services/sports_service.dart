@@ -152,15 +152,16 @@ query GetLiveCricket {
               final mKey = RegExp(r'key=([^&]+)').firstMatch(raw);
               if (mManifest != null && mKid != null && mKey != null) {
                 final mpd = Uri.decodeComponent(mManifest.group(1)!);
+                final cleanUrl = 'https://voidflix.org/dash-player.html?manifest=${Uri.encodeComponent(mpd)}&keyid=${mKid.group(1)}&key=${mKey.group(1)}&title=${Uri.encodeComponent(c['title']?.toString() ?? "Voidflix Live HD")}';
                 streams.add(SportsStream(
                   id: 'dash_$i',
                   type: 'dash',
                   label: 'ClearKey DASH (1080p)',
-                  url: raw, // keep embed wrapper so WebView executes Shaka Player rather than downloading raw .mpd!
+                  url: cleanUrl,
                   manifest: mpd,
                   keyId: mKid.group(1),
                   key: mKey.group(1),
-                  isDirect: false, // In app, launch via in-app WebView
+                  isDirect: true,
                 ));
                 continue;
               }
