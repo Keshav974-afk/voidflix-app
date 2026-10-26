@@ -85,7 +85,7 @@ class _HomeScreenState extends State<HomeScreen> {
           ]
         : [
             {'name': 'All', 'type': 'all', 'id': 0},
-            {'name': '🏏 Live Sports & Cricket', 'type': 'sports', 'id': -99},
+            {'name': 'Sports', 'type': 'sports', 'id': -99},
             {'name': 'Action & Adventure', 'type': 'movie', 'id': 28},
             {'name': 'Anime & Animation', 'type': 'tv', 'id': 16},
             {'name': 'Comedy Hits', 'type': 'movie', 'id': 35},
@@ -265,37 +265,6 @@ class _HomeScreenState extends State<HomeScreen> {
                     child: Row(
                       children: [
                         _buildFilterChip('All'),
-                        const SizedBox(width: 8),
-                        GestureDetector(
-                          onTap: () {
-                            Navigator.of(context).push(
-                              MaterialPageRoute(builder: (_) => const LiveTvScreen()),
-                            );
-                          },
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
-                            decoration: BoxDecoration(
-                              color: Colors.red.withValues(alpha: 0.2),
-                              borderRadius: BorderRadius.circular(20),
-                              border: Border.all(color: Colors.redAccent.withValues(alpha: 0.6)),
-                            ),
-                            child: const Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                Icon(Icons.sports_cricket_rounded, color: Colors.redAccent, size: 14),
-                                SizedBox(width: 5),
-                                Text(
-                                  'Sports',
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontSize: 13,
-                                    fontWeight: FontWeight.bold,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
                         const SizedBox(width: 8),
                         _buildFilterChip('TV Shows'),
                         const SizedBox(width: 8),

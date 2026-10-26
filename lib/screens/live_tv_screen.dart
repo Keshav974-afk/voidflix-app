@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:video_player/video_player.dart';
 import 'package:webview_flutter/webview_flutter.dart';
@@ -24,58 +25,155 @@ class LiveTvScreen extends StatefulWidget {
 }
 
 class _LiveTvScreenState extends State<LiveTvScreen> {
-  String _selectedCategory = "Cricket (Live)";
+  static const List<String> sportsCategories = [
+    "Cricket",
+    "Football",
+    "Basketball",
+    "Motorsport",
+    "All Sports",
+    "24/7 Channels",
+  ];
+
+  String _selectedCategory = "Cricket";
   int _focusedChannelIndex = 0;
   final ScrollController _channelScrollController = ScrollController();
 
-  List<SportsMatch> _cricketMatches = [];
-  bool _isLoadingCricket = false;
-  String? _cricketError;
+  List<SportsMatch> _matches = [];
+  bool _isLoadingMatches = false;
+  String? _matchesError;
 
   Timer? _countdownTicker;
 
   @override
   void initState() {
     super.initState();
-    _loadCricketMatches();
+    _loadMatches(_selectedCategory);
     _countdownTicker = Timer.periodic(const Duration(seconds: 1), (_) {
-      if (mounted && _selectedCategory == "Cricket (Live)") {
+      if (mounted && _selectedCategory != "24/7 Channels") {
         setState(() {});
       }
     });
   }
 
-  Future<void> _loadCricketMatches({bool forceRefresh = false}) async {
-    if (_isLoadingCricket) return;
+  @override
+  void dispose() {
+    _countdownTicker?.cancel();
+    _channelScrollController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadMatches(String category, {bool forceRefresh = false}) async {
+    if (category == "24/7 Channels") return;
+    if (_isLoadingMatches) return;
     setState(() {
-      _isLoadingCricket = true;
-      _cricketError = null;
+      _isLoadingMatches = true;
+      _matchesError = null;
     });
+
+    final apiCat = category == "All Sports"
+        ? "all"
+        : category.toLowerCase().replaceAll(" ", "-");
 
     try {
       final matches = await SportsService().fetchMatches(
-        category: 'cricket',
+        category: apiCat,
         forceRefresh: forceRefresh,
       );
       if (mounted) {
         setState(() {
-          _cricketMatches = matches;
-          _isLoadingCricket = false;
+          _matches = matches;
+          _isLoadingMatches = false;
         });
       }
     } catch (e) {
       if (mounted) {
         setState(() {
-          _isLoadingCricket = false;
-          _cricketError = e.toString();
+          _isLoadingMatches = false;
+          _matchesError = e.toString();
         });
       }
     }
   }
 
-  List<LiveChannel> get _cricketChannels {
+  Widget _buildTeamLogo(String url, String teamName, {double size = 42}) {
+    final cleanName = teamName.trim();
+    final monogram = cleanName.length >= 3
+        ? cleanName.substring(0, 3).toUpperCase()
+        : (cleanName.isNotEmpty ? cleanName.toUpperCase() : "TM");
+
+    if (url.isEmpty || !url.startsWith("http")) {
+      return _buildMonogramBadge(monogram, size: size);
+    }
+
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        color: const Color(0xFF1E1E2A),
+        shape: BoxShape.circle,
+        border: Border.all(color: Colors.white12, width: 1.2),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.35),
+            blurRadius: 4,
+            offset: const Offset(0, 2),
+          ),
+        ],
+      ),
+      padding: EdgeInsets.all(size * 0.12),
+      child: ClipOval(
+        child: Image.network(
+          url,
+          fit: BoxFit.contain,
+          errorBuilder: (_, __, ___) => _buildMonogramBadge(monogram, size: size),
+          loadingBuilder: (ctx, child, progress) {
+            if (progress == null) return child;
+            return Center(
+              child: SizedBox(
+                width: size * 0.35,
+                height: size * 0.35,
+                child: const CircularProgressIndicator(
+                  strokeWidth: 1.5,
+                  color: Colors.white30,
+                ),
+              ),
+            );
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget _buildMonogramBadge(String monogram, {double size = 42}) {
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        gradient: const LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [Color(0xFF2C2C3D), Color(0xFF14141E)],
+        ),
+        shape: BoxShape.circle,
+        border: Border.all(color: Colors.white12, width: 1.2),
+      ),
+      child: Center(
+        child: Text(
+          monogram,
+          style: TextStyle(
+            color: Colors.white,
+            fontWeight: FontWeight.w800,
+            fontSize: (size * 0.28).clamp(9.0, 13.0),
+            letterSpacing: 0.5,
+          ),
+        ),
+      ),
+    );
+  }
+
+  List<LiveChannel> get _sportsChannels {
     final list = <LiveChannel>[];
-    for (final match in _cricketMatches) {
+    for (final match in _matches) {
       if (match.streams.isEmpty) continue;
       final primaryStream = match.streams.firstWhere(
         (s) => s.isDirect && s.type == 'hls',
@@ -84,7 +182,7 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
       list.add(LiveChannel(
         id: match.id,
         name: match.title,
-        category: 'Cricket (Live)',
+        category: match.category,
         streamUrl: primaryStream.url,
         directStreamUrl: primaryStream.isDirect ? primaryStream.url : null,
         description: '${match.category} • ${match.formattedStatus} • ${match.streams.length} stream(s)',
@@ -95,9 +193,8 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
   }
 
   List<LiveChannel> get _filteredChannels {
-    if (_selectedCategory == "Cricket (Live)") return _cricketChannels;
-    if (_selectedCategory == "All") return [..._cricketChannels, ...LiveData.channels];
-    return LiveData.channels.where((c) => c.category == _selectedCategory).toList();
+    if (_selectedCategory == "24/7 Channels") return LiveData.channels;
+    return _sportsChannels;
   }
 
   void _watchChannel(LiveChannel channel) {
@@ -113,12 +210,7 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
   }
 
   void _showStreamPickerModal(SportsMatch match) {
-    if (match.streams.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('No active streams available for this match yet.')),
-      );
-      return;
-    }
+    if (match.streams.isEmpty) return;
 
     final hasStarted = match.hasStarted || match.isLive;
 
@@ -149,7 +241,7 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
                     child: const Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        Icon(Icons.timer_outlined, color: Colors.amber, size: 14),
+                        Icon(Icons.schedule_rounded, color: Colors.amber, size: 14),
                         SizedBox(width: 6),
                         Text(
                           'PRE-MATCH COUNTDOWN',
@@ -158,13 +250,54 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
                       ],
                     ),
                   ),
-                  const SizedBox(height: 12),
-                  Text(
-                    match.title,
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(color: Colors.white, fontSize: 17, fontWeight: FontWeight.bold),
+                  const SizedBox(height: 16),
+
+                  // Team Logos & Names
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Column(
+                          children: [
+                            _buildTeamLogo(match.homeTeamLogo, match.homeTeam, size: 54),
+                            const SizedBox(height: 8),
+                            Text(
+                              match.homeTeam.isNotEmpty ? match.homeTeam : match.title,
+                              textAlign: TextAlign.center,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF232332),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(color: Colors.white12),
+                        ),
+                        child: const Text('VS', style: TextStyle(color: Colors.amber, fontSize: 13, fontWeight: FontWeight.w900)),
+                      ),
+                      Expanded(
+                        child: Column(
+                          children: [
+                            _buildTeamLogo(match.awayTeamLogo, match.awayTeam, size: 54),
+                            const SizedBox(height: 8),
+                            Text(
+                              match.awayTeam.isNotEmpty ? match.awayTeam : 'Opponent',
+                              textAlign: TextAlign.center,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: 6),
+
+                  const SizedBox(height: 14),
                   Text(
                     '${match.category} • Scheduled Kickoff',
                     style: const TextStyle(color: Colors.white60, fontSize: 12),
@@ -172,13 +305,13 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
                   const SizedBox(height: 16),
                   Container(
                     width: double.infinity,
-                    padding: const EdgeInsets.symmetric(vertical: 16, horizontal: 20),
+                    padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 20),
                     decoration: BoxDecoration(
                       gradient: LinearGradient(
                         colors: [Colors.black54, Colors.amber.withValues(alpha: 0.08)],
                       ),
                       borderRadius: BorderRadius.circular(12),
-                      border: Border.all(color: Colors.white12),
+                      border: Border.all(color: Colors.amber.withValues(alpha: 0.2)),
                     ),
                     child: Column(
                       children: [
@@ -191,7 +324,7 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
                           match.formattedStatus.replaceFirst('Starts in ', ''),
                           style: const TextStyle(
                             color: Colors.amber,
-                            fontSize: 28,
+                            fontSize: 26,
                             fontWeight: FontWeight.w900,
                             fontFamily: 'monospace',
                             letterSpacing: 2,
@@ -224,26 +357,14 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
                             borderRadius: BorderRadius.circular(10),
                             onTap: () async {
                               final notif = Provider.of<NotificationProvider>(context, listen: false);
-                              final messenger = ScaffoldMessenger.of(context);
-                              final enabled = await SportsReminderService().toggleReminder(
+                              HapticFeedback.lightImpact();
+                              await SportsReminderService().toggleReminder(
                                 context: context,
                                 match: match,
                                 notifProvider: notif,
                               );
                               setModalState(() {});
                               if (mounted) setState(() {});
-                              messenger.showSnackBar(
-                                SnackBar(
-                                  backgroundColor: const Color(0xFF1E1E28),
-                                  content: Text(
-                                    enabled
-                                        ? 'Notification enabled. You will receive an alert at kickoff.'
-                                        : 'Reminder removed.',
-                                    style: const TextStyle(color: Colors.white, fontSize: 13),
-                                  ),
-                                  duration: const Duration(seconds: 2),
-                                ),
-                              );
                             },
                             child: Container(
                               width: double.infinity,
@@ -304,7 +425,7 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
       _watchChannel(LiveChannel(
         id: '${match.id}_${s.id}',
         name: '${match.title} (${s.label})',
-        category: 'Cricket (Live)',
+        category: match.category,
         streamUrl: s.url,
         directStreamUrl: s.isDirect ? s.url : null,
         description: '${match.category} • ${match.formattedStatus}',
@@ -329,24 +450,25 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
               children: [
                 Row(
                   children: [
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                      decoration: BoxDecoration(
-                        color: AppTheme.primaryRed,
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: Text(
-                        match.isLive ? 'LIVE' : 'UPCOMING',
-                        style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
-                      ),
-                    ),
+                    _buildTeamLogo(match.homeTeamLogo, match.homeTeam, size: 36),
+                    const SizedBox(width: 6),
+                    _buildTeamLogo(match.awayTeamLogo, match.awayTeam, size: 36),
                     const SizedBox(width: 10),
                     Expanded(
-                      child: Text(
-                        match.title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            match.title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold),
+                          ),
+                          Text(
+                            '${match.category} • Select Streaming Feed',
+                            style: const TextStyle(color: Colors.white60, fontSize: 11),
+                          ),
+                        ],
                       ),
                     ),
                   ],
@@ -391,7 +513,7 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
                       _watchChannel(LiveChannel(
                         id: '${match.id}_${s.id}',
                         name: '${match.title} (${s.label})',
-                        category: 'Cricket (Live)',
+                        category: match.category,
                         streamUrl: s.url,
                         directStreamUrl: s.isDirect ? s.url : null,
                         description: '${match.category} • ${match.formattedStatus}',
@@ -406,13 +528,6 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
         );
       },
     );
-  }
-
-  @override
-  void dispose() {
-    _countdownTicker?.cancel();
-    _channelScrollController.dispose();
-    super.dispose();
   }
 
   @override
@@ -946,48 +1061,62 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
-                    if (canPop) ...[
-                      const TvBackButton(),
-                      const SizedBox(width: 12),
-                    ],
-                    Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                      decoration: BoxDecoration(
-                        color: AppTheme.primaryRed,
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: const Row(
-                        children: [
-                          Icon(Icons.fiber_manual_record, color: Colors.white, size: 10),
-                          SizedBox(width: 4),
-                          Text(
-                            'LIVE',
-                            style: TextStyle(
-                              fontSize: 11,
-                              fontWeight: FontWeight.bold,
-                              color: Colors.white,
-                              letterSpacing: 1.0,
-                            ),
-                          ),
+                    Row(
+                      children: [
+                        if (canPop) ...[
+                          const TvBackButton(),
+                          const SizedBox(width: 12),
                         ],
-                      ),
+                        Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFFE50914),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: const Row(
+                            children: [
+                              Icon(Icons.fiber_manual_record, color: Colors.white, size: 8),
+                              SizedBox(width: 4),
+                              Text(
+                                'LIVE',
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.white,
+                                  letterSpacing: 1.0,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        const SizedBox(width: 10),
+                        Text(
+                          'LIVE SPORTS & CHANNELS',
+                          style: GoogleFonts.bebasNeue(
+                            fontSize: 28,
+                            letterSpacing: 1.5,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ],
                     ),
-                    const SizedBox(width: 10),
-                    Text(
-                      'IPTV & SPORTS CHANNELS',
-                      style: GoogleFonts.bebasNeue(
-                        fontSize: 32,
-                        letterSpacing: 1.5,
-                        color: Colors.white,
+                    IconButton(
+                      icon: Icon(
+                        Icons.refresh_rounded,
+                        color: _isLoadingMatches ? AppTheme.primaryRed : Colors.white70,
+                        size: 20,
                       ),
+                      tooltip: 'Refresh Fixtures',
+                      onPressed: () => _loadMatches(_selectedCategory, forceRefresh: true),
                     ),
                   ],
                 ),
-                const SizedBox(height: 4),
+                const SizedBox(height: 2),
                 const Text(
-                  'Stream 24/7 global sports, news broadcasts, entertainment, and movie networks.',
-                  style: TextStyle(color: AppTheme.textSecondary, fontSize: 13),
+                  'Real-time tournaments, fixtures, and direct CDN broadcasts in 1080p.',
+                  style: TextStyle(color: AppTheme.textSecondary, fontSize: 12),
                 ),
               ],
             ),
@@ -999,28 +1128,33 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
             child: ListView.builder(
               scrollDirection: Axis.horizontal,
               padding: const EdgeInsets.symmetric(horizontal: 12),
-              itemCount: LiveData.categories.length,
+              itemCount: sportsCategories.length,
               itemBuilder: (context, index) {
-                final cat = LiveData.categories[index];
+                final cat = sportsCategories[index];
                 final isSel = cat == _selectedCategory;
 
                 return GestureDetector(
-                  onTap: () => setState(() => _selectedCategory = cat),
+                  onTap: () {
+                    setState(() => _selectedCategory = cat);
+                    if (cat != "24/7 Channels") {
+                      _loadMatches(cat);
+                    }
+                  },
                   child: Container(
                     margin: const EdgeInsets.only(right: 8),
                     padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
                     decoration: BoxDecoration(
-                      color: isSel ? AppTheme.primaryRed : const Color(0xFF222222),
+                      color: isSel ? Colors.white : const Color(0xFF1E1E28),
                       borderRadius: BorderRadius.circular(20),
                       border: Border.all(
-                        color: isSel ? AppTheme.primaryRed : Colors.white24,
+                        color: isSel ? Colors.white : Colors.white12,
                       ),
                     ),
                     child: Text(
                       cat,
                       style: TextStyle(
-                        color: isSel ? Colors.white : Colors.white70,
-                        fontWeight: isSel ? FontWeight.bold : FontWeight.normal,
+                        color: isSel ? Colors.black : Colors.white70,
+                        fontWeight: isSel ? FontWeight.bold : FontWeight.w500,
                         fontSize: 12,
                       ),
                     ),
@@ -1031,256 +1165,293 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
           ),
           const SizedBox(height: 14),
 
-          // Channels Grid / Live Cricket Fixtures
-          if (_selectedCategory == "Cricket (Live)" && _isLoadingCricket) ...[
-            const Center(
-              child: Padding(
-                padding: EdgeInsets.symmetric(vertical: 40),
-                child: Column(
-                  children: [
-                    CircularProgressIndicator(color: AppTheme.primaryRed),
-                    SizedBox(height: 12),
-                    Text(
-                      'Fetching live cricket fixtures & CDN edges…',
-                      style: TextStyle(color: Colors.white70, fontSize: 13),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ] else if (_selectedCategory == "Cricket (Live)" && _cricketMatches.isEmpty) ...[
-            Center(
-              child: Padding(
-                padding: const EdgeInsets.symmetric(vertical: 40),
-                child: Column(
-                  children: [
-                    const Icon(Icons.sports_cricket_rounded, size: 48, color: Colors.white38),
-                    const SizedBox(height: 12),
-                    Text(
-                      _cricketError != null
-                          ? 'Failed to load live matches: $_cricketError'
-                          : 'No live cricket matches broadcasting right now',
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(color: Colors.white70),
-                    ),
-                    const SizedBox(height: 12),
-                    ElevatedButton.icon(
-                      style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryRed),
-                      onPressed: () => _loadCricketMatches(forceRefresh: true),
-                      icon: const Icon(Icons.refresh_rounded, color: Colors.white),
-                      label: const Text('Refresh Fixtures', style: TextStyle(color: Colors.white)),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ] else if (_selectedCategory == "Cricket (Live)") ...[
-            LayoutBuilder(
-              builder: (context, constraints) {
-                final count = (constraints.maxWidth / 320).floor().clamp(1, 4);
-                return GridView.builder(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: count,
-                    childAspectRatio: 1.6,
-                    crossAxisSpacing: 12,
-                    mainAxisSpacing: 12,
+          // Matches Grid or 24/7 Channels Grid
+          if (_selectedCategory != "24/7 Channels") ...[
+            if (_isLoadingMatches) ...[
+              const Center(
+                child: Padding(
+                  padding: EdgeInsets.symmetric(vertical: 40),
+                  child: Column(
+                    children: [
+                      CircularProgressIndicator(color: AppTheme.primaryRed),
+                      SizedBox(height: 12),
+                      Text(
+                        'Fetching live match fixtures & CDN manifests…',
+                        style: TextStyle(color: Colors.white70, fontSize: 13),
+                      ),
+                    ],
                   ),
-                  itemCount: _cricketMatches.length,
-                  itemBuilder: (context, index) {
-                    final match = _cricketMatches[index];
-                    return GestureDetector(
-                      onTap: () => _showStreamPickerModal(match),
-                      child: Container(
-                        decoration: BoxDecoration(
-                          gradient: LinearGradient(
-                            begin: Alignment.topLeft,
-                            end: Alignment.bottomRight,
-                            colors: [
-                              const Color(0xFF1F1F2A),
-                              match.isLive ? const Color(0xFF2E1515) : const Color(0xFF14141B),
+                ),
+              ),
+            ] else if (_matches.isEmpty) ...[
+              Center(
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 40),
+                  child: Column(
+                    children: [
+                      Icon(_getCategoryIcon(_selectedCategory), size: 48, color: Colors.white38),
+                      const SizedBox(height: 12),
+                      Text(
+                        _matchesError != null
+                            ? 'Failed to load fixtures: $_matchesError'
+                            : 'No $_selectedCategory matches broadcasting right now',
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(color: Colors.white70),
+                      ),
+                      const SizedBox(height: 12),
+                      ElevatedButton.icon(
+                        style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryRed),
+                        onPressed: () => _loadMatches(_selectedCategory, forceRefresh: true),
+                        icon: const Icon(Icons.refresh_rounded, color: Colors.white),
+                        label: const Text('Refresh Fixtures', style: TextStyle(color: Colors.white)),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ] else ...[
+              LayoutBuilder(
+                builder: (context, constraints) {
+                  final count = (constraints.maxWidth / 320).floor().clamp(1, 4);
+                  return GridView.builder(
+                    shrinkWrap: true,
+                    physics: const NeverScrollableScrollPhysics(),
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                      crossAxisCount: count,
+                      childAspectRatio: 1.32,
+                      crossAxisSpacing: 12,
+                      mainAxisSpacing: 12,
+                    ),
+                    itemCount: _matches.length,
+                    itemBuilder: (context, index) {
+                      final match = _matches[index];
+                      return GestureDetector(
+                        onTap: () => _showStreamPickerModal(match),
+                        child: Container(
+                          decoration: BoxDecoration(
+                            gradient: LinearGradient(
+                              begin: Alignment.topLeft,
+                              end: Alignment.bottomRight,
+                              colors: [
+                                const Color(0xFF1B1B26),
+                                match.isLive ? const Color(0xFF281418) : const Color(0xFF13131C),
+                              ],
+                            ),
+                            borderRadius: BorderRadius.circular(14),
+                            border: Border.all(
+                              color: match.isLive
+                                  ? const Color(0xFFE50914).withValues(alpha: 0.6)
+                                  : Colors.white12,
+                              width: 1.2,
+                            ),
+                            boxShadow: [
+                              BoxShadow(
+                                color: Colors.black.withValues(alpha: 0.5),
+                                blurRadius: 10,
+                                offset: const Offset(0, 4),
+                              ),
                             ],
                           ),
-                          borderRadius: BorderRadius.circular(12),
-                          border: Border.all(
-                            color: match.isLive ? AppTheme.primaryRed.withValues(alpha: 0.6) : Colors.white12,
-                            width: 1.2,
-                          ),
-                          boxShadow: [
-                            BoxShadow(
-                              color: Colors.black.withValues(alpha: 0.5),
-                              blurRadius: 8,
-                              offset: const Offset(0, 4),
-                            ),
-                          ],
-                        ),
-                        padding: const EdgeInsets.all(14),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-                                  decoration: BoxDecoration(
-                                    color: match.isLive
-                                        ? Colors.red
-                                        : (match.hasStarted ? Colors.white10 : Colors.amber.withValues(alpha: 0.15)),
-                                    borderRadius: BorderRadius.circular(4),
-                                    border: (!match.isLive && !match.hasStarted)
-                                        ? Border.all(color: Colors.amber.withValues(alpha: 0.3))
-                                        : null,
-                                  ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      if (match.isLive) ...[
-                                        const Icon(Icons.fiber_manual_record, color: Colors.white, size: 8),
-                                        const SizedBox(width: 4),
-                                      ] else if (!match.hasStarted) ...[
-                                        const Icon(Icons.timer_outlined, color: Colors.amber, size: 10),
-                                        const SizedBox(width: 4),
-                                      ],
-                                      Text(
-                                        match.formattedStatus,
-                                        style: TextStyle(
-                                          color: match.isLive
-                                              ? Colors.white
-                                              : (match.hasStarted ? Colors.white70 : Colors.amber),
-                                          fontSize: 10,
-                                          fontWeight: FontWeight.bold,
-                                        ),
+                          padding: const EdgeInsets.all(12),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              // Top Row: Sport tag + Live/Timer Status + Silent Bell
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      match.category.toUpperCase(),
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(
+                                        color: AppTheme.textMuted,
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.bold,
+                                        letterSpacing: 0.8,
                                       ),
-                                    ],
+                                    ),
                                   ),
-                                ),
-                                if (!match.hasStarted) ...[
-                                  Builder(
-                                    builder: (cardCtx) {
-                                      final isReminded = SportsReminderService().isReminded(match.id);
-                                      return GestureDetector(
-                                        onTap: () async {
-                                          final notif = Provider.of<NotificationProvider>(context, listen: false);
-                                          final messenger = ScaffoldMessenger.of(context);
-                                          final enabled = await SportsReminderService().toggleReminder(
-                                            context: context,
-                                            match: match,
-                                            notifProvider: notif,
-                                          );
-                                          if (mounted) {
-                                            setState(() {});
-                                            messenger.showSnackBar(
-                                              SnackBar(
-                                                backgroundColor: const Color(0xFF1E1E28),
-                                                content: Text(
-                                                  enabled
-                                                      ? 'Reminder set for ${match.title}'
-                                                      : 'Reminder removed',
-                                                  style: const TextStyle(color: Colors.white, fontSize: 12),
-                                                ),
-                                                duration: const Duration(seconds: 2),
-                                              ),
+                                  const SizedBox(width: 6),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                                    decoration: BoxDecoration(
+                                      color: match.isLive
+                                          ? const Color(0xFFE50914)
+                                          : (match.hasStarted ? Colors.white10 : Colors.amber.withValues(alpha: 0.15)),
+                                      borderRadius: BorderRadius.circular(4),
+                                      border: (!match.isLive && !match.hasStarted)
+                                          ? Border.all(color: Colors.amber.withValues(alpha: 0.35))
+                                          : null,
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        if (match.isLive) ...[
+                                          const Icon(Icons.fiber_manual_record, color: Colors.white, size: 7),
+                                          const SizedBox(width: 4),
+                                        ] else if (!match.hasStarted) ...[
+                                          const Icon(Icons.schedule_rounded, color: Colors.amber, size: 9),
+                                          const SizedBox(width: 4),
+                                        ],
+                                        Text(
+                                          match.formattedStatus,
+                                          style: TextStyle(
+                                            color: match.isLive ? Colors.white : (match.hasStarted ? Colors.white70 : Colors.amber),
+                                            fontSize: 9.5,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                  if (!match.hasStarted) ...[
+                                    const SizedBox(width: 6),
+                                    Builder(
+                                      builder: (cardCtx) {
+                                        final isReminded = SportsReminderService().isReminded(match.id);
+                                        return GestureDetector(
+                                          onTap: () async {
+                                            final notif = Provider.of<NotificationProvider>(context, listen: false);
+                                            HapticFeedback.lightImpact();
+                                            await SportsReminderService().toggleReminder(
+                                              context: context,
+                                              match: match,
+                                              notifProvider: notif,
                                             );
-                                          }
-                                        },
-                                        child: Container(
-                                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3.5),
-                                          decoration: BoxDecoration(
-                                            color: isReminded ? Colors.amber.withValues(alpha: 0.18) : Colors.white10,
-                                            borderRadius: BorderRadius.circular(5),
-                                            border: Border.all(
-                                              color: isReminded ? Colors.amber.withValues(alpha: 0.5) : Colors.white12,
+                                            if (mounted) setState(() {});
+                                          },
+                                          child: Container(
+                                            padding: const EdgeInsets.all(5),
+                                            decoration: BoxDecoration(
+                                              color: isReminded ? Colors.amber.withValues(alpha: 0.2) : Colors.white10,
+                                              shape: BoxShape.circle,
+                                              border: Border.all(
+                                                color: isReminded ? Colors.amber.withValues(alpha: 0.6) : Colors.white12,
+                                              ),
+                                            ),
+                                            child: Icon(
+                                              isReminded ? Icons.notifications_active_rounded : Icons.notifications_none_rounded,
+                                              color: isReminded ? Colors.amber : Colors.white70,
+                                              size: 13,
                                             ),
                                           ),
-                                          child: Row(
-                                            mainAxisSize: MainAxisSize.min,
-                                            children: [
-                                              Icon(
-                                                isReminded ? Icons.notifications_active_rounded : Icons.notifications_none_rounded,
-                                                color: isReminded ? Colors.amber : Colors.white70,
-                                                size: 13,
-                                              ),
-                                              const SizedBox(width: 4),
-                                              Text(
-                                                isReminded ? 'Reminded' : 'Remind Me',
-                                                style: TextStyle(
-                                                  color: isReminded ? Colors.amber : Colors.white70,
-                                                  fontSize: 10,
-                                                  fontWeight: FontWeight.w600,
-                                                ),
-                                              ),
-                                            ],
-                                          ),
+                                        );
+                                      },
+                                    ),
+                                  ],
+                                ],
+                              ),
+
+                              const SizedBox(height: 6),
+
+                              // CENTER HERO: Team Logos & Names
+                              Row(
+                                children: [
+                                  // Home Team
+                                  Expanded(
+                                    child: Column(
+                                      children: [
+                                        _buildTeamLogo(match.homeTeamLogo, match.homeTeam, size: 40),
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          match.homeTeam.isNotEmpty ? match.homeTeam : match.title,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          textAlign: TextAlign.center,
+                                          style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
                                         ),
-                                      );
-                                    },
+                                      ],
+                                    ),
                                   ),
-                                ] else ...[
-                                  Text(
-                                    '${match.streams.length} Stream${match.streams.length == 1 ? '' : 's'}',
-                                    style: const TextStyle(color: Colors.white54, fontSize: 11, fontWeight: FontWeight.w500),
+
+                                  // VS Divider
+                                  Padding(
+                                    padding: const EdgeInsets.symmetric(horizontal: 4),
+                                    child: Text(
+                                      'VS',
+                                      style: TextStyle(
+                                        color: Colors.white.withValues(alpha: 0.4),
+                                        fontSize: 10,
+                                        fontWeight: FontWeight.w900,
+                                        letterSpacing: 1,
+                                      ),
+                                    ),
+                                  ),
+
+                                  // Away Team
+                                  Expanded(
+                                    child: Column(
+                                      children: [
+                                        _buildTeamLogo(match.awayTeamLogo, match.awayTeam, size: 40),
+                                        const SizedBox(height: 4),
+                                        Text(
+                                          match.awayTeam.isNotEmpty ? match.awayTeam : 'Opponent',
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          textAlign: TextAlign.center,
+                                          style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
+                                        ),
+                                      ],
+                                    ),
                                   ),
                                 ],
-                              ],
-                            ),
-                            Text(
-                              match.title,
-                              maxLines: 2,
-                              overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 14,
-                                height: 1.25,
                               ),
-                            ),
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                              children: [
-                                Expanded(
-                                  child: Text(
-                                    match.category,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(color: AppTheme.textMuted, fontSize: 11),
+
+                              const SizedBox(height: 6),
+
+                              // Bottom Action Row
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                children: [
+                                  Text(
+                                    '${match.streams.length} Feed${match.streams.length == 1 ? '' : 's'}',
+                                    style: const TextStyle(color: Colors.white54, fontSize: 10, fontWeight: FontWeight.w500),
                                   ),
-                                ),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                                  decoration: BoxDecoration(
-                                    color: (match.isLive || match.hasStarted) ? AppTheme.primaryRed : Colors.amber.shade700,
-                                    borderRadius: BorderRadius.circular(6),
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                    decoration: BoxDecoration(
+                                      color: (match.isLive || match.hasStarted) ? const Color(0xFFE50914) : Colors.amber.shade700,
+                                      borderRadius: BorderRadius.circular(6),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: (match.isLive || match.hasStarted)
+                                              ? const Color(0xFFE50914).withValues(alpha: 0.4)
+                                              : Colors.amber.withValues(alpha: 0.3),
+                                          blurRadius: 4,
+                                        ),
+                                      ],
+                                    ),
+                                    child: Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(
+                                          (match.isLive || match.hasStarted) ? Icons.play_arrow_rounded : Icons.schedule_rounded,
+                                          color: Colors.white,
+                                          size: 13,
+                                        ),
+                                        const SizedBox(width: 3),
+                                        Text(
+                                          (match.isLive || match.hasStarted) ? 'Watch Live' : 'Pre-Match',
+                                          style: const TextStyle(color: Colors.white, fontSize: 10.5, fontWeight: FontWeight.bold),
+                                        ),
+                                      ],
+                                    ),
                                   ),
-                                  child: Row(
-                                    mainAxisSize: MainAxisSize.min,
-                                    children: [
-                                      Icon(
-                                        (match.isLive || match.hasStarted) ? Icons.play_arrow_rounded : Icons.timer_outlined,
-                                        color: Colors.white,
-                                        size: 16,
-                                      ),
-                                      const SizedBox(width: 4),
-                                      Text(
-                                        (match.isLive || match.hasStarted) ? 'WATCH' : 'PRE-MATCH',
-                                        style: const TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold),
-                                      ),
-                                    ],
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ],
+                                ],
+                              ),
+                            ],
+                          ),
                         ),
-                      ),
-                    );
-                  },
-                );
-              },
-            ),
+                      );
+                    },
+                  );
+                },
+              ),
+            ],
           ] else ...[
             LayoutBuilder(
               builder: (context, constraints) {
@@ -1380,10 +1551,23 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
 
   IconData _getCategoryIcon(String cat) {
     switch (cat.toLowerCase()) {
+      case 'cricket':
       case 'cricket (live)':
         return Icons.sports_cricket_rounded;
-      case 'sports':
+      case 'football':
+      case 'soccer':
         return Icons.sports_soccer_rounded;
+      case 'basketball':
+        return Icons.sports_basketball_rounded;
+      case 'motorsport':
+      case 'racing':
+        return Icons.sports_motorsports_rounded;
+      case 'all sports':
+      case 'sports':
+        return Icons.emoji_events_rounded;
+      case '24/7 channels':
+      case 'live tv':
+        return Icons.live_tv_rounded;
       case 'news':
         return Icons.newspaper_rounded;
       case 'movies':
@@ -1431,12 +1615,21 @@ class _LiveChannelPlayerScreenState extends State<LiveChannelPlayerScreen> {
   Timer? _hideControlsTimer;
   double _volume = 1.0;
   bool _isMuted = false;
+  bool _isLandscape = true;
 
   @override
   void initState() {
     super.initState();
     _currentChannel = widget.channel;
     _currentIndex = widget.initialIndex >= 0 ? widget.initialIndex : 0;
+
+    // Default to fullscreen landscape and immersive sticky UI for match streams
+    SystemChrome.setPreferredOrientations([
+      DeviceOrientation.landscapeLeft,
+      DeviceOrientation.landscapeRight,
+    ]);
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+
     _initChannelStream();
   }
 
@@ -1548,10 +1741,37 @@ class _LiveChannelPlayerScreenState extends State<LiveChannelPlayerScreen> {
     if (_showControls) _startHideControlsTimer();
   }
 
+  void _toggleOrientation() {
+    setState(() => _isLandscape = !_isLandscape);
+    if (_isLandscape) {
+      SystemChrome.setPreferredOrientations([
+        DeviceOrientation.landscapeLeft,
+        DeviceOrientation.landscapeRight,
+      ]);
+      SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+    } else {
+      SystemChrome.setPreferredOrientations([
+        DeviceOrientation.portraitUp,
+        DeviceOrientation.portraitDown,
+        DeviceOrientation.landscapeLeft,
+        DeviceOrientation.landscapeRight,
+      ]);
+      SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
+    }
+  }
+
   @override
   void dispose() {
     _hideControlsTimer?.cancel();
     _videoPlayerController?.dispose();
+    // Restore orientation and system chrome on exit
+    SystemChrome.setPreferredOrientations([
+      DeviceOrientation.portraitUp,
+      DeviceOrientation.portraitDown,
+      DeviceOrientation.landscapeLeft,
+      DeviceOrientation.landscapeRight,
+    ]);
+    SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     super.dispose();
   }
 
@@ -1797,6 +2017,16 @@ class _LiveChannelPlayerScreenState extends State<LiveChannelPlayerScreen> {
                                   ),
                                 ),
                                 const Spacer(),
+                                IconButton(
+                                  icon: Icon(
+                                    _isLandscape ? Icons.screen_lock_landscape_rounded : Icons.screen_lock_portrait_rounded,
+                                    color: Colors.white70,
+                                    size: 20,
+                                  ),
+                                  tooltip: 'Rotate Screen',
+                                  onPressed: _toggleOrientation,
+                                ),
+                                const SizedBox(width: 8),
                                 Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                                   decoration: BoxDecoration(
