@@ -744,7 +744,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
     try {
       List<ExtractedStream> streams = [];
-      if (server.name.contains('NetMirror')) {
+      if (server.name.contains('StellarHD') || server.name.contains('NetMirror')) {
         String? preferredAudio;
         try {
           if (mounted) {
@@ -772,16 +772,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
           if (sfStreams.isNotEmpty) {
             streams = sfStreams;
           } else {
-            // Fast-fallback 2: Meow Telegram direct stream (api.voidflix.org)
-            final tStreams = await StreamExtractor.extractTelegram(
-              type: widget.mediaType,
-              tmdbId: widget.mediaId,
-              season: _currentSeason,
-              episode: _currentEpisode,
-            ).timeout(const Duration(milliseconds: 3000), onTimeout: () => <ExtractedStream>[]);
-            if (tStreams.isNotEmpty) {
-              streams = tStreams;
-            } else {
               // Fast-fallback 3: Aoneroom (MovieBox direct MP4)
               final aStreams = await StreamExtractor.extractAoneroom(
                 type: widget.mediaType,
@@ -805,8 +795,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
               }
             }
           }
-        }
-      } else if (server.name.contains('Screenfetch')) {
+      } else if (server.name.contains('QuantumStream') || server.name.contains('Screenfetch')) {
         streams = await StreamExtractor.extractScreenfetch(
           type: widget.mediaType,
           tmdbId: widget.mediaId,
@@ -2267,6 +2256,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                     final seenAudioLangs = <String>{};
                                     for (int i = 0; i < _directStreams.length; i++) {
                                       final s = _directStreams[i];
+                                      // Strictly filter out any subtitle releases mistakenly labelled in stream audio
+                                      if (LanguageUtils.isSubtitleOnly(s.language) || LanguageUtils.isSubtitleOnly(s.sourceName)) {
+                                        continue;
+                                      }
                                       final clean = LanguageUtils.cleanLanguageName(s.language);
                                       if (!seenAudioLangs.contains(clean.toLowerCase())) {
                                         seenAudioLangs.add(clean.toLowerCase());

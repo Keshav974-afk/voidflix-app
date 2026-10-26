@@ -698,7 +698,7 @@ class DownloadProvider extends ChangeNotifier {
               headers: s.headers,
               isHls: false, // Direct progressive MP4 stream with byte-range 206!
               qualityLabel: q.label,
-              serverName: 'NetMirror',
+              serverName: 'StellarHD',
               audioLanguage: s.language,
               height: q.height > 0 ? q.height : 1080,
             ));
@@ -709,7 +709,7 @@ class DownloadProvider extends ChangeNotifier {
               headers: s.headers,
               isHls: false,
               qualityLabel: s.qualityLabel ?? '1080p',
-              serverName: 'NetMirror',
+              serverName: 'StellarHD',
               audioLanguage: s.language,
               height: 1080,
             ));

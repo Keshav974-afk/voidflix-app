@@ -32,7 +32,7 @@ class SportsService {
       final res = await http.get(
         Uri.parse('$_apiBase?category=$catKey'),
         headers: {
-          'User-Agent': 'Voidflix-App/0.3.0',
+          'User-Agent': 'Voidflix-App/0.4.0',
           'Accept': 'application/json',
         },
       ).timeout(const Duration(seconds: 5));

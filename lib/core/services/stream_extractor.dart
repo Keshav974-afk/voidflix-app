@@ -1351,7 +1351,7 @@ class StreamExtractor {
             ExtractedStream(
               url: hls,
               type: 'hls',
-              sourceName: 'Screenfetch (Filmpire 1080p)',
+              sourceName: 'QuantumStream (Filmpire 1080p)',
               language: 'Original',
               headers: streamHeaders,
               qualityLabel: '1080p',
@@ -1393,6 +1393,13 @@ class StreamExtractor {
       'https://net77.net.in',
     ];
 
+    bool isSubtitleOnlyVariant(String raw) {
+      final l = raw.toLowerCase().trim();
+      final hasSub = RegExp(r'\b(sub|subs|subtitle|subtitles|softsub|hardsub|subbed)\b', caseSensitive: false).hasMatch(l);
+      final hasDub = RegExp(r'\b(dub|dubs|dubbed|audio|dual|original|default)\b', caseSensitive: false).hasMatch(l);
+      return hasSub && !hasDub;
+    }
+
     String cleanDubLang(String raw) {
       var c = raw.replaceAll(RegExp(r'\s*dub|\s*sub', caseSensitive: false), '').trim();
       if (c.isEmpty || c.toLowerCase() == 'default' || c.toLowerCase() == 'original') {
@@ -1422,7 +1429,9 @@ class StreamExtractor {
                 if (v is Map<String, dynamic>) {
                   final dId = v['dubSubjectId']?.toString() ?? '';
                   final dLang = v['language']?.toString() ?? '';
-                  if (dId.isNotEmpty && dLang.isNotEmpty) {
+                  // Strictly exclude subtitle-only releases ("Hindi sub", "Arabic sub") from audio tracks!
+                  final isSubOnly = isSubtitleOnlyVariant(dLang);
+                  if (dId.isNotEmpty && dLang.isNotEmpty && !isSubOnly) {
                     availableDubs.add({'dubId': dId, 'language': dLang});
                   }
                 }
@@ -1516,7 +1525,7 @@ class StreamExtractor {
             return ExtractedStream(
               url: primaryUrl,
               type: 'mp4',
-              sourceName: 'NetMirror',
+              sourceName: 'StellarHD',
               language: langLabel,
               headers: streamHeaders,
               qualityLabel: qualities.isNotEmpty ? qualities.first.label : '1080p',
@@ -1757,7 +1766,7 @@ class StreamExtractor {
         setCachedEntry(key, fastDirect);
 
         // Background worker to enrich cache with all alternate audio & subtitles
-        Future.wait([screenfetchFuture, telegramFuture, aoneroomFuture, cinejoyFuture, vidrockFuture, vidlinkFuture, voidflixFuture]).then((all) {
+        Future.wait([screenfetchFuture, aoneroomFuture, cinejoyFuture, vidrockFuture, vidlinkFuture, voidflixFuture]).then((all) {
           try {
             final sfList = all[0] as List<ExtractedStream>;
             final tList = all[1] as List<ExtractedStream>;
@@ -1798,7 +1807,6 @@ class StreamExtractor {
 
       final futures = await Future.wait([
         screenfetchFuture,
-        telegramFuture,
         aoneroomFuture,
         cinejoyFuture,
         vidrockFuture,

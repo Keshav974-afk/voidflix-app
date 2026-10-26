@@ -1633,7 +1633,7 @@ class _DetailScreenState extends State<DetailScreen> {
                           SizedBox(width: 8),
                           Expanded(
                             child: Text(
-                              'Best Server routing: Meow (Direct MP4) & NebulaHD (Full AAC Audio)',
+                              'Best Server routing: StellarHD (Direct MP4) & QuantumStream (Zero-Buffering HLS)',
                               style: TextStyle(color: Colors.white70, fontSize: 11),
                             ),
                           ),

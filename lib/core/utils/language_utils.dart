@@ -299,6 +299,17 @@ class LanguageUtils {
     );
   }
 
+  /// Returns whether a language/variant string indicates it is purely a subtitle release (e.g. "Hindi sub", "Arabic sub")
+  /// rather than a true audio dub ("Hindi dub", "Dual Audio").
+  static bool isSubtitleOnly(String? raw) {
+    if (raw == null) return false;
+    final l = raw.toLowerCase().trim();
+    if (l.isEmpty) return false;
+    final hasSub = RegExp(r'\b(sub|subs|subtitle|subtitles|softsub|hardsub|subbed)\b', caseSensitive: false).hasMatch(l);
+    final hasDub = RegExp(r'\b(dub|dubs|dubbed|audio|dual|original|default)\b', caseSensitive: false).hasMatch(l);
+    return hasSub && !hasDub;
+  }
+
   /// Returns a clean, user-friendly language name without server names, resolutions, or noise.
   static String cleanLanguageName(String raw) {
     if (raw.trim().isEmpty) return 'English';
@@ -309,7 +320,8 @@ class LanguageUtils {
     // 3. Strip resolution tokens (4k, 1080p, 720p, etc.)
     cleaned = cleaned.replaceAll(RegExp(r'\b(4k|2160p|1080p|720p|480p|360p)\b', caseSensitive: false), '').trim();
     // 4. Strip server/dub noise words
-    cleaned = cleaned.replaceAll(RegExp(r'\b(dub|sub|audio|original|server|netmirror|cinejoy|screenfetch|stream)\b', caseSensitive: false), '').trim();
+        // Exclude subtitle releases from audio name cleanup
+    cleaned = cleaned.replaceAll(RegExp(r'\b(dub|sub|audio|original|server|stellarhd|quantumstream|netmirror|cinejoy|screenfetch|stream)\b', caseSensitive: false), '').trim();
 
     if (cleaned.isEmpty) return 'English';
     final info = getInfo(cleaned);

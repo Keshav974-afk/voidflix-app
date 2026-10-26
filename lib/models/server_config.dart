@@ -20,7 +20,7 @@ class ServerConfig {
     // DIRECT NATIVE SERVERS (Extractable HLS • Hardware Accelerated • No Ads)
     // -------------------------------------------------------------------------
     VideoServer(
-      name: "NetMirror",
+      name: "StellarHD",
       description:
           "Direct 1080p MP4 adaptive streams (Fast Start • Multi-Audio • Multi-Sub)",
       movieUrl: (id) => "https://net79.cc/watch-tmdb/$id?type=movie",
@@ -29,20 +29,12 @@ class ServerConfig {
       isDirectPlay: true,
     ),
     VideoServer(
-      name: "Screenfetch",
+      name: "QuantumStream",
       description:
           "Zero-buffering micro-segmented HLS (Filmpire Engine • Instant Keyframe Seeking)",
       movieUrl: (id) => "https://screenfetch4.cyou/embed/movie?tmdb=$id",
       tvUrl: (id, s, e) =>
           "https://screenfetch4.cyou/embed/tv?tmdb=$id&season=$s&episode=$e",
-      isDirectPlay: true,
-    ),
-    VideoServer(
-      name: "Meow",
-      description:
-          "Direct 4K/1080p multi-audio streams from 25k Telegram channel (Ultra Fast • Primary)",
-      movieUrl: (id) => "http://103.30.211.131/stream/movie/$id",
-      tvUrl: (id, s, e) => "http://103.30.211.131/stream/tv/$id/$s/$e",
       isDirectPlay: true,
     ),
     VideoServer(
