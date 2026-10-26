@@ -1,4 +1,7 @@
 import 'dart:async';
+import 'dart:io';
+import 'package:flutter/foundation.dart';
+import 'package:url_launcher/url_launcher.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
@@ -204,6 +207,35 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
           channel: channel,
           allChannels: _filteredChannels,
           initialIndex: _filteredChannels.indexOf(channel),
+        ),
+      ),
+    );
+  }
+
+  void _watchMatchStream(SportsMatch match, SportsStream s) {
+    final matchChannels = match.streams.map((stream) {
+      return LiveChannel(
+        id: '${match.id}_${stream.id}',
+        name: '${match.title} (${stream.label})',
+        category: match.category,
+        streamUrl: stream.url,
+        directStreamUrl: stream.isDirect ? stream.url : null,
+        description: '${match.category} • ${match.formattedStatus}',
+        httpHeaders: stream.headers,
+      );
+    }).toList();
+
+    final selectedChannel = matchChannels.firstWhere(
+      (c) => c.id == '${match.id}_${s.id}',
+      orElse: () => matchChannels.first,
+    );
+
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => LiveChannelPlayerScreen(
+          channel: selectedChannel,
+          allChannels: matchChannels,
+          initialIndex: matchChannels.indexOf(selectedChannel),
         ),
       ),
     );
@@ -421,16 +453,7 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
     }
 
     if (match.streams.length == 1) {
-      final s = match.streams.first;
-      _watchChannel(LiveChannel(
-        id: '${match.id}_${s.id}',
-        name: '${match.title} (${s.label})',
-        category: match.category,
-        streamUrl: s.url,
-        directStreamUrl: s.isDirect ? s.url : null,
-        description: '${match.category} • ${match.formattedStatus}',
-        httpHeaders: s.headers,
-      ));
+      _watchMatchStream(match, match.streams.first);
       return;
     }
 
@@ -510,15 +533,7 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
                     trailing: const Icon(Icons.play_arrow_rounded, color: Colors.white70),
                     onTap: () {
                       Navigator.of(ctx).pop();
-                      _watchChannel(LiveChannel(
-                        id: '${match.id}_${s.id}',
-                        name: '${match.title} (${s.label})',
-                        category: match.category,
-                        streamUrl: s.url,
-                        directStreamUrl: s.isDirect ? s.url : null,
-                        description: '${match.category} • ${match.formattedStatus}',
-                        httpHeaders: s.headers,
-                      ));
+                      _watchMatchStream(match, s);
                     },
                   );
                 }),
@@ -1616,6 +1631,7 @@ class _LiveChannelPlayerScreenState extends State<LiveChannelPlayerScreen> {
   double _volume = 1.0;
   bool _isMuted = false;
   bool _isLandscape = true;
+  bool _isDesktopWebStream = false;
 
   @override
   void initState() {
@@ -1647,7 +1663,7 @@ class _LiveChannelPlayerScreenState extends State<LiveChannelPlayerScreen> {
     final streamUrl = _currentChannel.playbackUrl;
 
     // 1. Direct native HLS stream playback
-    if (_currentChannel.isDirectHls || !PlatformUtils.isWebViewSupported) {
+    if (_currentChannel.isDirectHls) {
       try {
         final controller = VideoPlayerController.networkUrl(
           Uri.parse(streamUrl),
@@ -1676,8 +1692,8 @@ class _LiveChannelPlayerScreenState extends State<LiveChannelPlayerScreen> {
         }
       }
     }
-    // 2. Mobile web embed fallback (when supported)
-    else {
+    // 2. Mobile web embed & DASH fallback (Android / iOS / macOS with WebView)
+    else if (PlatformUtils.isWebViewSupported) {
       try {
         var playUrl = streamUrl;
         // Direct resolution for golf stream wrapper to eliminate sandbox detection overlay
@@ -1723,6 +1739,41 @@ class _LiveChannelPlayerScreenState extends State<LiveChannelPlayerScreen> {
         if (mounted) setState(() => _isLoading = false);
       }
     }
+    // 3. Desktop (Windows / Linux) DASH & Web Stream Studio
+    else {
+      setState(() {
+        _isLoading = false;
+        _hasError = false;
+        _isDesktopWebStream = true;
+      });
+      _launchDesktopPlayer(streamUrl);
+    }
+  }
+
+  Future<void> _launchDesktopPlayer(String streamUrl, {bool forceBrowser = false}) async {
+    try {
+      if (!forceBrowser && !kIsWeb && Platform.isWindows) {
+        // Try Edge App Mode (Dedicated, borderless 1080p window)
+        try {
+          final res = await Process.run('cmd', ['/c', 'start', '""', 'msedge', '--app=$streamUrl']);
+          if (res.exitCode == 0) return;
+        } catch (_) {}
+
+        // Try Chrome App Mode
+        try {
+          final res = await Process.run('cmd', ['/c', 'start', '""', 'chrome', '--app=$streamUrl']);
+          if (res.exitCode == 0) return;
+        } catch (_) {}
+      }
+
+      // Default browser launch via url_launcher
+      final uri = Uri.parse(streamUrl);
+      if (await canLaunchUrl(uri)) {
+        await launchUrl(uri, mode: LaunchMode.externalApplication);
+      }
+    } catch (e) {
+      debugPrint('Desktop stream launch error: $e');
+    }
   }
 
   void _switchChannel(int direction) {
@@ -1748,6 +1799,190 @@ class _LiveChannelPlayerScreenState extends State<LiveChannelPlayerScreen> {
   void _toggleControls() {
     setState(() => _showControls = !_showControls);
     if (_showControls) _startHideControlsTimer();
+  }
+
+  Widget _buildDesktopStreamStudio() {
+    return Container(
+      decoration: const BoxDecoration(
+        gradient: RadialGradient(
+          center: Alignment.center,
+          radius: 1.2,
+          colors: [
+            Color(0xFF1B1B28),
+            Color(0xFF0E0E15),
+            Colors.black,
+          ],
+        ),
+      ),
+      child: Center(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 32),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 680),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.center,
+              children: [
+                // Live Glowing Badge
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+                  decoration: BoxDecoration(
+                    color: AppTheme.primaryRed.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(20),
+                    border: Border.all(color: AppTheme.primaryRed.withValues(alpha: 0.5)),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        width: 8,
+                        height: 8,
+                        decoration: const BoxDecoration(
+                          color: AppTheme.primaryRed,
+                          shape: BoxShape.circle,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      const Text(
+                        'LIVE BROADCAST ACTIVE • 1080p 60FPS',
+                        style: TextStyle(
+                          color: AppTheme.primaryRed,
+                          fontSize: 11,
+                          fontWeight: FontWeight.bold,
+                          letterSpacing: 1.2,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 20),
+
+                // Match / Channel Title
+                Text(
+                  _currentChannel.name,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 22,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 0.3,
+                  ),
+                ),
+                const SizedBox(height: 8),
+
+                // Subtitle
+                Text(
+                  _currentChannel.description ?? 'ClearKey DRM Hardware-Accelerated Broadcast',
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(color: Colors.white60, fontSize: 13),
+                ),
+                const SizedBox(height: 26),
+
+                // Main Launch Button (Glow Effect)
+                ElevatedButton.icon(
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: AppTheme.primaryRed,
+                    foregroundColor: Colors.white,
+                    padding: const EdgeInsets.symmetric(horizontal: 32, vertical: 16),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    elevation: 8,
+                    shadowColor: AppTheme.primaryRed.withValues(alpha: 0.6),
+                  ),
+                  onPressed: () => _launchDesktopPlayer(_currentChannel.playbackUrl),
+                  icon: const Icon(Icons.play_arrow_rounded, size: 24),
+                  label: const Text(
+                    'Launch 1080p Live Player Window',
+                    style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold, letterSpacing: 0.5),
+                  ),
+                ),
+                const SizedBox(height: 12),
+
+                // Secondary Browser Button
+                OutlinedButton.icon(
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: Colors.white70,
+                    side: const BorderSide(color: Colors.white24),
+                    padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 13),
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                  ),
+                  onPressed: () => _launchDesktopPlayer(_currentChannel.playbackUrl, forceBrowser: true),
+                  icon: const Icon(Icons.open_in_browser_rounded, size: 18),
+                  label: const Text('Open in Web Browser (voidflix.org/sports)'),
+                ),
+
+                const SizedBox(height: 24),
+
+                // Helpful Info Card
+                Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF161622),
+                    borderRadius: BorderRadius.circular(10),
+                    border: Border.all(color: Colors.white10),
+                  ),
+                  child: const Row(
+                    children: [
+                      Icon(Icons.info_outline_rounded, color: Colors.amber, size: 18),
+                      SizedBox(width: 10),
+                      Expanded(
+                        child: Text(
+                          'Windows Desktop uses hardware-accelerated Shaka ClearKey DRM. The stream opens in a dedicated frameless player window with full volume & fullscreen controls.',
+                          style: TextStyle(color: Colors.white70, fontSize: 11, height: 1.4),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+
+                // Feeds Switcher Row if multiple channels available
+                if (widget.allChannels.length > 1) ...[
+                  const SizedBox(height: 24),
+                  const Text(
+                    'SWITCH AVAILABLE MATCH FEEDS',
+                    style: TextStyle(color: Colors.white38, fontSize: 10, fontWeight: FontWeight.bold, letterSpacing: 1),
+                  ),
+                  const SizedBox(height: 10),
+                  Wrap(
+                    spacing: 8,
+                    runSpacing: 8,
+                    alignment: WrapAlignment.center,
+                    children: List.generate(widget.allChannels.length, (idx) {
+                      final ch = widget.allChannels[idx];
+                      final isCurrent = idx == _currentIndex;
+                      return ChoiceChip(
+                        label: Text(
+                          ch.name,
+                          style: TextStyle(
+                            color: isCurrent ? Colors.white : Colors.white70,
+                            fontSize: 11,
+                            fontWeight: isCurrent ? FontWeight.bold : FontWeight.normal,
+                          ),
+                        ),
+                        selected: isCurrent,
+                        selectedColor: AppTheme.primaryRed,
+                        backgroundColor: const Color(0xFF1C1C2A),
+                        side: BorderSide(
+                          color: isCurrent ? AppTheme.primaryRed : Colors.white12,
+                        ),
+                        onSelected: (selected) {
+                          if (selected) {
+                            setState(() {
+                              _currentIndex = idx;
+                              _currentChannel = widget.allChannels[idx];
+                            });
+                            _initChannelStream();
+                          }
+                        },
+                      );
+                    }),
+                  ),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 
   void _toggleOrientation() {
@@ -1806,6 +2041,8 @@ class _LiveChannelPlayerScreenState extends State<LiveChannelPlayerScreen> {
                 )
               else if (_webViewController != null)
                 WebViewWidget(controller: _webViewController!)
+              else if (_isDesktopWebStream)
+                _buildDesktopStreamStudio()
               else if (!_isLoading && _hasError)
                 Center(
                   child: Padding(
