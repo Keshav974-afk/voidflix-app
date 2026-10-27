@@ -332,12 +332,6 @@ query GetLiveCricket {
             }
           }
 
-          // D. Mark live if within 8 hours of today's start time for NPL
-          bool effectiveLive = isLive;
-          if (isNplMatch && now.difference(start).abs().inHours < 8) {
-            effectiveLive = true;
-          }
-
           matches.add(SportsMatch(
             id: c['id']?.toString() ?? '',
             slug: c['slug']?.toString() ?? '',
@@ -351,7 +345,7 @@ query GetLiveCricket {
             thumbnail: c['thumbnailUrl']?.toString() ?? '',
             startDateTime: start,
             durationMinutes: duration,
-            isLive: effectiveLive,
+            isLive: isLive,
             streams: streams,
           ));
         }
