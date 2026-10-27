@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:google_fonts/google_fonts.dart';
 import 'package:video_player/video_player.dart';
+import 'package:wakelock_plus/wakelock_plus.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import '../core/constants/theme_constants.dart';
 import '../core/services/tv_mode_service.dart';
@@ -1757,6 +1758,11 @@ class _LiveChannelPlayerScreenState extends State<LiveChannelPlayerScreen> {
     _currentChannel = widget.channel;
     _currentIndex = widget.initialIndex >= 0 ? widget.initialIndex : 0;
 
+    // Keep screen awake while watching Live TV / Sports match stream
+    try {
+      WakelockPlus.enable();
+    } catch (_) {}
+
     // Default to fullscreen landscape and immersive sticky UI for match streams
     SystemChrome.setPreferredOrientations([
       DeviceOrientation.landscapeLeft,
@@ -2151,6 +2157,11 @@ class _LiveChannelPlayerScreenState extends State<LiveChannelPlayerScreen> {
 
   @override
   void dispose() {
+    // Release screen wakelock
+    try {
+      WakelockPlus.disable();
+    } catch (_) {}
+
     _hideControlsTimer?.cancel();
     _videoPlayerController?.dispose();
     // Restore orientation and system chrome on exit
