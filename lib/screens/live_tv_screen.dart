@@ -1293,242 +1293,294 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
             ] else ...[
               LayoutBuilder(
                 builder: (context, constraints) {
-                  final count = (constraints.maxWidth / 320).floor().clamp(1, 4);
+                  final isNarrow = constraints.maxWidth < 640;
+                  final count = isNarrow ? 1 : (constraints.maxWidth / 380).floor().clamp(2, 4);
+
+                  Widget buildMatchCard(SportsMatch match) {
+                    return GestureDetector(
+                      onTap: () => _showStreamPickerModal(match),
+                      child: Container(
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            begin: Alignment.topLeft,
+                            end: Alignment.bottomRight,
+                            colors: [
+                              const Color(0xFF191924),
+                              match.isLive ? const Color(0xFF24131C) : const Color(0xFF12121A),
+                            ],
+                          ),
+                          borderRadius: BorderRadius.circular(12),
+                          border: Border.all(
+                            color: match.isLive
+                                ? const Color(0xFFE50914).withValues(alpha: 0.55)
+                                : Colors.white.withValues(alpha: 0.09),
+                            width: 1.1,
+                          ),
+                          boxShadow: [
+                            BoxShadow(
+                              color: Colors.black.withValues(alpha: 0.4),
+                              blurRadius: 8,
+                              offset: const Offset(0, 3),
+                            ),
+                          ],
+                        ),
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            // 1. Top Bar: Category/Tournament + Status Badge + Reminder
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Expanded(
+                                  child: Row(
+                                    children: [
+                                      Icon(_getCategoryIcon(match.category), size: 12, color: AppTheme.textMuted),
+                                      const SizedBox(width: 5),
+                                      Expanded(
+                                        child: Text(
+                                          match.category.toUpperCase(),
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: const TextStyle(
+                                            color: AppTheme.textMuted,
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.bold,
+                                            letterSpacing: 0.7,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
+                                  decoration: BoxDecoration(
+                                    color: match.isLive
+                                        ? const Color(0xFFE50914)
+                                        : (match.hasStarted ? Colors.white12 : Colors.amber.withValues(alpha: 0.16)),
+                                    borderRadius: BorderRadius.circular(5),
+                                    border: (!match.isLive && !match.hasStarted)
+                                        ? Border.all(color: Colors.amber.withValues(alpha: 0.4), width: 0.9)
+                                        : null,
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      if (match.isLive) ...[
+                                        const Icon(Icons.fiber_manual_record, color: Colors.white, size: 7),
+                                        const SizedBox(width: 4),
+                                      ] else if (!match.hasStarted) ...[
+                                        const Icon(Icons.schedule_rounded, color: Colors.amber, size: 9),
+                                        const SizedBox(width: 4),
+                                      ],
+                                      Text(
+                                        match.formattedStatus,
+                                        style: TextStyle(
+                                          color: match.isLive ? Colors.white : (match.hasStarted ? Colors.white70 : Colors.amber),
+                                          fontSize: 9.5,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                if (!match.hasStarted) ...[
+                                  const SizedBox(width: 6),
+                                  Builder(
+                                    builder: (cardCtx) {
+                                      final isReminded = SportsReminderService().isReminded(match.id);
+                                      return GestureDetector(
+                                        onTap: () async {
+                                          final notif = Provider.of<NotificationProvider>(context, listen: false);
+                                          HapticFeedback.lightImpact();
+                                          await SportsReminderService().toggleReminder(
+                                            context: context,
+                                            match: match,
+                                            notifProvider: notif,
+                                          );
+                                          if (mounted) setState(() {});
+                                        },
+                                        child: Container(
+                                          padding: const EdgeInsets.all(4.5),
+                                          decoration: BoxDecoration(
+                                            color: isReminded ? Colors.amber.withValues(alpha: 0.22) : Colors.white10,
+                                            shape: BoxShape.circle,
+                                            border: Border.all(
+                                              color: isReminded ? Colors.amber.withValues(alpha: 0.6) : Colors.white12,
+                                            ),
+                                          ),
+                                          child: Icon(
+                                            isReminded ? Icons.notifications_active_rounded : Icons.notifications_none_rounded,
+                                            color: isReminded ? Colors.amber : Colors.white70,
+                                            size: 12,
+                                          ),
+                                        ),
+                                      );
+                                    },
+                                  ),
+                                ],
+                              ],
+                            ),
+
+                            const SizedBox(height: 8),
+
+                            // 2. Center VS Hero: Team Logos & Names (Compact Inline)
+                            Row(
+                              children: [
+                                // Home Team
+                                Expanded(
+                                  child: Row(
+                                    children: [
+                                      _buildTeamLogo(match.homeTeamLogo, match.homeTeam, size: 28),
+                                      const SizedBox(width: 8),
+                                      Expanded(
+                                        child: Text(
+                                          match.homeTeam.isNotEmpty ? match.homeTeam : match.title,
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 12.5,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+
+                                // VS Divider
+                                Container(
+                                  margin: const EdgeInsets.symmetric(horizontal: 8),
+                                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2.5),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF222230),
+                                    borderRadius: BorderRadius.circular(5),
+                                    border: Border.all(color: Colors.white10),
+                                  ),
+                                  child: const Text(
+                                    'VS',
+                                    style: TextStyle(
+                                      color: Colors.amber,
+                                      fontSize: 9.5,
+                                      fontWeight: FontWeight.w900,
+                                      letterSpacing: 0.5,
+                                    ),
+                                  ),
+                                ),
+
+                                // Away Team
+                                Expanded(
+                                  child: Row(
+                                    mainAxisAlignment: MainAxisAlignment.end,
+                                    children: [
+                                      Expanded(
+                                        child: Text(
+                                          match.awayTeam.isNotEmpty ? match.awayTeam : 'Opponent',
+                                          maxLines: 1,
+                                          overflow: TextOverflow.ellipsis,
+                                          textAlign: TextAlign.end,
+                                          style: const TextStyle(
+                                            color: Colors.white,
+                                            fontSize: 12.5,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      _buildTeamLogo(match.awayTeamLogo, match.awayTeam, size: 28),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+
+                            const SizedBox(height: 8),
+
+                            // 3. Bottom Row: Stream count & Action Watch button
+                            Row(
+                              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                              children: [
+                                Text(
+                                  '⚡ ${match.streams.length} Feed${match.streams.length == 1 ? '' : 's'} • HD',
+                                  style: const TextStyle(
+                                    color: Colors.white54,
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                ),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                                  decoration: BoxDecoration(
+                                    gradient: LinearGradient(
+                                      colors: (match.isLive || match.hasStarted)
+                                          ? [const Color(0xFFE50914), const Color(0xFFB80710)]
+                                          : [const Color(0xFFD97706), const Color(0xFFB45309)],
+                                    ),
+                                    borderRadius: BorderRadius.circular(6),
+                                    boxShadow: [
+                                      BoxShadow(
+                                        color: (match.isLive || match.hasStarted)
+                                            ? const Color(0xFFE50914).withValues(alpha: 0.35)
+                                            : Colors.amber.withValues(alpha: 0.25),
+                                        blurRadius: 4,
+                                      ),
+                                    ],
+                                  ),
+                                  child: Row(
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: [
+                                      Icon(
+                                        (match.isLive || match.hasStarted) ? Icons.play_arrow_rounded : Icons.schedule_rounded,
+                                        color: Colors.white,
+                                        size: 13,
+                                      ),
+                                      const SizedBox(width: 3),
+                                      Text(
+                                        (match.isLive || match.hasStarted) ? 'Watch Live' : 'Pre-Match',
+                                        style: const TextStyle(
+                                          color: Colors.white,
+                                          fontSize: 10,
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
+                        ),
+                      ),
+                    );
+                  }
+
+                  if (isNarrow) {
+                    return ListView.separated(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      itemCount: _matches.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 10),
+                      itemBuilder: (context, index) => buildMatchCard(_matches[index]),
+                    );
+                  }
+
                   return GridView.builder(
                     shrinkWrap: true,
                     physics: const NeverScrollableScrollPhysics(),
                     padding: const EdgeInsets.symmetric(horizontal: 12),
                     gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                       crossAxisCount: count,
-                      childAspectRatio: 1.32,
-                      crossAxisSpacing: 12,
-                      mainAxisSpacing: 12,
+                      childAspectRatio: 2.3,
+                      crossAxisSpacing: 10,
+                      mainAxisSpacing: 10,
                     ),
                     itemCount: _matches.length,
-                    itemBuilder: (context, index) {
-                      final match = _matches[index];
-                      return GestureDetector(
-                        onTap: () => _showStreamPickerModal(match),
-                        child: Container(
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              begin: Alignment.topLeft,
-                              end: Alignment.bottomRight,
-                              colors: [
-                                const Color(0xFF1B1B26),
-                                match.isLive ? const Color(0xFF281418) : const Color(0xFF13131C),
-                              ],
-                            ),
-                            borderRadius: BorderRadius.circular(14),
-                            border: Border.all(
-                              color: match.isLive
-                                  ? const Color(0xFFE50914).withValues(alpha: 0.6)
-                                  : Colors.white12,
-                              width: 1.2,
-                            ),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withValues(alpha: 0.5),
-                                blurRadius: 10,
-                                offset: const Offset(0, 4),
-                              ),
-                            ],
-                          ),
-                          padding: const EdgeInsets.all(12),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: [
-                              // Top Row: Sport tag + Live/Timer Status + Silent Bell
-                              Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                children: [
-                                  Expanded(
-                                    child: Text(
-                                      match.category.toUpperCase(),
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(
-                                        color: AppTheme.textMuted,
-                                        fontSize: 10,
-                                        fontWeight: FontWeight.bold,
-                                        letterSpacing: 0.8,
-                                      ),
-                                    ),
-                                  ),
-                                  const SizedBox(width: 6),
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
-                                    decoration: BoxDecoration(
-                                      color: match.isLive
-                                          ? const Color(0xFFE50914)
-                                          : (match.hasStarted ? Colors.white10 : Colors.amber.withValues(alpha: 0.15)),
-                                      borderRadius: BorderRadius.circular(4),
-                                      border: (!match.isLive && !match.hasStarted)
-                                          ? Border.all(color: Colors.amber.withValues(alpha: 0.35))
-                                          : null,
-                                    ),
-                                    child: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        if (match.isLive) ...[
-                                          const Icon(Icons.fiber_manual_record, color: Colors.white, size: 7),
-                                          const SizedBox(width: 4),
-                                        ] else if (!match.hasStarted) ...[
-                                          const Icon(Icons.schedule_rounded, color: Colors.amber, size: 9),
-                                          const SizedBox(width: 4),
-                                        ],
-                                        Text(
-                                          match.formattedStatus,
-                                          style: TextStyle(
-                                            color: match.isLive ? Colors.white : (match.hasStarted ? Colors.white70 : Colors.amber),
-                                            fontSize: 9.5,
-                                            fontWeight: FontWeight.bold,
-                                          ),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                  if (!match.hasStarted) ...[
-                                    const SizedBox(width: 6),
-                                    Builder(
-                                      builder: (cardCtx) {
-                                        final isReminded = SportsReminderService().isReminded(match.id);
-                                        return GestureDetector(
-                                          onTap: () async {
-                                            final notif = Provider.of<NotificationProvider>(context, listen: false);
-                                            HapticFeedback.lightImpact();
-                                            await SportsReminderService().toggleReminder(
-                                              context: context,
-                                              match: match,
-                                              notifProvider: notif,
-                                            );
-                                            if (mounted) setState(() {});
-                                          },
-                                          child: Container(
-                                            padding: const EdgeInsets.all(5),
-                                            decoration: BoxDecoration(
-                                              color: isReminded ? Colors.amber.withValues(alpha: 0.2) : Colors.white10,
-                                              shape: BoxShape.circle,
-                                              border: Border.all(
-                                                color: isReminded ? Colors.amber.withValues(alpha: 0.6) : Colors.white12,
-                                              ),
-                                            ),
-                                            child: Icon(
-                                              isReminded ? Icons.notifications_active_rounded : Icons.notifications_none_rounded,
-                                              color: isReminded ? Colors.amber : Colors.white70,
-                                              size: 13,
-                                            ),
-                                          ),
-                                        );
-                                      },
-                                    ),
-                                  ],
-                                ],
-                              ),
-
-                              const SizedBox(height: 6),
-
-                              // CENTER HERO: Team Logos & Names
-                              Row(
-                                children: [
-                                  // Home Team
-                                  Expanded(
-                                    child: Column(
-                                      children: [
-                                        _buildTeamLogo(match.homeTeamLogo, match.homeTeam, size: 40),
-                                        const SizedBox(height: 4),
-                                        Text(
-                                          match.homeTeam.isNotEmpty ? match.homeTeam : match.title,
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                          textAlign: TextAlign.center,
-                                          style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-
-                                  // VS Divider
-                                  Padding(
-                                    padding: const EdgeInsets.symmetric(horizontal: 4),
-                                    child: Text(
-                                      'VS',
-                                      style: TextStyle(
-                                        color: Colors.white.withValues(alpha: 0.4),
-                                        fontSize: 10,
-                                        fontWeight: FontWeight.w900,
-                                        letterSpacing: 1,
-                                      ),
-                                    ),
-                                  ),
-
-                                  // Away Team
-                                  Expanded(
-                                    child: Column(
-                                      children: [
-                                        _buildTeamLogo(match.awayTeamLogo, match.awayTeam, size: 40),
-                                        const SizedBox(height: 4),
-                                        Text(
-                                          match.awayTeam.isNotEmpty ? match.awayTeam : 'Opponent',
-                                          maxLines: 1,
-                                          overflow: TextOverflow.ellipsis,
-                                          textAlign: TextAlign.center,
-                                          style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ],
-                              ),
-
-                              const SizedBox(height: 6),
-
-                              // Bottom Action Row
-                              Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                children: [
-                                  Text(
-                                    '${match.streams.length} Feed${match.streams.length == 1 ? '' : 's'}',
-                                    style: const TextStyle(color: Colors.white54, fontSize: 10, fontWeight: FontWeight.w500),
-                                  ),
-                                  Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                                    decoration: BoxDecoration(
-                                      color: (match.isLive || match.hasStarted) ? const Color(0xFFE50914) : Colors.amber.shade700,
-                                      borderRadius: BorderRadius.circular(6),
-                                      boxShadow: [
-                                        BoxShadow(
-                                          color: (match.isLive || match.hasStarted)
-                                              ? const Color(0xFFE50914).withValues(alpha: 0.4)
-                                              : Colors.amber.withValues(alpha: 0.3),
-                                          blurRadius: 4,
-                                        ),
-                                      ],
-                                    ),
-                                    child: Row(
-                                      mainAxisSize: MainAxisSize.min,
-                                      children: [
-                                        Icon(
-                                          (match.isLive || match.hasStarted) ? Icons.play_arrow_rounded : Icons.schedule_rounded,
-                                          color: Colors.white,
-                                          size: 13,
-                                        ),
-                                        const SizedBox(width: 3),
-                                        Text(
-                                          (match.isLive || match.hasStarted) ? 'Watch Live' : 'Pre-Match',
-                                          style: const TextStyle(color: Colors.white, fontSize: 10.5, fontWeight: FontWeight.bold),
-                                        ),
-                                      ],
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ],
-                          ),
-                        ),
-                      );
-                    },
+                    itemBuilder: (context, index) => buildMatchCard(_matches[index]),
                   );
                 },
               ),

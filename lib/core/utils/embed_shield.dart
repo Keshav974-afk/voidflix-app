@@ -3,10 +3,6 @@ import 'package:webview_flutter_android/webview_flutter_android.dart';
 
 /// EmbedShield provides bulletproof anti-popup and silent redirect absorption
 /// for third-party streaming embeds (SPHub, streamed.st, DaddyLive, NetMirror, etc.).
-///
-/// It tricks aggressive ad scripts into believing popups and redirects succeeded
-/// by providing a fully compliant mock Window proxy, while silently absorbing
-/// top-level navigations so the user stays uninterrupted on the video player.
 class EmbedShield {
   EmbedShield._();
 
@@ -15,7 +11,7 @@ class EmbedShield {
 
   /// JavaScript payload injected on page start and finish.
   /// Fakes window.open with a mock Window proxy, intercepts popunder links,
-  /// neutralizes ad redirects, and removes transparent full-screen overlay click-jackers.
+  /// neutralizes ad redirects, and prevents click-jackers without breaking media players.
   static const String antiPopupScript = '''
 (function() {
   if (window.__voidflixShieldActive) return;
@@ -69,7 +65,7 @@ class EmbedShield {
     'adsterra', 'popads', 'propellerads', 'exoclick', 'bet365', '1xbet',
     'betway', 'casino', 'adcash', 'trafficjunky', 'onclickmega', 'doubleclick',
     'adnxs', 'popcash', 'hilltopads', 'monetag', 'asiafilm', 'capitalhospitals',
-    'czernik', 'tinyurl', 'sphub.net', 'quge5', 'diskbecause', 'ad.html', 'optimserve'
+    'czernik', 'tinyurl', 'sphub.net', 'quge5', 'diskbecause', 'optimserve'
   ];
 
   function isAdUrl(u) {
@@ -120,86 +116,34 @@ class EmbedShield {
     }
   }, true);
 
-  // Remove full-screen invisible popunder overlay elements & sandbox warnings
+  // Safely neutralize click-jackers WITHOUT removing legitimate video player containers
   function cleanOverlays() {
     try {
-      var all = document.querySelectorAll('div, a, iframe, section, p, span');
+      var all = document.querySelectorAll('div, a, section, p, span');
       for (var i = 0; i < all.length; i++) {
         var el = all[i];
 
-        // 1. Never remove the legitimate stream player iframe
-        if (el.tagName === 'IFRAME') {
-          if (el.hasAttribute('sandbox')) {
-            el.removeAttribute('sandbox');
-            console.log('[Voidflix] Stripped sandbox attribute from iframe');
-          }
-          if (el.src && (isAdUrl(el.src) || el.id === 'close')) {
-            el.remove();
-          }
+        // Never touch or remove player containers or media stages
+        var idOrClass = ((el.id || '') + ' ' + (el.className || '')).toLowerCase();
+        if (idOrClass.includes('player') || idOrClass.includes('video') || idOrClass.includes('media') || idOrClass.includes('shaka') || idOrClass.includes('container') || idOrClass.includes('voidflix')) {
           continue;
         }
 
-        // 2. Kill any element containing "sandbox" warning text
-        var txt = (el.textContent || '').toLowerCase();
-        if (txt.includes('remove sandbox') || txt.includes('sandbox attributes') || (txt.includes('sandbox') && txt.includes('iframe'))) {
-          console.log('[Voidflix] Purged sandbox warning element:', el.tagName);
-          el.remove();
-          continue;
-        }
-
-        // 3. Kill transparent / full-screen clickjackers or extreme z-index blockers
+        // Kill transparent / invisible overlay elements that block taps to video
         var style = window.getComputedStyle(el);
         if (style.position === 'fixed' || style.position === 'absolute') {
           var z = parseInt(style.zIndex, 10);
-          if (z >= 999999 || (z > 500 && (el.clientWidth > window.innerWidth * 0.8) && (el.clientHeight > window.innerHeight * 0.8) && !el.querySelector('video') && !el.querySelector('iframe'))) {
-            el.remove();
+          var isTransparent = style.opacity === '0' || style.backgroundColor === 'transparent' || style.backgroundColor === 'rgba(0, 0, 0, 0)';
+          if (z >= 999999 && isTransparent && !el.querySelector('video') && !el.querySelector('iframe')) {
+            el.style.pointerEvents = 'none';
           }
         }
       }
     } catch(e) {}
   }
 
-  // Intercept and prevent sandbox attribute from ever being attached to any iframe
-  try {
-    var origSetAttr = Element.prototype.setAttribute;
-    Element.prototype.setAttribute = function(name, val) {
-      if (this.tagName === 'IFRAME' && name && name.toLowerCase() === 'sandbox') {
-        console.log('[Voidflix] Intercepted setAttribute sandbox on iframe');
-        return;
-      }
-      return origSetAttr.apply(this, arguments);
-    };
-  } catch(e) {}
-
-  // Auto-promote inner stream iframes (e.g. rockyembed inside embed.st) so they run in the top window
-  try {
-    function promoteInnerPlayer() {
-      if (window.top !== window.self) return; // Only run on top-level page
-      var iframes = document.querySelectorAll('iframe');
-      for (var j = 0; j < iframes.length; j++) {
-        var ifr = iframes[j];
-        if (ifr.src && (ifr.src.includes('rockyembed.st') || ifr.src.includes('source/streamed') || ifr.src.includes('embedme'))) {
-          console.log('[Voidflix] Auto-promoting inner stream iframe to direct window:', ifr.src);
-          window.location.replace(ifr.src);
-          break;
-        }
-      }
-    }
-    promoteInnerPlayer();
-    setTimeout(promoteInnerPlayer, 400);
-  } catch(e) {}
-
-  // Clear any cached isSandboxed flags in localStorage
-  try {
-    for (var k in localStorage) {
-      if (localStorage.hasOwnProperty(k) && typeof localStorage.getItem(k) === 'string' && localStorage.getItem(k).includes('isSandboxed')) {
-        localStorage.removeItem(k);
-      }
-    }
-  } catch(e) {}
-
   cleanOverlays();
-  setInterval(cleanOverlays, 300);
+  setInterval(cleanOverlays, 800);
 
   function notifyTap() {
     try { if (window.VoidflixBridge) { window.VoidflixBridge.postMessage('screen_tapped'); } } catch(e) {}
@@ -235,8 +179,6 @@ class EmbedShield {
 ''';
 
   /// Evaluates whether a pending navigation request should be blocked.
-  /// When this returns true, the WebView returns NavigationDecision.prevent,
-  /// causing the redirect to be absorbed silently without navigating away.
   static bool shouldBlockNavigation(String url) {
     final lower = url.toLowerCase();
 
@@ -254,7 +196,7 @@ class EmbedShield {
       return true;
     }
 
-    // 2. Ad networks, redirect landing pages, popunders, and countdown domain traps
+    // 2. Ad networks and popunders
     const blocked = [
       'adsterra', 'popads', 'propellerads', 'exoclick', 'bet365', '1xbet',
       'betway', 'casino', 'adcash', 'trafficjunky', 'onclickmega', 'doubleclick',
