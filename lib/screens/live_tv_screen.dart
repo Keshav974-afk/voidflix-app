@@ -201,6 +201,11 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
       }
     }
 
+    // 4. If stream is an external mirror/embed, route through our clean sandboxed zero-ad player
+    if (stream.type == 'embed' && !raw.contains('voidflix.org/dash-player.html')) {
+      return 'https://voidflix.org/dash-player.html?embed=${Uri.encodeComponent(raw)}&title=${Uri.encodeComponent(title)}';
+    }
+
     return raw;
   }
 
@@ -467,7 +472,28 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
                               ),
                             ),
                           ),
-                          const SizedBox(height: 10),
+                          const SizedBox(height: 12),
+                          SizedBox(
+                            width: double.infinity,
+                            child: ElevatedButton.icon(
+                              style: ElevatedButton.styleFrom(
+                                backgroundColor: const Color(0xFF2563EB),
+                                foregroundColor: Colors.white,
+                                padding: const EdgeInsets.symmetric(vertical: 13),
+                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                              ),
+                              icon: const Icon(Icons.play_circle_filled_rounded, size: 20),
+                              label: const Text(
+                                'Tune In Live Feed (Pre-Match / Studio)',
+                                style: TextStyle(fontSize: 13, fontWeight: FontWeight.bold),
+                              ),
+                              onPressed: () {
+                                Navigator.of(ctx).pop();
+                                _openStreamSelectionSheet(match);
+                              },
+                            ),
+                          ),
+                          const SizedBox(height: 6),
                           SizedBox(
                             width: double.infinity,
                             child: TextButton(
@@ -488,6 +514,10 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
       return;
     }
 
+    _openStreamSelectionSheet(match);
+  }
+
+  void _openStreamSelectionSheet(SportsMatch match) {
     if (match.streams.length == 1) {
       _watchMatchStream(match, match.streams.first);
       return;

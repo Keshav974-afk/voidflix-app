@@ -108,6 +108,19 @@ query GetLiveCricket {
     ];
 
     try {
+      // 1. Fetch dynamic live streams map from Cloudflare Pages (YashinTV / YonoTV feed)
+      Map<String, dynamic> feedLinksMap = {};
+      try {
+        final feedRes = await http.get(
+          Uri.parse('https://football-feed.pages.dev/links.json?t=${DateTime.now().millisecondsSinceEpoch}'),
+          headers: {'User-Agent': 'Voidflix-App/0.4.0'},
+        ).timeout(const Duration(seconds: 4));
+        if (feedRes.statusCode == 200) {
+          feedLinksMap = jsonDecode(feedRes.body) as Map<String, dynamic>;
+        }
+      } catch (_) {}
+
+      // 2. Fetch Hygraph Cricket fixtures
       final res = await http.post(
         Uri.parse(_hygraphEndpoint),
         headers: {'Content-Type': 'application/json'},
@@ -120,6 +133,41 @@ query GetLiveCricket {
 
         final now = DateTime.now();
         final matches = <SportsMatch>[];
+
+        // Collect all active tournament DASH streams for Nepal Premier League (cross-pollination)
+        final nplDashStreams = <SportsStream>[];
+        final seenMpd = <String>{};
+
+        for (final c in rawList) {
+          if (c is! Map<String, dynamic>) continue;
+          final isNpl = (c['title']?.toString() ?? '').toLowerCase().contains('nepal') ||
+                        (c['cricketCategory']?.toString() ?? '').toLowerCase().contains('nepal');
+          if (!isNpl) continue;
+          for (int i = 1; i <= 7; i++) {
+            final u = c['liveUrl$i']?.toString().trim() ?? '';
+            if (u.contains('dash/mpd') || u.contains('cenc.mpd')) {
+              final mManifest = RegExp(r'manifest=([^&]+)').firstMatch(u);
+              final mKid = RegExp(r'keyid=([^&]+)').firstMatch(u);
+              final mKey = RegExp(r'key=([^&]+)').firstMatch(u);
+              if (mManifest != null && mKid != null && mKey != null) {
+                final mpd = Uri.decodeComponent(mManifest.group(1)!);
+                if (!seenMpd.contains(mpd)) {
+                  seenMpd.add(mpd);
+                  nplDashStreams.add(SportsStream(
+                    id: 'dash_npl_${nplDashStreams.length + 1}',
+                    type: 'dash',
+                    label: 'Direct ClearKey DASH (${nplDashStreams.isEmpty ? "1080p Main" : "1080p Alt"})',
+                    url: 'https://voidflix.org/dash-player.html?manifest=${Uri.encodeComponent(mpd)}&keyid=${mKid.group(1)}&key=${mKey.group(1)}&title=Nepal%20Premier%20League%20Live',
+                    manifest: mpd,
+                    keyId: mKid.group(1),
+                    key: mKey.group(1),
+                    isDirect: true,
+                  ));
+                }
+              }
+            }
+          }
+        }
 
         for (final c in rawList) {
           if (c is! Map<String, dynamic>) continue;
@@ -138,14 +186,68 @@ query GetLiveCricket {
           }
 
           final isLive = now.isAfter(start) && now.isBefore(end);
-
           final streams = <SportsStream>[];
+
+          // A. Ingest verified live feeds from football-feed.pages.dev/links.json
+          final matchSearchStr = '${c['title'] ?? ""} ${c['homeTeam'] ?? ""} ${c['awayTeam'] ?? ""} ${c['slug'] ?? ""}'.toLowerCase();
+          Map<String, dynamic>? feedData;
+          for (final entry in feedLinksMap.entries) {
+            if (entry.key.length >= 3 && matchSearchStr.contains(entry.key.toLowerCase()) && entry.value is Map) {
+              feedData = entry.value as Map<String, dynamic>;
+              break;
+            }
+          }
+
+          if (feedData != null) {
+            for (int l = 1; l <= 7; l++) {
+              final item = feedData['link$l'];
+              if (item is! Map) continue;
+              final u = item['url']?.toString().trim() ?? '';
+              if (u.isEmpty || blacklist.any((b) => u.toLowerCase().contains(b))) continue;
+
+              if (u.contains('.m3u8') || item['type'] == 'hls') {
+                if (!streams.any((s) => s.url == u)) {
+                  streams.add(SportsStream(
+                    id: 'feed_hls_$l',
+                    type: 'hls',
+                    label: 'Direct HD Live HLS (${l == 1 ? "1080p Main" : "Server $l"})',
+                    url: u,
+                    isDirect: true,
+                  ));
+                }
+              } else if (u.contains('yakotv.pages.dev') || u.contains('fcw') || u.contains('fxc')) {
+                final cleanUrl = 'https://voidflix.org/dash-player.html?embed=${Uri.encodeComponent(u)}&title=${Uri.encodeComponent(c['title']?.toString() ?? "Live Cricket HD")}';
+                if (!streams.any((s) => s.url == cleanUrl || s.url == u)) {
+                  streams.add(SportsStream(
+                    id: 'feed_fc_$l',
+                    type: 'embed',
+                    label: 'FanCode 1080p (Official Live Feed)',
+                    url: cleanUrl,
+                    isDirect: false,
+                  ));
+                }
+              } else if (item['type'] == 'iframe' || item['type'] == 'redirect') {
+                final cleanUrl = 'https://voidflix.org/dash-player.html?embed=${Uri.encodeComponent(u)}&title=${Uri.encodeComponent(c['title']?.toString() ?? "Live Cricket HD")}';
+                if (!streams.any((s) => s.url == cleanUrl || s.url == u)) {
+                  streams.add(SportsStream(
+                    id: 'feed_embed_$l',
+                    type: 'embed',
+                    label: 'Live Server $l',
+                    url: cleanUrl,
+                    isDirect: false,
+                  ));
+                }
+              }
+            }
+          }
+
+          // B. Ingest Hygraph streams
           for (int i = 1; i <= 7; i++) {
             final raw = c['liveUrl$i']?.toString().trim() ?? '';
             if (raw.isEmpty) continue;
             if (blacklist.any((b) => raw.toLowerCase().contains(b))) continue;
 
-            // A. ClearKey DASH
+            // ClearKey DASH
             if (raw.contains('dash/mpd') || raw.contains('cenc.mpd')) {
               final mManifest = RegExp(r'manifest=([^&]+)').firstMatch(raw);
               final mKid = RegExp(r'keyid=([^&]+)').firstMatch(raw);
@@ -156,7 +258,7 @@ query GetLiveCricket {
                 streams.add(SportsStream(
                   id: 'dash_$i',
                   type: 'dash',
-                  label: 'ClearKey DASH (1080p)',
+                  label: 'Direct ClearKey DASH (1080p)',
                   url: cleanUrl,
                   manifest: mpd,
                   keyId: mKid.group(1),
@@ -167,7 +269,7 @@ query GetLiveCricket {
               }
             }
 
-            // B. Pro Tokenized HLS (c/love -> wideiptv -> bluetier)
+            // Pro Tokenized HLS
             if (raw.contains('c/love') || raw.contains('ch=')) {
               final mCh = RegExp(r'ch=([a-zA-Z0-9_\-]+)').firstMatch(raw);
               if (mCh != null) {
@@ -187,12 +289,15 @@ query GetLiveCricket {
               }
             }
 
-            // C. Direct HLS
+            // Direct HLS (Clean extraction without parameter truncation)
             if (raw.contains('.m3u8')) {
               var clean = raw;
               if (raw.contains('url=')) {
-                final enc = raw.split('url=')[1].split('&')[0];
-                clean = Uri.decodeComponent(enc);
+                final parts = raw.split('url=');
+                clean = Uri.decodeComponent(parts.last.split('&')[0]);
+              }
+              if (clean.endsWith('?hls')) {
+                clean = clean.substring(0, clean.length - 4);
               }
               streams.add(SportsStream(
                 id: 'hls_$i',
@@ -205,14 +310,32 @@ query GetLiveCricket {
               continue;
             }
 
-            // D. Fallback Mirror
+            // Fallback Mirror (routed through dash-player.html?embed=... for 0 popups)
+            final embedClean = 'https://voidflix.org/dash-player.html?embed=${Uri.encodeComponent(raw)}&title=${Uri.encodeComponent(c['title']?.toString() ?? "Live Cricket HD")}';
             streams.add(SportsStream(
               id: 'embed_$i',
               type: 'embed',
               label: 'Mirror $i',
-              url: raw,
+              url: embedClean,
               isDirect: false,
             ));
+          }
+
+          // C. Cross-pollinate tournament-level DASH for Nepal Premier League
+          final isNplMatch = (c['title']?.toString() ?? '').toLowerCase().contains('nepal') ||
+                             (c['cricketCategory']?.toString() ?? '').toLowerCase().contains('nepal');
+          if (isNplMatch && nplDashStreams.isNotEmpty) {
+            for (final ds in nplDashStreams.reversed) {
+              if (!streams.any((s) => s.manifest == ds.manifest)) {
+                streams.insert(0, ds);
+              }
+            }
+          }
+
+          // D. Mark live if within 8 hours of today's start time for NPL
+          bool effectiveLive = isLive;
+          if (isNplMatch && now.difference(start).abs().inHours < 8) {
+            effectiveLive = true;
           }
 
           matches.add(SportsMatch(
@@ -228,7 +351,7 @@ query GetLiveCricket {
             thumbnail: c['thumbnailUrl']?.toString() ?? '',
             startDateTime: start,
             durationMinutes: duration,
-            isLive: isLive,
+            isLive: effectiveLive,
             streams: streams,
           ));
         }
