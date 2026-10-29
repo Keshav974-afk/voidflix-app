@@ -183,6 +183,12 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
 
     final raw = stream.url;
 
+    // Check if the stream wraps a direct HLS manifest (e.g. playanym3u8.com, embed.html?src=, etc.)
+    final unwrapped = LiveChannel.unwrapStreamUrl(raw);
+    if (unwrapped.contains('.m3u8') || unwrapped.contains('/hls/') || unwrapped.contains('playlist')) {
+      return unwrapped;
+    }
+
     // 2. If already pointing to voidflix.org/dash-player.html
     if (raw.contains('voidflix.org/dash-player.html')) {
       if (!raw.contains('title=') && title.isNotEmpty) {
@@ -202,8 +208,8 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
       }
     }
 
-    // 4. If stream is an external mirror/embed or playanym3u8 wrapper, route through our clean sandboxed zero-ad player
-    if ((stream.type == 'embed' || raw.contains('playanym3u8.com') || raw.contains('embed.html')) && !raw.contains('voidflix.org/dash-player.html')) {
+    // 4. If stream is an external mirror/embed, route through our clean sandboxed zero-ad player
+    if (stream.type == 'embed' && !raw.contains('voidflix.org/dash-player.html')) {
       return 'https://voidflix.org/dash-player.html?embed=${Uri.encodeComponent(raw)}&title=${Uri.encodeComponent(title)}';
     }
 
@@ -214,28 +220,30 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
     final list = <LiveChannel>[];
     for (final match in _matches) {
       if (match.streams.isEmpty) continue;
-      // Prioritize DASH / clean player feeds over broken HLS
+      // Prioritize direct HLS / DASH over mirrors
       final primaryStream = match.streams.firstWhere(
-        (s) => s.type == 'dash' || s.url.contains('dash-player.html'),
-        orElse: () => match.streams.firstWhere(
-          (s) => s.isDirect,
-          orElse: () => match.streams.first,
-        ),
+        (s) => s.isDirect || s.type == 'hls' || s.type == 'dash',
+        orElse: () => match.streams.first,
       );
       final resolvedUrl = _resolveCleanStreamUrl(primaryStream, match.title);
-      final isRealDirect = primaryStream.type == 'hls' &&
-          primaryStream.isDirect &&
-          !primaryStream.url.contains('playanym3u8.com') &&
-          !primaryStream.url.contains('embed.html') &&
-          !primaryStream.url.contains('dash-player.html');
+      final cleanDirect = LiveChannel.unwrapStreamUrl(primaryStream.url);
+      final isRealDirect = cleanDirect.contains('.m3u8') ||
+          cleanDirect.contains('/hls/') ||
+          cleanDirect.contains('playlist') ||
+          (primaryStream.type == 'hls' && primaryStream.isDirect);
+
       list.add(LiveChannel(
         id: match.id,
         name: match.title,
         category: match.category,
         streamUrl: resolvedUrl,
-        directStreamUrl: isRealDirect ? primaryStream.url : resolvedUrl,
+        directStreamUrl: isRealDirect ? cleanDirect : resolvedUrl,
         description: '${match.category} • ${match.formattedStatus} • ${match.streams.length} stream(s)',
-        httpHeaders: primaryStream.headers,
+        httpHeaders: primaryStream.headers ?? const {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Referer': 'https://tv.sphublive.com/',
+          'Origin': 'https://tv.sphublive.com',
+        },
       ));
     }
     return list;
@@ -261,19 +269,23 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
   void _watchMatchStream(SportsMatch match, SportsStream s) {
     final matchChannels = match.streams.map((stream) {
       final resolvedUrl = _resolveCleanStreamUrl(stream, match.title);
-      final isRealDirect = stream.type == 'hls' &&
-          stream.isDirect &&
-          !stream.url.contains('playanym3u8.com') &&
-          !stream.url.contains('embed.html') &&
-          !stream.url.contains('dash-player.html');
+      final cleanDirect = LiveChannel.unwrapStreamUrl(stream.url);
+      final isRealDirect = cleanDirect.contains('.m3u8') ||
+          cleanDirect.contains('/hls/') ||
+          cleanDirect.contains('playlist') ||
+          (stream.type == 'hls' && stream.isDirect);
       return LiveChannel(
         id: '${match.id}_${stream.id}',
         name: '${match.title} (${stream.label})',
         category: match.category,
         streamUrl: resolvedUrl,
-        directStreamUrl: isRealDirect ? stream.url : resolvedUrl,
+        directStreamUrl: isRealDirect ? cleanDirect : resolvedUrl,
         description: '${match.category} • ${match.formattedStatus}',
-        httpHeaders: stream.headers,
+        httpHeaders: stream.headers ?? const {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+          'Referer': 'https://tv.sphublive.com/',
+          'Origin': 'https://tv.sphublive.com',
+        },
       );
     }).toList();
 
@@ -1761,7 +1773,6 @@ class _LiveChannelPlayerScreenState extends State<LiveChannelPlayerScreen> {
   bool _isMuted = false;
   bool _isLandscape = true;
   bool _isDesktopWebStream = false;
-  bool _preferWebEmbed = false;
 
   @override
   void initState() {
@@ -1795,20 +1806,32 @@ class _LiveChannelPlayerScreenState extends State<LiveChannelPlayerScreen> {
     _videoPlayerController = null;
     _webViewController = null;
 
-    final streamUrl = _currentChannel.playbackUrl;
+    final rawStreamUrl = _currentChannel.playbackUrl;
+    final streamUrl = LiveChannel.unwrapStreamUrl(rawStreamUrl);
 
-    // 1. Direct native HLS stream playback
-    if (!_preferWebEmbed && _currentChannel.isDirectHls) {
+    // 1. Direct native HLS stream playback (Pure in-app native video player)
+    if (_currentChannel.isDirectHls ||
+        streamUrl.contains('.m3u8') ||
+        streamUrl.contains('/hls/') ||
+        streamUrl.contains('playlist') ||
+        streamUrl.contains('chunklist')) {
       try {
+        final headers = {
+          'User-Agent': 'Mozilla/5.0 (Linux; Android 10; K) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36',
+          'Referer': 'https://tv.sphublive.com/',
+          'Origin': 'https://tv.sphublive.com',
+          ...?_currentChannel.httpHeaders,
+        };
+
         final controller = VideoPlayerController.networkUrl(
           Uri.parse(streamUrl),
-          httpHeaders: _currentChannel.httpHeaders ?? const {},
+          httpHeaders: headers,
           videoPlayerOptions: VideoPlayerOptions(mixWithOthers: true),
         );
         _videoPlayerController = controller;
 
-        // Apply a resilient 7-second buffer timeout race
-        await controller.initialize().timeout(const Duration(seconds: 7));
+        // Allow up to 25s for large live HLS chunk buffering
+        await controller.initialize().timeout(const Duration(seconds: 25));
         await controller.play();
         if (mounted) {
           setState(() {
@@ -1819,26 +1842,21 @@ class _LiveChannelPlayerScreenState extends State<LiveChannelPlayerScreen> {
         }
         return;
       } catch (e) {
-        debugPrint('Live TV native HLS failed ($e), auto-falling back to Web Embed player...');
+        debugPrint('Live TV native HLS playback error ($e)');
         _videoPlayerController?.dispose();
         _videoPlayerController = null;
-
-        // Resilient automatic fallback to Web Embed Player with Hls.js!
-        if (PlatformUtils.isWebViewSupported) {
-          _initWebViewPlayer(streamUrl);
-          return;
-        }
 
         if (mounted) {
           setState(() {
             _isLoading = false;
             _hasError = true;
-            _errorMessage = 'Native HLS buffer timed out. Tap Switch to Web Embed Player below.';
+            _errorMessage = 'Live stream buffer timed out or feed temporarily unavailable. Please tap Retry or choose another server.';
           });
         }
+        return;
       }
     }
-    // 2. Mobile web embed & DASH fallback (Android / iOS / macOS with WebView)
+    // 2. ClearKey DASH or Sandboxed Web Embed for non-HLS feeds (if mobile WebView supported)
     else if (PlatformUtils.isWebViewSupported) {
       _initWebViewPlayer(streamUrl);
     }
@@ -1989,17 +2007,7 @@ class _LiveChannelPlayerScreenState extends State<LiveChannelPlayerScreen> {
 
 
 
-  void _togglePlayerEngine() {
 
-    setState(() {
-
-      _preferWebEmbed = !_preferWebEmbed;
-
-    });
-
-    _initChannelStream();
-
-  }
 
 
 
@@ -2347,26 +2355,12 @@ class _LiveChannelPlayerScreenState extends State<LiveChannelPlayerScreen> {
                               icon: const Icon(Icons.refresh_rounded, color: Colors.white),
                               label: const Text('Retry Stream', style: TextStyle(color: Colors.white)),
                             ),
-                            if (PlatformUtils.isWebViewSupported)
+                            if (widget.allChannels.length > 1)
                               ElevatedButton.icon(
-                                style: ElevatedButton.styleFrom(
-                                  backgroundColor: Colors.amber.shade700,
-                                ),
-                                onPressed: () {
-                                  setState(() {
-                                    _preferWebEmbed = !_preferWebEmbed;
-                                    _hasError = false;
-                                  });
-                                  _initChannelStream();
-                                },
-                                icon: Icon(
-                                  _preferWebEmbed ? Icons.bolt_rounded : Icons.language_rounded,
-                                  color: Colors.white,
-                                ),
-                                label: Text(
-                                  _preferWebEmbed ? '⚡ Switch to Direct HLS' : '📱 Switch to Web Embed Player',
-                                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-                                ),
+                                style: ElevatedButton.styleFrom(backgroundColor: Colors.white12),
+                                onPressed: () => _switchChannel(1),
+                                icon: const Icon(Icons.skip_next_rounded, color: Colors.white),
+                                label: const Text('Next Server', style: TextStyle(color: Colors.white)),
                               ),
                             if (widget.allChannels.length > 1)
                               OutlinedButton.icon(
@@ -2473,33 +2467,6 @@ class _LiveChannelPlayerScreenState extends State<LiveChannelPlayerScreen> {
                                     ],
                                   ),
                                 ),
-                                if (PlatformUtils.isWebViewSupported)
-                                  Container(
-                                    margin: const EdgeInsets.symmetric(horizontal: 4),
-                                    decoration: BoxDecoration(
-                                      color: Colors.white.withValues(alpha: 0.15),
-                                      borderRadius: BorderRadius.circular(8),
-                                      border: Border.all(color: Colors.white24),
-                                    ),
-                                    child: TextButton.icon(
-                                      style: TextButton.styleFrom(
-                                        foregroundColor: Colors.white,
-                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                                        minimumSize: Size.zero,
-                                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                                      ),
-                                      onPressed: _togglePlayerEngine,
-                                      icon: Icon(
-                                        _webViewController != null ? Icons.language_rounded : Icons.bolt_rounded,
-                                        size: 13,
-                                        color: _webViewController != null ? Colors.amberAccent : Colors.cyanAccent,
-                                      ),
-                                      label: Text(
-                                        _webViewController != null ? '📱 Web Embed' : '⚡ Direct HLS',
-                                        style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold),
-                                      ),
-                                    ),
-                                  ),
                                 if (widget.allChannels.length > 1) ...[
                                   IconButton(
                                     icon: const Icon(Icons.skip_previous_rounded, color: Colors.white),

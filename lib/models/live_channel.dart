@@ -19,23 +19,44 @@ class LiveChannel {
     this.httpHeaders,
   });
 
+  /// Extracts the clean direct stream URL unwrapping any query parameters (e.g. src=, url=, embed=)
+  static String unwrapStreamUrl(String raw) {
+    if (raw.isEmpty) return raw;
+    var cur = raw.trim();
+    for (int depth = 0; depth < 3; depth++) {
+      try {
+        final uri = Uri.parse(cur);
+        final target = uri.queryParameters['src'] ??
+            uri.queryParameters['url'] ??
+            uri.queryParameters['embed'] ??
+            uri.queryParameters['manifest'] ??
+            uri.queryParameters['source'];
+        if (target != null && (target.startsWith('http://') || target.startsWith('https://'))) {
+          final decoded = Uri.decodeComponent(target);
+          if (decoded.contains('.m3u8') || decoded.contains('/hls/') || decoded.contains('playlist') || decoded.contains('chunklist')) {
+            cur = decoded;
+            continue;
+          }
+        }
+      } catch (_) {}
+      break;
+    }
+    if (cur.endsWith('?hls')) {
+      cur = cur.substring(0, cur.length - 4);
+    }
+    return cur;
+  }
+
   /// The active URL for in-app video playback
-  String get playbackUrl => directStreamUrl ?? streamUrl;
+  String get playbackUrl => unwrapStreamUrl(directStreamUrl ?? streamUrl);
 
   /// Whether this stream is an HLS .m3u8 stream playable natively by VideoPlayerController
   bool get isDirectHls {
-    final url = playbackUrl.toLowerCase();
-    // HTML embed players or wrappers must NEVER be treated as direct raw HLS for native ExoPlayer!
-    if (url.contains('playanym3u8.com') ||
-        url.contains('embed.html') ||
-        url.contains('dash-player.html') ||
-        url.contains('player.html') ||
-        url.contains('embed=') ||
-        url.contains('manifest=') ||
-        url.contains('iframe')) {
-      return false;
-    }
-    return url.contains('.m3u8') || url.contains('m3u8');
+    final clean = unwrapStreamUrl(playbackUrl).toLowerCase();
+    return clean.contains('.m3u8') ||
+        clean.contains('/hls/') ||
+        clean.contains('playlist') ||
+        clean.contains('chunklist');
   }
 }
 

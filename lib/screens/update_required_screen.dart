@@ -20,7 +20,7 @@ class _UpdateRequiredScreenState extends State<UpdateRequiredScreen> {
   Future<void> _launchUpdateUrl() async {
     final apkUrl = RemoteConfigService.resolvedApkUrl;
     final update = RemoteConfigService.cachedUpdate;
-    final targetVersion = update?.version ?? '0.3.0';
+    final targetVersion = update?.version ?? '0.4.2';
 
     AppUpdateDownloadDialog.show(
       context,

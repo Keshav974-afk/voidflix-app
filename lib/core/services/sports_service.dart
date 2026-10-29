@@ -312,39 +312,38 @@ query GetLiveCricket {
               }
             }
 
-            // Embedded HLS players (e.g. playanym3u8.com, embed.html) - Route to WebView
-            if (raw.contains('playanym3u8.com') || raw.contains('embed.html')) {
-              final embedClean = 'https://voidflix.org/dash-player.html?embed=${Uri.encodeComponent(raw)}&title=${Uri.encodeComponent(c['title']?.toString() ?? "Live Cricket HD")}';
-              streams.add(SportsStream(
-                id: 'hls_$i',
-                type: 'embed',
-                label: 'Server $i (Live HD)',
-                url: embedClean,
-                isDirect: false,
-              ));
-              continue;
+            // Direct HLS (Clean extraction from wrapper or raw parameter without truncation)
+            String? extractedHls;
+            if (raw.contains('.m3u8') || raw.contains('playanym3u8.com') || raw.contains('embed.html') || raw.contains('src=') || raw.contains('url=')) {
+              var cur = raw;
+              for (int depth = 0; depth < 3; depth++) {
+                final mParam = RegExp(r'[?&](?:src|url|manifest|source|embed)=([^&]+)').firstMatch(cur);
+                if (mParam != null) {
+                  final decoded = Uri.decodeComponent(mParam.group(1)!);
+                  if (decoded.startsWith('http://') || decoded.startsWith('https://')) {
+                    cur = decoded;
+                    continue;
+                  }
+                }
+                break;
+              }
+              if (cur.contains('.m3u8') || cur.contains('/hls/') || cur.contains('playlist') || cur.contains('chunklist')) {
+                extractedHls = cur.endsWith('?hls') ? cur.substring(0, cur.length - 4) : cur;
+              }
             }
 
-            // Direct HLS (Clean extraction without parameter truncation)
-            if (raw.contains('.m3u8')) {
-              var clean = raw;
-              if (raw.contains('src=')) {
-                final parts = raw.split('src=');
-                clean = Uri.decodeComponent(parts.last.split('&')[0]);
-              } else if (raw.contains('url=')) {
-                final parts = raw.split('url=');
-                clean = Uri.decodeComponent(parts.last.split('&')[0]);
-              }
-              if (clean.endsWith('?hls')) {
-                clean = clean.substring(0, clean.length - 4);
-              }
+            if (extractedHls != null) {
               streams.add(SportsStream(
                 id: 'hls_$i',
                 type: 'hls',
                 label: 'Server $i (Direct HLS)',
-                url: clean,
+                url: extractedHls,
                 isDirect: true,
-                headers: const {'Referer': 'https://tv.sphublive.com/'},
+                headers: const {
+                  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                  'Referer': 'https://tv.sphublive.com/',
+                  'Origin': 'https://tv.sphublive.com',
+                },
               ));
               continue;
             }
