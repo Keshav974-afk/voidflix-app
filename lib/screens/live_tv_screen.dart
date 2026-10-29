@@ -202,8 +202,8 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
       }
     }
 
-    // 4. If stream is an external mirror/embed, route through our clean sandboxed zero-ad player
-    if (stream.type == 'embed' && !raw.contains('voidflix.org/dash-player.html')) {
+    // 4. If stream is an external mirror/embed or playanym3u8 wrapper, route through our clean sandboxed zero-ad player
+    if ((stream.type == 'embed' || raw.contains('playanym3u8.com') || raw.contains('embed.html')) && !raw.contains('voidflix.org/dash-player.html')) {
       return 'https://voidflix.org/dash-player.html?embed=${Uri.encodeComponent(raw)}&title=${Uri.encodeComponent(title)}';
     }
 
@@ -223,12 +223,17 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
         ),
       );
       final resolvedUrl = _resolveCleanStreamUrl(primaryStream, match.title);
+      final isRealDirect = primaryStream.type == 'hls' &&
+          primaryStream.isDirect &&
+          !primaryStream.url.contains('playanym3u8.com') &&
+          !primaryStream.url.contains('embed.html') &&
+          !primaryStream.url.contains('dash-player.html');
       list.add(LiveChannel(
         id: match.id,
         name: match.title,
         category: match.category,
         streamUrl: resolvedUrl,
-        directStreamUrl: (primaryStream.type == 'hls' && primaryStream.isDirect) ? primaryStream.url : resolvedUrl,
+        directStreamUrl: isRealDirect ? primaryStream.url : resolvedUrl,
         description: '${match.category} • ${match.formattedStatus} • ${match.streams.length} stream(s)',
         httpHeaders: primaryStream.headers,
       ));
@@ -256,12 +261,17 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
   void _watchMatchStream(SportsMatch match, SportsStream s) {
     final matchChannels = match.streams.map((stream) {
       final resolvedUrl = _resolveCleanStreamUrl(stream, match.title);
+      final isRealDirect = stream.type == 'hls' &&
+          stream.isDirect &&
+          !stream.url.contains('playanym3u8.com') &&
+          !stream.url.contains('embed.html') &&
+          !stream.url.contains('dash-player.html');
       return LiveChannel(
         id: '${match.id}_${stream.id}',
         name: '${match.title} (${stream.label})',
         category: match.category,
         streamUrl: resolvedUrl,
-        directStreamUrl: (stream.type == 'hls' && stream.isDirect) ? stream.url : resolvedUrl,
+        directStreamUrl: isRealDirect ? stream.url : resolvedUrl,
         description: '${match.category} • ${match.formattedStatus}',
         httpHeaders: stream.headers,
       );
@@ -1751,6 +1761,7 @@ class _LiveChannelPlayerScreenState extends State<LiveChannelPlayerScreen> {
   bool _isMuted = false;
   bool _isLandscape = true;
   bool _isDesktopWebStream = false;
+  bool _preferWebEmbed = false;
 
   @override
   void initState() {
@@ -1787,7 +1798,7 @@ class _LiveChannelPlayerScreenState extends State<LiveChannelPlayerScreen> {
     final streamUrl = _currentChannel.playbackUrl;
 
     // 1. Direct native HLS stream playback
-    if (_currentChannel.isDirectHls) {
+    if (!_preferWebEmbed && _currentChannel.isDirectHls) {
       try {
         final controller = VideoPlayerController.networkUrl(
           Uri.parse(streamUrl),
@@ -1796,7 +1807,8 @@ class _LiveChannelPlayerScreenState extends State<LiveChannelPlayerScreen> {
         );
         _videoPlayerController = controller;
 
-        await controller.initialize();
+        // Apply a resilient 7-second buffer timeout race
+        await controller.initialize().timeout(const Duration(seconds: 7));
         await controller.play();
         if (mounted) {
           setState(() {
@@ -1805,75 +1817,30 @@ class _LiveChannelPlayerScreenState extends State<LiveChannelPlayerScreen> {
           });
           _startHideControlsTimer();
         }
+        return;
       } catch (e) {
-        debugPrint('Live TV stream init error: $e');
+        debugPrint('Live TV native HLS failed ($e), auto-falling back to Web Embed player...');
+        _videoPlayerController?.dispose();
+        _videoPlayerController = null;
+
+        // Resilient automatic fallback to Web Embed Player with Hls.js!
+        if (PlatformUtils.isWebViewSupported) {
+          _initWebViewPlayer(streamUrl);
+          return;
+        }
+
         if (mounted) {
           setState(() {
             _isLoading = false;
             _hasError = true;
-            _errorMessage = 'Stream buffer timed out. Press retry or select another channel.';
+            _errorMessage = 'Native HLS buffer timed out. Tap Switch to Web Embed Player below.';
           });
         }
       }
     }
     // 2. Mobile web embed & DASH fallback (Android / iOS / macOS with WebView)
     else if (PlatformUtils.isWebViewSupported) {
-      try {
-        var playUrl = streamUrl;
-        // Direct resolution for golf stream wrapper to eliminate sandbox detection overlay
-        if (playUrl.contains('embed.st/embed/golf/')) {
-          final parts = playUrl.split('embed/golf/')[1].split('/');
-          if (parts.isNotEmpty && parts[0].isNotEmpty) {
-            playUrl = 'https://rockyembed.st/source/streamed1.php?hd=33&id=${parts[0]}&no=1';
-          }
-        }
-        // Route any DASH / ClearKey stream through our own clean embedded zero-ad player
-        if (playUrl.contains('manifest=') && (playUrl.contains('keyid=') || playUrl.contains('key='))) {
-          if (!playUrl.contains('voidflix.org/dash-player.html')) {
-            final mManifest = RegExp(r'manifest=([^&]+)').firstMatch(playUrl);
-            final mKid = RegExp(r'keyid=([^&]+)').firstMatch(playUrl);
-            final mKey = RegExp(r'key=([^&]+)').firstMatch(playUrl);
-            if (mManifest != null && mKid != null && mKey != null) {
-              final mpd = Uri.decodeComponent(mManifest.group(1)!);
-              playUrl = 'https://voidflix.org/dash-player.html?manifest=${Uri.encodeComponent(mpd)}&keyid=${mKid.group(1)}&key=${mKey.group(1)}&title=${Uri.encodeComponent(_currentChannel.name)}';
-            }
-          }
-        }
-
-        final controller = WebViewController()
-          ..setJavaScriptMode(JavaScriptMode.unrestricted)
-          ..setUserAgent(EmbedShield.userAgent)
-          ..setBackgroundColor(Colors.black);
-
-        EmbedShield.configureAndroid(controller);
-
-        controller.setNavigationDelegate(
-          NavigationDelegate(
-            onPageStarted: (url) {
-              controller.runJavaScript(EmbedShield.antiPopupScript);
-            },
-            onPageFinished: (url) {
-              if (mounted) setState(() => _isLoading = false);
-              controller.runJavaScript(EmbedShield.antiPopupScript);
-            },
-            onWebResourceError: (error) {
-              if (mounted) setState(() => _isLoading = false);
-            },
-            onNavigationRequest: (request) {
-              if (EmbedShield.shouldBlockNavigation(request.url)) {
-                debugPrint('[LiveTV EmbedShield] Silently absorbed redirect: ${request.url}');
-                return NavigationDecision.prevent;
-              }
-              return NavigationDecision.navigate;
-            },
-          ),
-        );
-
-        controller.loadRequest(Uri.parse(playUrl));
-        _webViewController = controller;
-      } catch (_) {
-        if (mounted) setState(() => _isLoading = false);
-      }
+      _initWebViewPlayer(streamUrl);
     }
     // 3. Desktop (Windows / Linux) DASH & Web Stream Studio
     else {
@@ -1885,6 +1852,156 @@ class _LiveChannelPlayerScreenState extends State<LiveChannelPlayerScreen> {
       _launchDesktopPlayer(streamUrl);
     }
   }
+
+  void _initWebViewPlayer(String streamUrl) {
+
+    try {
+
+      var playUrl = streamUrl;
+
+      // Direct resolution for golf stream wrapper
+
+      if (playUrl.contains('embed.st/embed/golf/')) {
+
+        final parts = playUrl.split('embed/golf/')[1].split('/');
+
+        if (parts.isNotEmpty && parts[0].isNotEmpty) {
+
+          playUrl = 'https://rockyembed.st/source/streamed1.php?hd=33&id=${parts[0]}&no=1';
+
+        }
+
+      }
+
+      // Route any DASH / ClearKey stream through our own clean embedded player
+
+      if (playUrl.contains('manifest=') && (playUrl.contains('keyid=') || playUrl.contains('key='))) {
+
+        if (!playUrl.contains('voidflix.org/dash-player.html')) {
+
+          final mManifest = RegExp(r'manifest=([^&]+)').firstMatch(playUrl);
+
+          final mKid = RegExp(r'keyid=([^&]+)').firstMatch(playUrl);
+
+          final mKey = RegExp(r'key=([^&]+)').firstMatch(playUrl);
+
+          if (mManifest != null && mKid != null && mKey != null) {
+
+            final mpd = Uri.decodeComponent(mManifest.group(1)!);
+
+            playUrl = 'https://voidflix.org/dash-player.html?manifest=${Uri.encodeComponent(mpd)}&keyid=${mKid.group(1)}&key=${mKey.group(1)}&title=${Uri.encodeComponent(_currentChannel.name)}';
+
+          }
+
+        }
+
+      } else if (!playUrl.contains('voidflix.org/dash-player.html') && !playUrl.contains('playanym3u8.com') && !playUrl.contains('embed.html')) {
+
+        // Wrap raw HLS into voidflix dash-player which has Hls.js
+
+        playUrl = 'https://voidflix.org/dash-player.html?manifest=${Uri.encodeComponent(playUrl)}&title=${Uri.encodeComponent(_currentChannel.name)}';
+
+      }
+
+
+
+      final controller = WebViewController()
+
+        ..setJavaScriptMode(JavaScriptMode.unrestricted)
+
+        ..setUserAgent(EmbedShield.userAgent)
+
+        ..setBackgroundColor(Colors.black);
+
+
+
+      EmbedShield.configureAndroid(controller);
+
+
+
+      controller.setNavigationDelegate(
+
+        NavigationDelegate(
+
+          onPageStarted: (url) {
+
+            controller.runJavaScript(EmbedShield.antiPopupScript);
+
+          },
+
+          onPageFinished: (url) {
+
+            if (mounted) setState(() => _isLoading = false);
+
+            controller.runJavaScript(EmbedShield.antiPopupScript);
+
+          },
+
+          onWebResourceError: (error) {
+
+            if (mounted) setState(() => _isLoading = false);
+
+          },
+
+          onNavigationRequest: (request) {
+
+            if (EmbedShield.shouldBlockNavigation(request.url)) {
+
+              debugPrint('[LiveTV EmbedShield] Silently absorbed redirect: ${request.url}');
+
+              return NavigationDecision.prevent;
+
+            }
+
+            return NavigationDecision.navigate;
+
+          },
+
+        ),
+
+      );
+
+
+
+      controller.loadRequest(Uri.parse(playUrl));
+
+      if (mounted) {
+
+        setState(() {
+
+          _webViewController = controller;
+
+          _isLoading = false;
+
+          _hasError = false;
+
+        });
+
+      }
+
+    } catch (_) {
+
+      if (mounted) setState(() => _isLoading = false);
+
+    }
+
+  }
+
+
+
+  void _togglePlayerEngine() {
+
+    setState(() {
+
+      _preferWebEmbed = !_preferWebEmbed;
+
+    });
+
+    _initChannelStream();
+
+  }
+
+
 
   Future<void> _launchDesktopPlayer(String streamUrl, {bool forceBrowser = false}) async {
     try {
@@ -2219,8 +2336,10 @@ class _LiveChannelPlayerScreenState extends State<LiveChannelPlayerScreen> {
                           style: const TextStyle(color: Colors.white70, fontSize: 13),
                         ),
                         const SizedBox(height: 20),
-                        Row(
-                          mainAxisSize: MainAxisSize.min,
+                        Wrap(
+                          spacing: 12,
+                          runSpacing: 8,
+                          alignment: WrapAlignment.center,
                           children: [
                             ElevatedButton.icon(
                               style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryRed),
@@ -2228,8 +2347,28 @@ class _LiveChannelPlayerScreenState extends State<LiveChannelPlayerScreen> {
                               icon: const Icon(Icons.refresh_rounded, color: Colors.white),
                               label: const Text('Retry Stream', style: TextStyle(color: Colors.white)),
                             ),
-                            if (widget.allChannels.length > 1) ...[
-                              const SizedBox(width: 12),
+                            if (PlatformUtils.isWebViewSupported)
+                              ElevatedButton.icon(
+                                style: ElevatedButton.styleFrom(
+                                  backgroundColor: Colors.amber.shade700,
+                                ),
+                                onPressed: () {
+                                  setState(() {
+                                    _preferWebEmbed = !_preferWebEmbed;
+                                    _hasError = false;
+                                  });
+                                  _initChannelStream();
+                                },
+                                icon: Icon(
+                                  _preferWebEmbed ? Icons.bolt_rounded : Icons.language_rounded,
+                                  color: Colors.white,
+                                ),
+                                label: Text(
+                                  _preferWebEmbed ? '⚡ Switch to Direct HLS' : '📱 Switch to Web Embed Player',
+                                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                                ),
+                              ),
+                            if (widget.allChannels.length > 1)
                               OutlinedButton.icon(
                                 style: OutlinedButton.styleFrom(
                                   side: const BorderSide(color: Colors.white38),
@@ -2238,7 +2377,6 @@ class _LiveChannelPlayerScreenState extends State<LiveChannelPlayerScreen> {
                                 icon: const Icon(Icons.skip_next_rounded, color: Colors.white),
                                 label: const Text('Next Channel', style: TextStyle(color: Colors.white)),
                               ),
-                            ],
                           ],
                         ),
                       ],
@@ -2335,6 +2473,33 @@ class _LiveChannelPlayerScreenState extends State<LiveChannelPlayerScreen> {
                                     ],
                                   ),
                                 ),
+                                if (PlatformUtils.isWebViewSupported)
+                                  Container(
+                                    margin: const EdgeInsets.symmetric(horizontal: 4),
+                                    decoration: BoxDecoration(
+                                      color: Colors.white.withValues(alpha: 0.15),
+                                      borderRadius: BorderRadius.circular(8),
+                                      border: Border.all(color: Colors.white24),
+                                    ),
+                                    child: TextButton.icon(
+                                      style: TextButton.styleFrom(
+                                        foregroundColor: Colors.white,
+                                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                                        minimumSize: Size.zero,
+                                        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                                      ),
+                                      onPressed: _togglePlayerEngine,
+                                      icon: Icon(
+                                        _webViewController != null ? Icons.language_rounded : Icons.bolt_rounded,
+                                        size: 13,
+                                        color: _webViewController != null ? Colors.amberAccent : Colors.cyanAccent,
+                                      ),
+                                      label: Text(
+                                        _webViewController != null ? '📱 Web Embed' : '⚡ Direct HLS',
+                                        style: const TextStyle(fontSize: 10, fontWeight: FontWeight.bold),
+                                      ),
+                                    ),
+                                  ),
                                 if (widget.allChannels.length > 1) ...[
                                   IconButton(
                                     icon: const Icon(Icons.skip_previous_rounded, color: Colors.white),

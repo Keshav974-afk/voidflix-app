@@ -103,7 +103,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           'ESN: $esn';
     }
 
-    return 'Version: 1.0.0, OS API: ${Platform.operatingSystemVersion}\n'
+    return 'Version: 0.4.2, OS API: ${Platform.operatingSystemVersion}\n'
         'Model: ${Platform.operatingSystem}\n'
         'Platform: ${Platform.isAndroid ? "Android" : Platform.operatingSystem}';
   }
@@ -1073,7 +1073,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               showLicensePage(
                 context: context,
                 applicationName: 'Voidflix',
-                applicationVersion: '1.0.0 (Release Build)',
+                applicationVersion: '0.4.2 (Build 8)',
               );
             },
           ),

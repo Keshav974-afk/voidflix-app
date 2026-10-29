@@ -32,7 +32,7 @@ class SportsService {
       final res = await http.get(
         Uri.parse('$_apiBase?category=$catKey'),
         headers: {
-          'User-Agent': 'Voidflix-App/0.4.0',
+          'User-Agent': 'Voidflix-App/0.4.2',
           'Accept': 'application/json',
         },
       ).timeout(const Duration(seconds: 15));
@@ -113,7 +113,7 @@ query GetLiveCricket {
       try {
         final cfgRes = await http.get(
           Uri.parse('https://voidflix.org/api/public/config'),
-          headers: {'User-Agent': 'Voidflix-App/0.4.0'},
+          headers: {'User-Agent': 'Voidflix-App/0.4.2'},
         ).timeout(const Duration(seconds: 5));
         if (cfgRes.statusCode == 200) {
           final cfg = jsonDecode(cfgRes.body) as Map<String, dynamic>;
@@ -136,7 +136,7 @@ query GetLiveCricket {
       try {
         final feedRes = await http.get(
           Uri.parse('https://football-feed.pages.dev/links.json?t=${DateTime.now().millisecondsSinceEpoch}'),
-          headers: {'User-Agent': 'Voidflix-App/0.4.0'},
+          headers: {'User-Agent': 'Voidflix-App/0.4.2'},
         ).timeout(const Duration(seconds: 4));
         if (feedRes.statusCode == 200) {
           feedLinksMap = jsonDecode(feedRes.body) as Map<String, dynamic>;
@@ -312,10 +312,26 @@ query GetLiveCricket {
               }
             }
 
+            // Embedded HLS players (e.g. playanym3u8.com, embed.html) - Route to WebView
+            if (raw.contains('playanym3u8.com') || raw.contains('embed.html')) {
+              final embedClean = 'https://voidflix.org/dash-player.html?embed=${Uri.encodeComponent(raw)}&title=${Uri.encodeComponent(c['title']?.toString() ?? "Live Cricket HD")}';
+              streams.add(SportsStream(
+                id: 'hls_$i',
+                type: 'embed',
+                label: 'Server $i (Live HD)',
+                url: embedClean,
+                isDirect: false,
+              ));
+              continue;
+            }
+
             // Direct HLS (Clean extraction without parameter truncation)
             if (raw.contains('.m3u8')) {
               var clean = raw;
-              if (raw.contains('url=')) {
+              if (raw.contains('src=')) {
+                final parts = raw.split('src=');
+                clean = Uri.decodeComponent(parts.last.split('&')[0]);
+              } else if (raw.contains('url=')) {
                 final parts = raw.split('url=');
                 clean = Uri.decodeComponent(parts.last.split('&')[0]);
               }

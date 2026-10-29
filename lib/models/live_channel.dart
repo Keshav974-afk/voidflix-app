@@ -25,6 +25,16 @@ class LiveChannel {
   /// Whether this stream is an HLS .m3u8 stream playable natively by VideoPlayerController
   bool get isDirectHls {
     final url = playbackUrl.toLowerCase();
+    // HTML embed players or wrappers must NEVER be treated as direct raw HLS for native ExoPlayer!
+    if (url.contains('playanym3u8.com') ||
+        url.contains('embed.html') ||
+        url.contains('dash-player.html') ||
+        url.contains('player.html') ||
+        url.contains('embed=') ||
+        url.contains('manifest=') ||
+        url.contains('iframe')) {
+      return false;
+    }
     return url.contains('.m3u8') || url.contains('m3u8');
   }
 }
