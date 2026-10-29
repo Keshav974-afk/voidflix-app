@@ -35,7 +35,7 @@ class SportsService {
           'User-Agent': 'Voidflix-App/0.4.0',
           'Accept': 'application/json',
         },
-      ).timeout(const Duration(seconds: 5));
+      ).timeout(const Duration(seconds: 15));
 
       if (res.statusCode == 200) {
         final data = jsonDecode(res.body) as Map<String, dynamic>;
@@ -108,6 +108,29 @@ query GetLiveCricket {
     ];
 
     try {
+      // Fetch disabled stream rules from Voidflix Central Admin Config to ensure offline fallback respects admin stream disabling
+      final disabledRules = <String>{};
+      try {
+        final cfgRes = await http.get(
+          Uri.parse('https://voidflix.org/api/public/config'),
+          headers: {'User-Agent': 'Voidflix-App/0.4.0'},
+        ).timeout(const Duration(seconds: 5));
+        if (cfgRes.statusCode == 200) {
+          final cfg = jsonDecode(cfgRes.body) as Map<String, dynamic>;
+          final sportsControls = cfg['sportsControls'] as Map<String, dynamic>?;
+          final disabledMap = sportsControls?['disabledMatchStreams'] as Map<String, dynamic>?;
+          if (disabledMap != null) {
+            for (final list in disabledMap.values) {
+              if (list is List) {
+                for (final item in list) {
+                  disabledRules.add(item.toString().toLowerCase().trim());
+                }
+              }
+            }
+          }
+        }
+      } catch (_) {}
+
       // 1. Fetch dynamic live streams map from Cloudflare Pages (YashinTV / YonoTV feed)
       Map<String, dynamic> feedLinksMap = {};
       try {
@@ -332,6 +355,17 @@ query GetLiveCricket {
             }
           }
 
+          // Filter out any disabled streams if admin marked them disabled in Admin Panel
+          final filteredStreams = streams.where((s) {
+            final sId = s.id.toLowerCase().trim();
+            final sLabel = s.label.toLowerCase().trim();
+            final sUrl = s.url.toLowerCase();
+            final isDisabled = disabledRules.contains(sId) ||
+                disabledRules.contains(sLabel) ||
+                disabledRules.any((d) => d.length > 4 && (sUrl.contains(d) || sLabel.contains(d)));
+            return !isDisabled;
+          }).toList();
+
           matches.add(SportsMatch(
             id: c['id']?.toString() ?? '',
             slug: c['slug']?.toString() ?? '',
@@ -346,7 +380,7 @@ query GetLiveCricket {
             startDateTime: start,
             durationMinutes: duration,
             isLive: isLive,
-            streams: streams,
+            streams: filteredStreams,
           ));
         }
 
