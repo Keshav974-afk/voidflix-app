@@ -1,10 +1,15 @@
 import 'dart:io';
+import 'dart:math' as math;
+import 'package:google_fonts/google_fonts.dart';
+import '../core/network/api_service.dart';
+import '../widgets/media_card.dart';
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:provider/provider.dart';
 import '../core/constants/theme_constants.dart';
 import '../core/services/remote_config_service.dart';
 import '../models/downloaded_item.dart';
+import '../models/media_item.dart';
 import '../providers/download_provider.dart';
 import '../providers/history_provider.dart';
 import '../providers/media_provider.dart';
@@ -29,10 +34,88 @@ class _HomeScreenState extends State<HomeScreen> {
   bool _isOffline = false;
   String? _lastProfileId;
 
+  final ApiService _apiService = ApiService();
+  final ScrollController _scrollController = ScrollController();
+  final List<MediaItem> _infiniteItems = [];
+  final Set<int> _seenIds = {};
+  int _infinitePage = 1;
+  bool _isLoadingMore = false;
+  bool _hasMore = true;
+
   @override
   void initState() {
     super.initState();
     _checkConnectivity();
+    _loadInitialInfiniteItems();
+
+    _scrollController.addListener(() {
+      if (_scrollController.hasClients) {
+        final maxScroll = _scrollController.position.maxScrollExtent;
+        final currentScroll = _scrollController.position.pixels;
+        if (currentScroll >= maxScroll - 600 && !_isLoadingMore && _hasMore) {
+          _loadMoreInfiniteItems();
+        }
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _loadInitialInfiniteItems() async {
+    setState(() {
+      _infinitePage = 1;
+      _hasMore = true;
+      _infiniteItems.clear();
+      _seenIds.clear();
+    });
+    await _loadMoreInfiniteItems();
+  }
+
+  Future<void> _loadMoreInfiniteItems() async {
+    if (_isLoadingMore || !_hasMore) return;
+    setState(() => _isLoadingMore = true);
+
+    try {
+      final targetPage = _infiniteItems.isEmpty ? 1 : _infinitePage + 1;
+      List<MediaItem> results;
+
+      if (_selectedCategoryFilter == 'TV Shows') {
+        results = await _apiService.getPopularTV(page: targetPage);
+      } else if (_selectedCategoryFilter == 'Movies') {
+        results = await _apiService.getPopularMovies(page: targetPage);
+      } else {
+        final movies = await _apiService.getPopularMovies(page: targetPage);
+        final tv = await _apiService.getPopularTV(page: targetPage);
+        results = [];
+        final maxLen = math.max(movies.length, tv.length);
+        for (int i = 0; i < maxLen; i++) {
+          if (i < movies.length) results.add(movies[i]);
+          if (i < tv.length) results.add(tv[i]);
+        }
+      }
+
+      if (mounted) {
+        setState(() {
+          _infinitePage = targetPage;
+          if (results.isEmpty) {
+            _hasMore = false;
+          } else {
+            for (final it in results) {
+              if (_seenIds.add(it.id)) {
+                _infiniteItems.add(it);
+              }
+            }
+          }
+          _isLoadingMore = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _isLoadingMore = false);
+    }
   }
 
   Future<void> _checkConnectivity() async {
@@ -247,6 +330,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ]);
           },
           child: SingleChildScrollView(
+            controller: _scrollController,
             physics: const AlwaysScrollableScrollPhysics(),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -562,6 +646,66 @@ class _HomeScreenState extends State<HomeScreen> {
                   ],
                 ],
 
+                // ═══════════════════════════════════════════════════════════
+                // NEVER-ENDING / INFINITE EXPLORE SECTION
+                // ═══════════════════════════════════════════════════════════
+                const SizedBox(height: 24),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        'EXPLORE MORE ON VOIDFLIX',
+                        style: GoogleFonts.bebasNeue(
+                          fontSize: 26,
+                          letterSpacing: 1.2,
+                          color: Colors.white,
+                        ),
+                      ),
+                      const Text(
+                        'Never-ending catalog with real-time continuous scroll',
+                        style: TextStyle(color: Colors.white54, fontSize: 12),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 14),
+
+                LayoutBuilder(
+                  builder: (context, constraints) {
+                    final count = (constraints.maxWidth / 115.0).floor().clamp(3, 8);
+                    return GridView.builder(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      padding: const EdgeInsets.symmetric(horizontal: 12),
+                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: count,
+                        childAspectRatio: 0.65,
+                        crossAxisSpacing: 8,
+                        mainAxisSpacing: 10,
+                      ),
+                      itemCount: _infiniteItems.length,
+                      itemBuilder: (context, index) {
+                        return MediaCard(item: _infiniteItems[index]);
+                      },
+                    );
+                  },
+                ),
+
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 24),
+                  child: Center(
+                    child: _isLoadingMore
+                        ? const SizedBox(
+                            width: 28,
+                            height: 28,
+                            child: CircularProgressIndicator(strokeWidth: 2.5, color: AppTheme.primaryRed),
+                          )
+                        : const SizedBox.shrink(),
+                  ),
+                ),
+
                 const SizedBox(height: 96),
               ],
             ),
@@ -576,6 +720,7 @@ class _HomeScreenState extends State<HomeScreen> {
     return GestureDetector(
       onTap: () {
         setState(() => _selectedCategoryFilter = label);
+        _loadInitialInfiniteItems();
       },
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),

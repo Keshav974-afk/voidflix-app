@@ -229,6 +229,42 @@ class ApiService {
     return results.map((e) => MediaItem.fromJson(e as Map<String, dynamic>, defaultType: type)).toList();
   }
 
+  Future<List<MediaItem>> discoverMedia(
+    String type, {
+    int? genreId,
+    String? withGenres,
+    String? originalLanguage,
+    String sort = 'popularity.desc',
+    String? airDateGte,
+    int? voteCountGte,
+    int page = 1,
+  }) async {
+    final params = <String, String>{
+      'page': '$page',
+      'sort_by': sort,
+    };
+    if (withGenres != null && withGenres.isNotEmpty) {
+      params['with_genres'] = withGenres;
+    } else if (genreId != null) {
+      params['with_genres'] = '$genreId';
+    }
+    if (originalLanguage != null && originalLanguage.isNotEmpty) {
+      params['with_original_language'] = originalLanguage;
+    }
+    if (airDateGte != null) {
+      params['air_date.gte'] = airDateGte;
+    }
+    if (voteCountGte != null) {
+      params['vote_count.gte'] = '$voteCountGte';
+    } else if (sort == 'vote_average.desc') {
+      params['vote_count.gte'] = '100';
+    }
+
+    final data = await _get('/discover/$type', params);
+    final results = data['results'] as List<dynamic>? ?? [];
+    return results.map((e) => MediaItem.fromJson(e as Map<String, dynamic>, defaultType: type)).toList();
+  }
+
   Future<List<MediaItem>> searchPersonMedia(String personName) async {
     try {
       final data = await _get('/search/person', {

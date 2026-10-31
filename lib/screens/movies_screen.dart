@@ -1,10 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
+import 'package:provider/provider.dart';
 import '../core/constants/theme_constants.dart';
 import '../core/network/api_service.dart';
 import '../core/services/tv_mode_service.dart';
 import '../models/media_item.dart';
+import '../providers/media_provider.dart';
+import '../widgets/hero_banner.dart';
 import '../widgets/media_card.dart';
+import '../widgets/media_row.dart';
+import '../widgets/top10_row.dart';
 import '../widgets/tv_back_button.dart';
 import '../widgets/tv_focusable.dart';
 
@@ -17,386 +22,408 @@ class MoviesScreen extends StatefulWidget {
 
 class _MoviesScreenState extends State<MoviesScreen> {
   final ApiService _apiService = ApiService();
-  List<MediaItem> _movies = [];
-  List<Map<String, dynamic>> _genres = [];
+  final ScrollController _scrollController = ScrollController();
+
+  // Never-ending infinite scroll browse state
+  final List<MediaItem> _browseItems = [];
+  final Set<int> _seenIds = {};
+  int _currentPage = 1;
+  bool _isLoadingInitial = true;
+  bool _isLoadingMore = false;
+  bool _hasMore = true;
+
   int? _selectedGenreId;
   String _selectedSort = 'popularity.desc';
-  bool _isLoading = true;
+
+  static const List<Map<String, dynamic>> _genres = [
+    {'name': 'All', 'id': null},
+    {'name': 'Action', 'id': 28},
+    {'name': 'Adventure', 'id': 12},
+    {'name': 'Animation', 'id': 16},
+    {'name': 'Comedy', 'id': 35},
+    {'name': 'Crime', 'id': 80},
+    {'name': 'Documentary', 'id': 99},
+    {'name': 'Drama', 'id': 18},
+    {'name': 'Fantasy', 'id': 14},
+    {'name': 'Horror', 'id': 27},
+    {'name': 'Romance', 'id': 10749},
+    {'name': 'Sci-Fi', 'id': 878},
+    {'name': 'Thriller', 'id': 53},
+  ];
+
+  static const List<Map<String, String>> _sortOptions = [
+    {'label': 'Popularity', 'value': 'popularity.desc'},
+    {'label': 'Highest Rated', 'value': 'vote_average.desc'},
+    {'label': 'Release Date', 'value': 'release_date.desc'},
+  ];
 
   @override
   void initState() {
     super.initState();
-    _loadInitialData();
+    _fetchBrowsePage(reset: true);
+
+    _scrollController.addListener(() {
+      if (_scrollController.hasClients) {
+        final maxScroll = _scrollController.position.maxScrollExtent;
+        final currentScroll = _scrollController.position.pixels;
+        if (currentScroll >= maxScroll - 600 && !_isLoadingMore && !_isLoadingInitial && _hasMore) {
+          _fetchBrowsePage(reset: false);
+        }
+      }
+    });
   }
 
-  Future<void> _loadInitialData() async {
+  @override
+  void dispose() {
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _fetchBrowsePage({required bool reset}) async {
+    if (reset) {
+      setState(() {
+        _isLoadingInitial = true;
+        _currentPage = 1;
+        _hasMore = true;
+        _browseItems.clear();
+        _seenIds.clear();
+      });
+    } else {
+      setState(() {
+        _isLoadingMore = true;
+      });
+    }
+
     try {
-      final genres = await _apiService.getGenres('movie');
-      final movies = await _apiService.getPopularMovies();
+      final targetPage = reset ? 1 : _currentPage + 1;
+      final results = await _apiService.discoverMedia(
+        'movie',
+        genreId: _selectedGenreId,
+        sort: _selectedSort,
+        page: targetPage,
+      );
+
       if (mounted) {
         setState(() {
-          _genres = genres;
-          _movies = movies;
-          _isLoading = false;
+          _currentPage = targetPage;
+          if (results.isEmpty) {
+            _hasMore = false;
+          } else {
+            for (final item in results) {
+              if (_seenIds.add(item.id)) {
+                _browseItems.add(item);
+              }
+            }
+          }
+          _isLoadingInitial = false;
+          _isLoadingMore = false;
         });
       }
     } catch (_) {
-      if (mounted) setState(() => _isLoading = false);
-    }
-  }
-
-  Future<void> _filterByGenre(int? genreId) async {
-    setState(() {
-      _selectedGenreId = genreId;
-      _isLoading = true;
-    });
-    try {
-      List<MediaItem> items;
-      if (genreId == null) {
-        items = _selectedSort == 'popularity.desc'
-            ? await _apiService.getPopularMovies()
-            : await _apiService.getTopRatedMovies();
-      } else {
-        items = await _apiService.discoverByGenre('movie', genreId);
-      }
       if (mounted) {
         setState(() {
-          _movies = items;
-          _isLoading = false;
+          _isLoadingInitial = false;
+          _isLoadingMore = false;
         });
       }
-    } catch (_) {
-      if (mounted) setState(() => _isLoading = false);
     }
   }
 
-  Future<void> _setSort(String sort) async {
-    setState(() {
-      _selectedSort = sort;
-      _isLoading = true;
-    });
-    try {
-      final items = sort == 'popularity.desc'
-          ? await _apiService.getPopularMovies()
-          : await _apiService.getTopRatedMovies();
-      if (mounted) setState(() { _movies = items; _isLoading = false; });
-    } catch (_) {
-      if (mounted) setState(() => _isLoading = false);
-    }
+  void _onGenreSelected(int? genreId) {
+    if (_selectedGenreId == genreId) return;
+    setState(() => _selectedGenreId = genreId);
+    _fetchBrowsePage(reset: true);
+  }
+
+  void _onSortSelected(String sort) {
+    if (_selectedSort == sort) return;
+    setState(() => _selectedSort = sort);
+    _fetchBrowsePage(reset: true);
   }
 
   @override
   Widget build(BuildContext context) {
     final canPop = Navigator.of(context).canPop();
     final isTv = TvModeService().isTvMode;
+    final mediaProvider = context.watch<MediaProvider>();
+
+    // Top spotlight items for HeroBanner
+    final spotlightItems = mediaProvider.popularMovies.isNotEmpty
+        ? mediaProvider.popularMovies
+        : (mediaProvider.trending.isNotEmpty ? mediaProvider.trending : _browseItems);
 
     return TvScreenWrapper(
       onBack: canPop ? () => Navigator.of(context).pop() : null,
-      child: isTv ? _buildTvLayout(context, canPop) : _buildMobileLayout(context, canPop),
-    );
-  }
-
-  // ═══════════════════════════════════════════════════════════════
-  // TV LAYOUT — D-pad navigable genre chips + large grid
-  // ═══════════════════════════════════════════════════════════════
-
-  Widget _buildTvLayout(BuildContext context, bool canPop) {
-    return Scaffold(
-      backgroundColor: Colors.black,
-      body: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          // Header
-          Padding(
-            padding: const EdgeInsets.fromLTRB(32, 28, 32, 0),
-            child: Row(
+      child: Scaffold(
+        backgroundColor: AppTheme.background,
+        body: RefreshIndicator(
+          color: AppTheme.primaryRed,
+          backgroundColor: const Color(0xFF16161E),
+          onRefresh: () async {
+            await Future.wait([
+              mediaProvider.fetchHomeData(),
+              _fetchBrowsePage(reset: true),
+            ]);
+          },
+          child: SingleChildScrollView(
+            controller: _scrollController,
+            physics: const AlwaysScrollableScrollPhysics(),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                if (canPop) ...[
-                  TvBackButton(onPressed: () => Navigator.of(context).pop()),
-                  const SizedBox(width: 20),
-                ],
-                const Icon(Icons.movie_outlined, color: AppTheme.primaryRed, size: 32),
-                const SizedBox(width: 10),
-                Text('MOVIES & FILMS',
-                    style: GoogleFonts.bebasNeue(fontSize: 38, letterSpacing: 2, color: Colors.white)),
-              ],
-            ),
-          ),
+                // Top Hero Spotlight Banner
+                if (spotlightItems.isNotEmpty)
+                  HeroBanner(items: spotlightItems)
+                else
+                  const SizedBox(height: 60),
 
-          const SizedBox(height: 16),
+                const SizedBox(height: 10),
 
-          // Genre chips row (D-pad focusable)
-          if (_genres.isNotEmpty)
-            SizedBox(
-              height: 56,
-              child: ListView(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: 28),
-                children: [
-                  _TvGenreChip(
-                    label: 'All',
-                    isSelected: _selectedGenreId == null,
-                    onPressed: () => _filterByGenre(null),
+                // Curated Category Rows (Home-like Experience)
+                if (mediaProvider.popularMovies.isNotEmpty)
+                  Top10Row(
+                    title: 'Top 10 Movies Today',
+                    items: mediaProvider.popularMovies,
+                    forceType: 'movie',
                   ),
-                  ..._genres.map((g) => _TvGenreChip(
-                        label: g['name'] as String,
-                        isSelected: _selectedGenreId == g['id'],
-                        onPressed: () => _filterByGenre(_selectedGenreId == g['id'] ? null : g['id'] as int),
-                      )),
-                ],
-              ),
-            ),
 
-          // Sort row
-          Padding(
-            padding: const EdgeInsets.fromLTRB(28, 10, 28, 14),
-            child: Row(
-              children: [
-                const Text('Sort: ', style: TextStyle(color: Colors.white54, fontSize: 13)),
-                _TvSortButton(
-                  label: 'Most Popular',
-                  isSelected: _selectedSort == 'popularity.desc',
-                  onPressed: () => _setSort('popularity.desc'),
-                ),
-                const SizedBox(width: 10),
-                _TvSortButton(
-                  label: 'Highest Rated',
-                  isSelected: _selectedSort == 'vote_average.desc',
-                  onPressed: () => _setSort('vote_average.desc'),
-                ),
-              ],
-            ),
-          ),
+                if (mediaProvider.nowPlayingMovies.isNotEmpty)
+                  MediaRow(
+                    title: 'Now Playing in Theaters',
+                    items: mediaProvider.nowPlayingMovies,
+                    forceType: 'movie',
+                  ),
 
-          // Grid
-          Expanded(child: _buildGrid(isTv: true)),
-        ],
-      ),
-    );
-  }
+                if (mediaProvider.topRatedMovies.isNotEmpty)
+                  MediaRow(
+                    title: 'Critically Acclaimed Movies',
+                    items: mediaProvider.topRatedMovies,
+                    forceType: 'movie',
+                  ),
 
-  // ═══════════════════════════════════════════════════════════════
-  // MOBILE LAYOUT (original behavior)
-  // ═══════════════════════════════════════════════════════════════
+                if (mediaProvider.actionMovies.isNotEmpty)
+                  MediaRow(
+                    title: 'Action & Adrenaline',
+                    items: mediaProvider.actionMovies,
+                    forceType: 'movie',
+                  ),
 
-  Widget _buildMobileLayout(BuildContext context, bool canPop) {
-    return SingleChildScrollView(
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-            child: Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (canPop) ...[
-                      const TvBackButton(),
-                      const SizedBox(width: 12),
+                if (mediaProvider.sciFiMovies.isNotEmpty)
+                  MediaRow(
+                    title: 'Sci-Fi & Fantasy Blockbusters',
+                    items: mediaProvider.sciFiMovies,
+                    forceType: 'movie',
+                  ),
+
+                if (mediaProvider.comedyMovies.isNotEmpty)
+                  MediaRow(
+                    title: 'Comedy Hits',
+                    items: mediaProvider.comedyMovies,
+                    forceType: 'movie',
+                  ),
+
+                if (mediaProvider.thrillerMovies.isNotEmpty)
+                  MediaRow(
+                    title: 'Edge-of-Your-Seat Thrillers',
+                    items: mediaProvider.thrillerMovies,
+                    forceType: 'movie',
+                  ),
+
+                if (mediaProvider.horrorMovies.isNotEmpty)
+                  MediaRow(
+                    title: 'Horror & Paranormal',
+                    items: mediaProvider.horrorMovies,
+                    forceType: 'movie',
+                  ),
+
+                if (mediaProvider.romanceMovies.isNotEmpty)
+                  MediaRow(
+                    title: 'Heartfelt Romance',
+                    items: mediaProvider.romanceMovies,
+                    forceType: 'movie',
+                  ),
+
+                if (mediaProvider.documentaries.isNotEmpty)
+                  MediaRow(
+                    title: 'Fascinating Documentaries',
+                    items: mediaProvider.documentaries,
+                    forceType: 'movie',
+                  ),
+
+                if (mediaProvider.upcomingMovies.isNotEmpty)
+                  MediaRow(
+                    title: 'Coming Soon to Voidflix',
+                    items: mediaProvider.upcomingMovies,
+                    forceType: 'movie',
+                  ),
+
+                const SizedBox(height: 24),
+
+                // ═══════════════════════════════════════════════════════════
+                // NEVER-ENDING / INFINITE SCROLL BROWSE SECTION
+                // ═══════════════════════════════════════════════════════════
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    crossAxisAlignment: CrossAxisAlignment.end,
+                    children: [
+                      Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'BROWSE ALL MOVIES',
+                            style: GoogleFonts.bebasNeue(
+                              fontSize: isTv ? 32 : 24,
+                              letterSpacing: 1.2,
+                              color: Colors.white,
+                            ),
+                          ),
+                          const Text(
+                            'Never-ending catalog with real-time infinite scroll',
+                            style: TextStyle(color: Colors.white54, fontSize: 12),
+                          ),
+                        ],
+                      ),
+                      // Sort Dropdown Pill
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF1E1E28),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(color: Colors.white24, width: 1),
+                        ),
+                        child: DropdownButtonHideUnderline(
+                          child: DropdownButton<String>(
+                            value: _selectedSort,
+                            dropdownColor: const Color(0xFF1E1E28),
+                            icon: const Icon(Icons.arrow_drop_down, color: Colors.white70, size: 20),
+                            style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600),
+                            onChanged: (val) {
+                              if (val != null) _onSortSelected(val);
+                            },
+                            items: _sortOptions.map((opt) {
+                              return DropdownMenuItem<String>(
+                                value: opt['value'],
+                                child: Text(opt['label']!),
+                              );
+                            }).toList(),
+                          ),
+                        ),
+                      ),
                     ],
-                    Text('MOVIES & FILMS',
-                        style: GoogleFonts.bebasNeue(fontSize: 34, letterSpacing: 1.5, color: Colors.white)),
-                  ],
-                ),
-                PopupMenuButton<String>(
-                  color: const Color(0xFF222222),
-                  icon: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF222222),
-                      borderRadius: BorderRadius.circular(6),
-                      border: Border.all(color: AppTheme.border),
-                    ),
-                    child: const Row(mainAxisSize: MainAxisSize.min, children: [
-                      Text('Sort', style: TextStyle(color: Colors.white, fontSize: 12)),
-                      SizedBox(width: 4),
-                      Icon(Icons.keyboard_arrow_down, color: Colors.white70, size: 16),
-                    ]),
                   ),
-                  onSelected: (val) {
-                    setState(() => _selectedSort = val);
-                    _filterByGenre(_selectedGenreId);
-                  },
-                  itemBuilder: (ctx) => [
-                    const PopupMenuItem(value: 'popularity.desc', child: Text('Most Popular')),
-                    const PopupMenuItem(value: 'vote_average.desc', child: Text('Highest Rated')),
-                  ],
                 ),
+
+                const SizedBox(height: 12),
+
+                // Genre Filter Chips
+                SizedBox(
+                  height: 38,
+                  child: ListView.builder(
+                    scrollDirection: Axis.horizontal,
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    itemCount: _genres.length,
+                    itemBuilder: (context, index) {
+                      final g = _genres[index];
+                      final isSelected = _selectedGenreId == g['id'];
+                      final chip = Container(
+                        margin: const EdgeInsets.symmetric(horizontal: 4),
+                        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 7),
+                        decoration: BoxDecoration(
+                          color: isSelected ? AppTheme.primaryRed : const Color(0xFF1A1A24),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(
+                            color: isSelected ? AppTheme.primaryRed : Colors.white24,
+                            width: 1,
+                          ),
+                        ),
+                        child: Center(
+                          child: Text(
+                            g['name'] as String,
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 12,
+                              fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
+                            ),
+                          ),
+                        ),
+                      );
+
+                      if (isTv) {
+                        return TvFocusable(
+                          onPressed: () => _onGenreSelected(g['id'] as int?),
+                          borderRadius: BorderRadius.circular(20),
+                          child: chip,
+                        );
+                      }
+                      return GestureDetector(
+                        onTap: () => _onGenreSelected(g['id'] as int?),
+                        child: chip,
+                      );
+                    },
+                  ),
+                ),
+
+                const SizedBox(height: 16),
+
+                // Never-Ending Grid Content
+                if (_isLoadingInitial)
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 48),
+                    child: Center(child: CircularProgressIndicator(color: AppTheme.primaryRed)),
+                  )
+                else if (_browseItems.isEmpty)
+                  const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 48),
+                    child: Center(child: Text('No movies found', style: TextStyle(color: Colors.white60))),
+                  )
+                else
+                  LayoutBuilder(
+                    builder: (context, constraints) {
+                      final targetWidth = isTv ? 190.0 : 115.0;
+                      final count = (constraints.maxWidth / targetWidth).floor().clamp(3, 8);
+
+                      return GridView.builder(
+                        shrinkWrap: true,
+                        physics: const NeverScrollableScrollPhysics(),
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: count,
+                          childAspectRatio: 0.65,
+                          crossAxisSpacing: isTv ? 12 : 8,
+                          mainAxisSpacing: isTv ? 14 : 10,
+                        ),
+                        itemCount: _browseItems.length,
+                        itemBuilder: (context, index) {
+                          return MediaCard(item: _browseItems[index], forceType: 'movie');
+                        },
+                      );
+                    },
+                  ),
+
+                // Bottom Infinite Scroll Spinner or End Notice
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 24),
+                  child: Center(
+                    child: _isLoadingMore
+                        ? const SizedBox(
+                            width: 28,
+                            height: 28,
+                            child: CircularProgressIndicator(strokeWidth: 2.5, color: AppTheme.primaryRed),
+                          )
+                        : (!_hasMore && _browseItems.isNotEmpty
+                            ? const Text(
+                                'You have reached the end of the catalogue',
+                                style: TextStyle(color: Colors.white38, fontSize: 12),
+                              )
+                            : const SizedBox.shrink()),
+                  ),
+                ),
+
+                const SizedBox(height: 70),
               ],
             ),
-          ),
-          if (_genres.isNotEmpty)
-            SizedBox(
-              height: 40,
-              child: ListView(
-                scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: 12),
-                children: [
-                  _MobileGenreChip(label: 'All', isSelected: _selectedGenreId == null, onTap: () => _filterByGenre(null)),
-                  ..._genres.map((g) => _MobileGenreChip(
-                        label: g['name'] as String,
-                        isSelected: _selectedGenreId == g['id'],
-                        onTap: () => _filterByGenre(_selectedGenreId == g['id'] ? null : g['id'] as int),
-                      )),
-                ],
-              ),
-            ),
-          const SizedBox(height: 12),
-          _buildGrid(isTv: false),
-          const SizedBox(height: 36),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildGrid({required bool isTv}) {
-    if (_isLoading) {
-      return const Padding(
-        padding: EdgeInsets.all(48),
-        child: Center(child: CircularProgressIndicator(color: AppTheme.primaryRed)),
-      );
-    }
-    if (_movies.isEmpty) {
-      return const Padding(
-        padding: EdgeInsets.all(48),
-        child: Center(child: Text('No movies found', style: TextStyle(color: Colors.white70))),
-      );
-    }
-
-    return LayoutBuilder(
-      builder: (context, constraints) {
-        // TV: larger cards (around 200px wide), mobile: smaller (130px)
-        final targetWidth = isTv ? 200.0 : 130.0;
-        final count = (constraints.maxWidth / targetWidth).floor().clamp(isTv ? 4 : 3, isTv ? 8 : 8);
-        final grid = GridView.builder(
-          shrinkWrap: !isTv,
-          physics: isTv ? const AlwaysScrollableScrollPhysics() : const NeverScrollableScrollPhysics(),
-          padding: EdgeInsets.symmetric(horizontal: isTv ? 24 : 12),
-          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-            crossAxisCount: count,
-            childAspectRatio: 0.65,
-            crossAxisSpacing: isTv ? 14 : 10,
-            mainAxisSpacing: isTv ? 16 : 12,
-          ),
-          itemCount: _movies.length,
-          itemBuilder: (context, index) => MediaCard(item: _movies[index], forceType: 'movie'),
-        );
-        return grid;
-      },
-    );
-  }
-}
-
-// ═══════════════════════════════════════════════════════════════
-// TV Genre Chip (D-Pad focusable)
-// ═══════════════════════════════════════════════════════════════
-
-class _TvGenreChip extends StatelessWidget {
-  final String label;
-  final bool isSelected;
-  final VoidCallback onPressed;
-
-  const _TvGenreChip({required this.label, required this.isSelected, required this.onPressed});
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(right: 10),
-      child: TvFocusable(
-        scaleFactor: 1.06,
-        glowColor: AppTheme.primaryRed,
-        borderRadius: BorderRadius.circular(28),
-        onPressed: onPressed,
-        child: Container(
-          padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 11),
-          decoration: BoxDecoration(
-            color: isSelected ? AppTheme.primaryRed : const Color(0xFF1E1E28),
-            borderRadius: BorderRadius.circular(28),
-            border: Border.all(color: isSelected ? AppTheme.primaryRed : Colors.white24),
-          ),
-          child: Text(
-            label,
-            style: TextStyle(
-              color: isSelected ? Colors.white : Colors.white70,
-              fontWeight: isSelected ? FontWeight.bold : FontWeight.w500,
-              fontSize: 14,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// ═══════════════════════════════════════════════════════════════
-// TV Sort Button
-// ═══════════════════════════════════════════════════════════════
-
-class _TvSortButton extends StatelessWidget {
-  final String label;
-  final bool isSelected;
-  final VoidCallback onPressed;
-
-  const _TvSortButton({required this.label, required this.isSelected, required this.onPressed});
-
-  @override
-  Widget build(BuildContext context) {
-    return TvFocusable(
-      scaleFactor: 1.05,
-      glowColor: AppTheme.primaryRed,
-      borderRadius: BorderRadius.circular(8),
-      onPressed: onPressed,
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-        decoration: BoxDecoration(
-          color: isSelected ? AppTheme.primaryRed.withValues(alpha: 0.25) : const Color(0xFF1E1E28),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(color: isSelected ? AppTheme.primaryRed : Colors.white24),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            color: isSelected ? Colors.white : Colors.white70,
-            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-            fontSize: 13,
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// ═══════════════════════════════════════════════════════════════
-// Mobile Genre Chip (touch-only)
-// ═══════════════════════════════════════════════════════════════
-
-class _MobileGenreChip extends StatelessWidget {
-  final String label;
-  final bool isSelected;
-  final VoidCallback onTap;
-
-  const _MobileGenreChip({required this.label, required this.isSelected, required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        margin: const EdgeInsets.only(right: 8),
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
-        decoration: BoxDecoration(
-          color: isSelected ? AppTheme.primaryRed : const Color(0xFF222222),
-          borderRadius: BorderRadius.circular(20),
-          border: Border.all(color: isSelected ? AppTheme.primaryRed : Colors.white24),
-        ),
-        child: Text(
-          label,
-          style: TextStyle(
-            color: isSelected ? Colors.white : Colors.white70,
-            fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
-            fontSize: 12,
           ),
         ),
       ),
