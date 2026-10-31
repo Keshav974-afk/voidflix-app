@@ -285,6 +285,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
         appBar: AppBar(
           backgroundColor: Colors.black,
           elevation: 0,
+          leadingWidth: 80,
           leading: const TvBackButton(),
           title: Text(
             displayTitle,

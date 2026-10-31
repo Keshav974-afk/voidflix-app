@@ -1,6 +1,8 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
+import 'tv_mode_service.dart';
 
 /// Remote configuration model received from Voidflix Mission Control Admin Panel
 class RemoteAppUpdate {
@@ -12,6 +14,8 @@ class RemoteAppUpdate {
   final String? arm64Url;
   final String? armeabiUrl;
   final String? x86_64Url;
+  final String? tvUrl;
+  final String? windowsUrl;
   final bool forceUpdate;
   final bool enabled;
   final String? publishedAt;
@@ -25,6 +29,8 @@ class RemoteAppUpdate {
     this.arm64Url,
     this.armeabiUrl,
     this.x86_64Url,
+    this.tvUrl,
+    this.windowsUrl,
     required this.forceUpdate,
     required this.enabled,
     this.publishedAt,
@@ -43,6 +49,8 @@ class RemoteAppUpdate {
       arm64Url: json['arm64Url'] as String?,
       armeabiUrl: json['armeabiUrl'] as String?,
       x86_64Url: json['x86_64Url'] as String?,
+      tvUrl: json['tvUrl'] as String?,
+      windowsUrl: json['windowsUrl'] as String?,
       forceUpdate: json['forceUpdate'] as bool? ?? false,
       enabled: json['enabled'] as bool? ?? false,
       publishedAt: json['publishedAt'] as String?,
@@ -232,12 +240,41 @@ class RemoteConfigService {
     return false;
   }
 
-  /// Resolves full APK download URL
+  /// Resolves full download URL as per current device and platform
   static String get resolvedApkUrl {
     final update = cachedUpdate;
-    if (update == null) return 'https://voidflix.org/Voidflix.apk';
-    final raw = update.downloadUrl;
-    if (raw.startsWith('http')) return raw;
+    if (kIsWeb) return 'https://voidflix.org/';
+
+    // 1. Windows Desktop (.exe)
+    if (Platform.isWindows) {
+      final raw = update?.windowsUrl ?? '/Voidflix-Setup-v0.4.2.exe';
+      return _toAbsoluteUrl(raw);
+    }
+
+    // 2. Linux Desktop / Steam Deck
+    if (Platform.isLinux) {
+      return 'https://voidflix.org/install-voidflix-linux.sh';
+    }
+
+    // 3. Android TV / Fire TV Stick / Google TV (Leanback D-Pad)
+    if (Platform.isAndroid && (TvModeService().isHardwareTv || TvModeService().isTvMode)) {
+      final raw = update?.tvUrl ?? '/Voidflix-AndroidTV.apk';
+      return _toAbsoluteUrl(raw);
+    }
+
+    // 4. Android Mobile / Tablet (Touch UI)
+    if (Platform.isAndroid) {
+      final raw = update?.arm64Url ?? update?.downloadUrl ?? '/Voidflix-arm64-v0.4.2.apk';
+      return _toAbsoluteUrl(raw);
+    }
+
+    // Fallback
+    final raw = update?.downloadUrl ?? '/Voidflix-arm64-v0.4.2.apk';
+    return _toAbsoluteUrl(raw);
+  }
+
+  static String _toAbsoluteUrl(String raw) {
+    if (raw.startsWith('http://') || raw.startsWith('https://')) return raw;
     if (raw.startsWith('/')) return 'https://voidflix.org$raw';
     return 'https://voidflix.org/$raw';
   }

@@ -1,5 +1,8 @@
+import 'dart:io';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import '../core/services/remote_config_service.dart';
+import '../core/services/tv_mode_service.dart';
 import '../widgets/app_update_download_dialog.dart';
 
 /// Full-Screen Mandatory App Update Gate
@@ -202,14 +205,18 @@ class _UpdateRequiredScreenState extends State<UpdateRequiredScreen> {
                             borderRadius: BorderRadius.circular(8),
                           ),
                         ),
-                        child: const Row(
+                        child: Row(
                           mainAxisAlignment: MainAxisAlignment.center,
                           children: [
-                            Icon(Icons.download_rounded, size: 22),
-                            SizedBox(width: 10),
+                            const Icon(Icons.download_rounded, size: 22),
+                            const SizedBox(width: 10),
                             Text(
-                              'Update Now (Download APK)',
-                              style: TextStyle(
+                              !kIsWeb && Platform.isWindows
+                                  ? 'Update Now (Download Windows App)'
+                                  : (!kIsWeb && Platform.isAndroid && (TvModeService().isHardwareTv || TvModeService().isTvMode))
+                                      ? 'Update Now (Download Android TV APK)'
+                                      : 'Update Now (Download Mobile APK)',
+                              style: const TextStyle(
                                 fontSize: 15,
                                 fontWeight: FontWeight.w800,
                                 letterSpacing: 0.3,

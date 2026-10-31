@@ -340,6 +340,7 @@ class _DetailScreenState extends State<DetailScreen> {
               expandedHeight: 280,
               pinned: true,
               backgroundColor: Colors.black,
+              leadingWidth: 80,
               leading: const TvBackButton(showBackground: true),
             actions: [
               ListenableBuilder(

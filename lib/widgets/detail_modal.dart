@@ -206,19 +206,37 @@ class _DetailModalState extends State<DetailModal> {
                         ),
                       ),
 
-                      // Close button top right
+                      // Close button top right - clean, fittable, touch-friendly UI
                       Positioned(
-                        top: 10,
-                        right: 12,
-                        child: GestureDetector(
-                          onTap: () => Navigator.of(context).pop(),
-                          child: Container(
-                            padding: const EdgeInsets.all(6),
-                            decoration: BoxDecoration(
-                              shape: BoxShape.circle,
-                              color: Colors.black.withValues(alpha: 0.7),
+                        top: 12,
+                        right: 14,
+                        child: Material(
+                          color: Colors.transparent,
+                          child: InkWell(
+                            onTap: () => Navigator.of(context).pop(),
+                            borderRadius: BorderRadius.circular(20),
+                            child: Container(
+                              width: 36,
+                              height: 36,
+                              decoration: BoxDecoration(
+                                shape: BoxShape.circle,
+                                color: Colors.black.withValues(alpha: 0.75),
+                                border: Border.all(
+                                  color: Colors.white.withValues(alpha: 0.25),
+                                  width: 1.0,
+                                ),
+                                boxShadow: [
+                                  BoxShadow(
+                                    color: Colors.black.withValues(alpha: 0.5),
+                                    blurRadius: 8,
+                                    offset: const Offset(0, 2),
+                                  ),
+                                ],
+                              ),
+                              child: const Center(
+                                child: Icon(Icons.close_rounded, color: Colors.white, size: 20),
+                              ),
                             ),
-                            child: const Icon(Icons.close, color: Colors.white, size: 20),
                           ),
                         ),
                       ),

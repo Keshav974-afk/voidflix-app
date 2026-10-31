@@ -44,8 +44,21 @@ class AppUpdateService {
       onProgress(0.0, 0, 0);
 
       final uri = Uri.parse(downloadUrl);
-      final request = http.Request('GET', uri);
-      final streamedResponse = await client.send(request);
+      var targetUri = uri;
+      var request = http.Request('GET', targetUri);
+      request.followRedirects = true;
+      var streamedResponse = await client.send(request);
+
+      int redirectCount = 0;
+      while ((streamedResponse.isRedirect || (streamedResponse.statusCode >= 301 && streamedResponse.statusCode <= 308)) && redirectCount < 5) {
+        redirectCount++;
+        final location = streamedResponse.headers['location'];
+        if (location == null || location.isEmpty) break;
+        targetUri = targetUri.resolve(location);
+        request = http.Request('GET', targetUri);
+        request.followRedirects = true;
+        streamedResponse = await client.send(request);
+      }
 
       if (streamedResponse.statusCode != 200) {
         throw Exception('Server returned HTTP ${streamedResponse.statusCode}');

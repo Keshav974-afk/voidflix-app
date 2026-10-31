@@ -178,6 +178,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
   List<TvSeason> _seasons = [];
   List<TvEpisode> _episodes = [];
   bool _isLoadingEpisodes = false;
+  String? _activeLocalFilePath;
+  String? _activeLocalSubtitlePath;
 
   // Picture-in-Picture & Desktop Windowing
   bool _isInPipMode = false;
@@ -383,9 +385,15 @@ class _PlayerScreenState extends State<PlayerScreen> {
       }
     });
 
+    _activeLocalFilePath = widget.localFilePath;
+    _activeLocalSubtitlePath = widget.localSubtitlePath;
+
     _loadMedia();
 
     if (widget.mediaType == 'tv') {
+      if (_activeLocalFilePath != null) {
+        _populateOfflineEpisodesIfAvailable();
+      }
       _fetchTvDetailsAndEpisodes();
     }
 
@@ -587,6 +595,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
       }
 
       // 4. Scan disk directory for any matching subtitles (.vtt or .srt)
+      if (_activeLocalSubtitlePath != null && File(_activeLocalSubtitlePath!).existsSync()) {
+        addSub('Offline Subtitles', 'offline', _activeLocalSubtitlePath!);
+      }
+
       if (dir.existsSync()) {
         try {
           final entries = dir.listSync();
@@ -647,8 +659,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _cancelAutoplayTimer();
 
     // Check if playing an offline in-app download
-    if (widget.localFilePath != null && File(widget.localFilePath!).existsSync()) {
-      await _loadLocalFile(widget.localFilePath!);
+    if (_activeLocalFilePath != null && File(_activeLocalFilePath!).existsSync()) {
+      await _loadLocalFile(_activeLocalFilePath!);
       return;
     }
 
@@ -1932,8 +1944,51 @@ class _PlayerScreenState extends State<PlayerScreen> {
         _loadEpisodesForSeason(_currentSeason);
       }
     } catch (e) {
-      _loadEpisodesForSeason(_currentSeason);
+      if (mounted) {
+        _populateOfflineEpisodesIfAvailable();
+        _loadEpisodesForSeason(_currentSeason);
+      }
     }
+  }
+
+  void _populateOfflineEpisodesIfAvailable() {
+    try {
+      final dlProvider = context.read<DownloadProvider>();
+      final seriesDownloads = dlProvider.items.where(
+        (item) => item.mediaId == widget.mediaId && item.mediaType == 'tv' && item.status == 'completed',
+      ).toList();
+
+      if (seriesDownloads.isNotEmpty) {
+        final seasonNums = seriesDownloads.map((i) => i.season).toSet().toList()..sort();
+        final seasons = seasonNums.map((sNum) {
+          final count = seriesDownloads.where((i) => i.season == sNum).length;
+          return TvSeason(
+            id: sNum,
+            seasonNumber: sNum,
+            name: 'Season $sNum',
+            episodeCount: count,
+          );
+        }).toList();
+
+        final currentSeasonDownloads = seriesDownloads.where((i) => i.season == _currentSeason).toList()
+          ..sort((a, b) => a.episode.compareTo(b.episode));
+
+        final episodes = currentSeasonDownloads.map((i) => TvEpisode(
+          episodeNumber: i.episode,
+          name: i.episodeTitle?.isNotEmpty == true ? i.episodeTitle! : 'Episode ${i.episode}',
+          overview: i.episodeDescription ?? '',
+          stillPath: i.stillPath,
+          runtime: i.runtime,
+        )).toList();
+
+        if (mounted) {
+          setState(() {
+            if (_seasons.isEmpty) _seasons = seasons;
+            if (_episodes.isEmpty && episodes.isNotEmpty) _episodes = episodes;
+          });
+        }
+      }
+    } catch (_) {}
   }
 
   Future<void> _loadEpisodesForSeason(int seasonNum) async {
@@ -1948,7 +2003,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
         });
       }
     } catch (e) {
-      if (mounted) setState(() => _isLoadingEpisodes = false);
+      if (mounted) {
+        _populateOfflineEpisodesIfAvailable();
+        setState(() => _isLoadingEpisodes = false);
+      }
     }
   }
 
@@ -2010,6 +2068,28 @@ class _PlayerScreenState extends State<PlayerScreen> {
   void _goToEpisode(int episodeNum) {
     _recordWatchProgress(force: true);
     _cancelAutoplayTimer();
+
+    // Check if offline download exists for this target episode
+    if (_activeLocalFilePath != null || widget.localFilePath != null) {
+      try {
+        final dlProvider = context.read<DownloadProvider>();
+        final dlMatch = dlProvider.items.where(
+          (item) => item.mediaId == widget.mediaId &&
+                    item.mediaType == 'tv' &&
+                    item.status == 'completed' &&
+                    item.season == _currentSeason &&
+                    item.episode == episodeNum,
+        ).firstOrNull;
+        if (dlMatch != null && File(dlMatch.localFilePath).existsSync()) {
+          _activeLocalFilePath = dlMatch.localFilePath;
+          _activeLocalSubtitlePath = dlMatch.localSubtitlePath;
+        } else {
+          _activeLocalFilePath = null;
+          _activeLocalSubtitlePath = null;
+        }
+      } catch (_) {}
+    }
+
     setState(() {
       _currentEpisode = episodeNum;
       _showSkipIntro = false;
@@ -2033,6 +2113,60 @@ class _PlayerScreenState extends State<PlayerScreen> {
     if (widget.mediaType != 'tv') return;
     _recordWatchProgress(force: true);
     _cancelAutoplayTimer();
+
+    // Check if offline download playback mode
+    if (_activeLocalFilePath != null || widget.localFilePath != null) {
+      try {
+        final dlProvider = context.read<DownloadProvider>();
+        final seriesDownloads = dlProvider.items.where(
+          (item) => item.mediaId == widget.mediaId && item.mediaType == 'tv' && item.status == 'completed',
+        ).toList();
+
+        if (seriesDownloads.isNotEmpty) {
+          // Look for next episode in current season
+          var nextDl = seriesDownloads.where(
+            (i) => i.season == _currentSeason && i.episode == _currentEpisode + 1,
+          ).firstOrNull;
+
+          // If not found in current season, search next season
+          if (nextDl == null) {
+            final nextSeasons = seriesDownloads
+                .where((i) => i.season > _currentSeason)
+                .map((i) => i.season)
+                .toSet()
+                .toList()
+              ..sort();
+            if (nextSeasons.isNotEmpty) {
+              final nextS = nextSeasons.first;
+              final seasonItems = seriesDownloads
+                  .where((i) => i.season == nextS)
+                  .toList();
+              seasonItems.sort((a, b) => a.episode.compareTo(b.episode));
+              nextDl = seasonItems.firstOrNull;
+            }
+          }
+
+          final targetDl = nextDl;
+          if (targetDl != null && File(targetDl.localFilePath).existsSync()) {
+            setState(() {
+              _currentSeason = targetDl.season;
+              _currentEpisode = targetDl.episode;
+              _activeLocalFilePath = targetDl.localFilePath;
+              _activeLocalSubtitlePath = targetDl.localSubtitlePath;
+              _showSkipIntro = false;
+              _hasSkippedIntroForThisEp = false;
+              _hasCancelledAutoplayForThisEp = false;
+            });
+            _loadEpisodesForSeason(_currentSeason);
+            _loadMedia();
+            return;
+          }
+        }
+      } catch (e) {
+        debugPrint('Error navigating to next offline episode: $e');
+      }
+    }
+
     if (_episodes.isNotEmpty && _currentEpisode < _episodes.length) {
       _goToEpisode(_currentEpisode + 1);
     } else {
@@ -4374,14 +4508,43 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   Widget _buildAutoplayNextCard() {
-    if (_episodes.isEmpty || _currentEpisode >= _episodes.length) {
+    TvEpisode? nextEp;
+    if (_episodes.isNotEmpty) {
+      nextEp = _episodes.where((e) => e.episodeNumber == _currentEpisode + 1).firstOrNull ??
+          _episodes.where((e) => e.episodeNumber > _currentEpisode).firstOrNull;
+    }
+
+    // Offline download fallback check
+    if (nextEp == null && (_activeLocalFilePath != null || widget.localFilePath != null)) {
+      try {
+        final dlProvider = context.read<DownloadProvider>();
+        final nextDl = dlProvider.items.where(
+          (item) => item.mediaId == widget.mediaId &&
+                    item.mediaType == 'tv' &&
+                    item.status == 'completed' &&
+                    ((item.season == _currentSeason && item.episode > _currentEpisode) || (item.season > _currentSeason)),
+        ).toList();
+        nextDl.sort((a, b) {
+          final sCmp = a.season.compareTo(b.season);
+          return sCmp != 0 ? sCmp : a.episode.compareTo(b.episode);
+        });
+
+        if (nextDl.isNotEmpty) {
+          final target = nextDl.first;
+          nextEp = TvEpisode(
+            episodeNumber: target.episode,
+            name: target.episodeTitle?.isNotEmpty == true ? target.episodeTitle! : 'Season ${target.season} Episode ${target.episode}',
+            overview: target.episodeDescription ?? '',
+            stillPath: target.stillPath,
+            runtime: target.runtime,
+          );
+        }
+      } catch (_) {}
+    }
+
+    if (nextEp == null) {
       return const SizedBox.shrink();
     }
-    final nextNum = _currentEpisode + 1;
-    final nextEp = _episodes.firstWhere(
-      (e) => e.episodeNumber == nextNum,
-      orElse: () => _episodes.first,
-    );
 
     return Container(
       width: 290,
@@ -4451,7 +4614,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
               const SizedBox(width: 10),
               Expanded(
                 child: Text(
-                  'S$_currentSeason E$nextNum • ${nextEp.name}',
+                  'S$_currentSeason E${nextEp.episodeNumber} • ${nextEp.name}',
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: const TextStyle(color: Colors.white, fontSize: 13, fontWeight: FontWeight.bold),

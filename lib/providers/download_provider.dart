@@ -680,195 +680,233 @@ class DownloadProvider extends ChangeNotifier {
                       : 480)
           : await _getPreferredQualityHeight();
 
-      // Priority 1: NetMirror (Direct High-Speed MP4 CDN with Multi-Quality 1080p/720p/480p, Range 206 & Preferred Dub)
-      try {
-        final netMirrorStreams = await StreamExtractor.extractNetMirror(
-          type: mediaType,
-          tmdbId: mediaId,
-          season: season,
-          episode: episode,
-          preferredAudioLang: preferredAudioLangs.isNotEmpty ? preferredAudioLangs.first : null,
-        ).timeout(const Duration(seconds: 4));
+      // Parallel Multi-Source Candidate Extraction (10s timeout per source running concurrently)
+      await Future.wait([
+        // Priority 1: NetMirror (Direct High-Speed MP4 CDN with Multi-Quality 1080p/720p/480p, Range 206 & Preferred Dub)
+        () async {
+          try {
+            final netMirrorStreams = await StreamExtractor.extractNetMirror(
+              type: mediaType,
+              tmdbId: mediaId,
+              season: season,
+              episode: episode,
+              preferredAudioLang: preferredAudioLangs.isNotEmpty ? preferredAudioLangs.first : null,
+            ).timeout(const Duration(seconds: 10));
 
-        for (final s in netMirrorStreams) {
-          if (s.subtitles.isNotEmpty) availableSubs.addAll(s.subtitles);
-          for (final q in s.qualities) {
-            candidates.add(_DownloadCandidate(
-              url: q.url,
-              headers: s.headers,
-              isHls: false, // Direct progressive MP4 stream with byte-range 206!
-              qualityLabel: q.label,
-              serverName: 'StellarHD',
-              audioLanguage: s.language,
-              height: q.height > 0 ? q.height : 1080,
-            ));
+            for (final s in netMirrorStreams) {
+              if (s.subtitles.isNotEmpty) availableSubs.addAll(s.subtitles);
+              for (final q in s.qualities) {
+                candidates.add(_DownloadCandidate(
+                  url: q.url,
+                  headers: s.headers,
+                  isHls: false,
+                  qualityLabel: q.label,
+                  serverName: 'StellarHD',
+                  audioLanguage: s.language,
+                  height: q.height > 0 ? q.height : 1080,
+                ));
+              }
+              if (s.qualities.isEmpty && s.url.isNotEmpty) {
+                candidates.add(_DownloadCandidate(
+                  url: s.url,
+                  headers: s.headers,
+                  isHls: false,
+                  qualityLabel: s.qualityLabel ?? '1080p',
+                  serverName: 'StellarHD',
+                  audioLanguage: s.language,
+                  height: 1080,
+                ));
+              }
+            }
+          } catch (e) {
+            debugPrint('Download: NetMirror candidate error: $e');
           }
-          if (s.qualities.isEmpty && s.url.isNotEmpty) {
+        }(),
+
+        // Priority 2: NebulaHD & Cine4K (Direct High-Speed CDN with Full Muxed Audio)
+        () async {
+          try {
+            final cinejoyStreams = await StreamExtractor.extractCinejoy(
+              type: mediaType,
+              tmdbId: mediaId,
+              season: season,
+              episode: episode,
+              title: cleanTitle,
+            ).timeout(const Duration(seconds: 10));
+
+            for (final s in cinejoyStreams) {
+              if (s.subtitles.isNotEmpty) availableSubs.addAll(s.subtitles);
+              for (final q in s.qualities) {
+                candidates.add(_DownloadCandidate(
+                  url: q.url,
+                  headers: s.headers,
+                  isHls: true,
+                  qualityLabel: q.label,
+                  serverName: s.sourceName,
+                  audioLanguage: s.language,
+                  height: q.height > 0 ? q.height : 1080,
+                ));
+              }
+              if (s.qualities.isEmpty && s.url.isNotEmpty) {
+                candidates.add(_DownloadCandidate(
+                  url: s.url,
+                  headers: s.headers,
+                  isHls: true,
+                  qualityLabel: s.qualityLabel ?? '1080p Full HD',
+                  serverName: s.sourceName,
+                  audioLanguage: s.language,
+                  height: 1080,
+                ));
+              }
+            }
+          } catch (e) {
+            debugPrint('Download: Cinejoy / NebulaHD candidate error: $e');
+          }
+        }(),
+
+        // Priority 3: Meow (Telegram VPS 25k Channel Database)
+        () async {
+          try {
+            final telegramStreams = await StreamExtractor.extractTelegram(
+              type: mediaType,
+              tmdbId: mediaId,
+              season: season,
+              episode: episode,
+            ).timeout(const Duration(seconds: 10));
+
+            for (final s in telegramStreams) {
+              if (s.subtitles.isNotEmpty) availableSubs.addAll(s.subtitles);
+              for (final q in s.qualities) {
+                candidates.add(_DownloadCandidate(
+                  url: q.url,
+                  headers: s.headers,
+                  isHls: false,
+                  qualityLabel: q.label,
+                  serverName: 'Meow',
+                  audioLanguage: s.language,
+                  height: q.height > 0 ? q.height : 1080,
+                ));
+              }
+              if (s.qualities.isEmpty && s.url.isNotEmpty) {
+                candidates.add(_DownloadCandidate(
+                  url: s.url,
+                  headers: s.headers,
+                  isHls: s.type == 'hls' || s.url.contains('.m3u8'),
+                  qualityLabel: s.qualityLabel ?? '1080p',
+                  serverName: 'Meow',
+                  audioLanguage: s.language,
+                  height: 1080,
+                ));
+              }
+            }
+          } catch (e) {
+            debugPrint('Download: Meow Telegram candidate error: $e');
+          }
+        }(),
+
+        // Priority 4: Direct File Resolver
+        () async {
+          try {
+            final directFile = await StreamExtractor.extractDirectFileUrl(
+              type: mediaType,
+              tmdbId: mediaId,
+              season: season,
+              episode: episode,
+            ).timeout(const Duration(seconds: 10));
+            if (directFile != null && directFile.isNotEmpty) {
+              candidates.add(_DownloadCandidate(
+                url: directFile,
+                headers: {
+                  'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                },
+                isHls: directFile.contains('.m3u8'),
+                qualityLabel: '1080p',
+                serverName: 'DirectFile',
+                audioLanguage: 'Original',
+                height: 1080,
+              ));
+            }
+          } catch (_) {}
+        }(),
+
+        // Priority 5: Vidlink & Vidrock
+        () async {
+          try {
+            final vidlinkStream = await StreamExtractor.extractVidlink(
+              type: mediaType,
+              tmdbId: mediaId,
+              season: season,
+              episode: episode,
+            ).timeout(const Duration(seconds: 10));
+            if (vidlinkStream != null) {
+              if (vidlinkStream.subtitles.isNotEmpty) availableSubs.addAll(vidlinkStream.subtitles);
+              for (final q in vidlinkStream.qualities) {
+                candidates.add(_DownloadCandidate(
+                  url: q.url,
+                  headers: vidlinkStream.headers,
+                  isHls: q.url.contains('.m3u8') || vidlinkStream.type == 'hls',
+                  qualityLabel: q.label,
+                  serverName: 'Vidlink',
+                  audioLanguage: vidlinkStream.language,
+                  height: q.height > 0 ? q.height : 1080,
+                ));
+              }
+            }
+          } catch (_) {}
+        }(),
+
+        // Priority 6: Voidflix Backend Extraction
+        () async {
+          try {
+            final voidflixStream = await StreamExtractor.extractVoidflixBackend(
+              type: mediaType,
+              tmdbId: mediaId,
+              season: season,
+              episode: episode,
+            ).timeout(const Duration(seconds: 10));
+            if (voidflixStream != null) {
+              if (voidflixStream.subtitles.isNotEmpty) availableSubs.addAll(voidflixStream.subtitles);
+              for (final q in voidflixStream.qualities) {
+                final proxiedDownloadUrl = q.url.contains('?')
+                    ? '${q.url}&download=${Uri.encodeComponent('$title.mp4')}'
+                    : '${q.url}?download=${Uri.encodeComponent('$title.mp4')}';
+                candidates.add(_DownloadCandidate(
+                  url: proxiedDownloadUrl,
+                  headers: voidflixStream.headers,
+                  isHls: q.url.contains('.m3u8') || voidflixStream.type == 'hls',
+                  qualityLabel: q.label,
+                  serverName: 'Voidflix',
+                  audioLanguage: voidflixStream.language,
+                  height: q.height > 0 ? q.height : 1080,
+                ));
+              }
+            }
+          } catch (_) {}
+        }(),
+      ]);
+
+      if (candidates.isEmpty) {
+        // Retry with fallback before giving up
+        try {
+          final directRetry = await StreamExtractor.extractDirectFileUrl(
+            type: mediaType,
+            tmdbId: mediaId,
+            season: season,
+            episode: episode,
+          ).timeout(const Duration(seconds: 8));
+          if (directRetry != null && directRetry.isNotEmpty) {
             candidates.add(_DownloadCandidate(
-              url: s.url,
-              headers: s.headers,
-              isHls: false,
-              qualityLabel: s.qualityLabel ?? '1080p',
-              serverName: 'StellarHD',
-              audioLanguage: s.language,
+              url: directRetry,
+              headers: {'User-Agent': 'Mozilla/5.0'},
+              isHls: directRetry.contains('.m3u8'),
+              qualityLabel: '1080p',
+              serverName: 'DirectFile',
+              audioLanguage: 'Original',
               height: 1080,
             ));
           }
-        }
-      } catch (e) {
-        debugPrint('Download: NetMirror candidate error: $e');
+        } catch (_) {}
       }
-
-      // Priority 2: Meow (Telegram VPS 25k Channel Database with multi-audio & multi-quality direct MP4)
-      try {
-        final telegramStreams = await StreamExtractor.extractTelegram(
-          type: mediaType,
-          tmdbId: mediaId,
-          season: season,
-          episode: episode,
-        ).timeout(const Duration(seconds: 4));
-
-        for (final s in telegramStreams) {
-          if (s.subtitles.isNotEmpty) availableSubs.addAll(s.subtitles);
-          for (final q in s.qualities) {
-            candidates.add(_DownloadCandidate(
-              url: q.url,
-              headers: s.headers,
-              isHls: false, // Direct progressive MP4 stream with byte-range 206!
-              qualityLabel: q.label,
-              serverName: 'Meow',
-              audioLanguage: s.language,
-              height: q.height > 0 ? q.height : 1080,
-            ));
-          }
-          if (s.qualities.isEmpty && s.url.isNotEmpty) {
-            candidates.add(_DownloadCandidate(
-              url: s.url,
-              headers: s.headers,
-              isHls: s.type == 'hls' || s.url.contains('.m3u8'),
-              qualityLabel: s.qualityLabel ?? '1080p',
-              serverName: 'Meow',
-              audioLanguage: s.language,
-              height: 1080,
-            ));
-          }
-        }
-      } catch (e) {
-        debugPrint('Download: Meow Telegram candidate error: $e');
-      }
-
-      // Priority 2: NebulaHD & Cine4K (Direct High-Speed CDN with Full Muxed Audio)
-      try {
-        final cinejoyStreams = await StreamExtractor.extractCinejoy(
-          type: mediaType,
-          tmdbId: mediaId,
-          season: season,
-          episode: episode,
-          title: cleanTitle,
-        ).timeout(const Duration(seconds: 4));
-
-        for (final s in cinejoyStreams) {
-          if (s.subtitles.isNotEmpty) availableSubs.addAll(s.subtitles);
-          for (final q in s.qualities) {
-            candidates.add(_DownloadCandidate(
-              url: q.url,
-              headers: s.headers,
-              isHls: true,
-              qualityLabel: q.label,
-              serverName: s.sourceName,
-              audioLanguage: s.language,
-              height: q.height > 0 ? q.height : 1080,
-            ));
-          }
-          if (s.qualities.isEmpty && s.url.isNotEmpty) {
-            candidates.add(_DownloadCandidate(
-              url: s.url,
-              headers: s.headers,
-              isHls: true,
-              qualityLabel: s.qualityLabel ?? '1080p Full HD',
-              serverName: s.sourceName,
-              audioLanguage: s.language,
-              height: 1080,
-            ));
-          }
-        }
-      } catch (e) {
-        debugPrint('Download: Cinejoy / NebulaHD candidate error: $e');
-      }
-
-      // Priority 3: Direct File Resolver (Stremio direct MP4 addon)
-      try {
-        final directFile = await StreamExtractor.extractDirectFileUrl(
-          type: mediaType,
-          tmdbId: mediaId,
-          season: season,
-          episode: episode,
-        ).timeout(const Duration(seconds: 4));
-        if (directFile != null && directFile.isNotEmpty) {
-          candidates.add(_DownloadCandidate(
-            url: directFile,
-            headers: {
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-            },
-            isHls: directFile.contains('.m3u8'),
-            qualityLabel: '1080p',
-            serverName: 'DirectFile',
-            audioLanguage: 'Original',
-            height: 1080,
-          ));
-        }
-      } catch (_) {}
-
-      // Priority 4: Vidlink & Vidrock
-      try {
-        final vidlinkStream = await StreamExtractor.extractVidlink(
-          type: mediaType,
-          tmdbId: mediaId,
-          season: season,
-          episode: episode,
-        ).timeout(const Duration(seconds: 4));
-        if (vidlinkStream != null) {
-          if (vidlinkStream.subtitles.isNotEmpty) availableSubs.addAll(vidlinkStream.subtitles);
-          for (final q in vidlinkStream.qualities) {
-            candidates.add(_DownloadCandidate(
-              url: q.url,
-              headers: vidlinkStream.headers,
-              isHls: q.url.contains('.m3u8') || vidlinkStream.type == 'hls',
-              qualityLabel: q.label,
-              serverName: 'Vidlink',
-              audioLanguage: vidlinkStream.language,
-              height: q.height > 0 ? q.height : 1080,
-            ));
-          }
-        }
-      } catch (_) {}
-
-      // Priority 5: Voidflix backend extraction
-      try {
-        final voidflixStream = await StreamExtractor.extractVoidflixBackend(
-          type: mediaType,
-          tmdbId: mediaId,
-          season: season,
-          episode: episode,
-        ).timeout(const Duration(seconds: 4));
-        if (voidflixStream != null) {
-          if (voidflixStream.subtitles.isNotEmpty) availableSubs.addAll(voidflixStream.subtitles);
-          for (final q in voidflixStream.qualities) {
-            final proxiedDownloadUrl = q.url.contains('?')
-                ? '${q.url}&download=${Uri.encodeComponent('$title.mp4')}'
-                : '${q.url}?download=${Uri.encodeComponent('$title.mp4')}';
-            candidates.add(_DownloadCandidate(
-              url: proxiedDownloadUrl,
-              headers: voidflixStream.headers,
-              isHls: q.url.contains('.m3u8') || voidflixStream.type == 'hls',
-              qualityLabel: q.label,
-              serverName: 'Voidflix',
-              audioLanguage: voidflixStream.language,
-              height: q.height > 0 ? q.height : 1080,
-            ));
-          }
-        }
-      } catch (_) {}
 
       if (candidates.isEmpty) {
         throw Exception('No stream candidates available for offline download.');
