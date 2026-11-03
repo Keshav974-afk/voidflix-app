@@ -1,3 +1,5 @@
+import '../core/services/voidcast_service.dart';
+import 'dart:async';
 import '../providers/download_provider.dart';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
@@ -39,12 +41,34 @@ class _ProfileGateScreenState extends State<ProfileGateScreen> {
   List<MediaItem> _trendingPosters = [];
   String? _featuredLogoPath;
   String? _featuredSubtitle;
+  StreamSubscription? _voidCastGateSub;
 
   @override
   void initState() {
     super.initState();
     _isManaging = widget.initialEditMode;
     _fetchTrendingPosters();
+    _voidCastGateSub = VoidCastService().onCommand.listen((cmd) {
+      if (cmd['action'] == 'sync_user_state' && mounted) {
+        final payload = cmd['payload'] as Map<String, dynamic>? ?? {};
+        final profiles = payload['profiles'] as List<dynamic>? ?? [];
+        final activeId = payload['activeProfileId'] as String?;
+        final serverIndex = payload['serverIndex'] as int?;
+        if (profiles.isNotEmpty) {
+          context.read<ProfileProvider>().mergeProfilesFromSync(
+            profiles,
+            activeId: activeId,
+            serverIndex: serverIndex,
+          );
+        }
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _voidCastGateSub?.cancel();
+    super.dispose();
   }
 
   Future<void> _fetchTrendingPosters() async {

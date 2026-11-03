@@ -1,3 +1,4 @@
+import '../providers/profile_provider.dart';
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
@@ -41,7 +42,7 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
   final ScrollController _mainScrollController = ScrollController();
 
   // Explicit FocusNodes for the nav-rail items so we can arrow-key between them
-  final List<FocusNode> _navFocusNodes = List.generate(10, (_) => FocusNode());
+  final List<FocusNode> _navFocusNodes = List.generate(9, (_) => FocusNode());
   StreamSubscription? _voidCastSub;
 
   static const Map<int, String> _genreMap = {
@@ -128,6 +129,8 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
         } else if (k == 'home' && mounted) {
           _onNavItemSelected(1);
         }
+      } else if (action == 'sync_user_state') {
+        _handleIncomingUserStateSync(payload);
       }
     });
   }
@@ -140,6 +143,70 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
     }
     _mainScrollController.dispose();
     super.dispose();
+  }
+
+  void _handleIncomingUserStateSync(Map<String, dynamic> payload) async {
+    try {
+      final profiles = payload['profiles'] as List<dynamic>? ?? [];
+      final activeProfileId = payload['activeProfileId'] as String?;
+      final serverIndex = payload['serverIndex'] as int?;
+      final watchlist = payload['watchlist'] as List<dynamic>? ?? [];
+      final history = payload['history'] as List<dynamic>? ?? [];
+      final mobileName = payload['mobileName'] as String? ?? 'Phone';
+
+      if (profiles.isNotEmpty && mounted) {
+        await context.read<ProfileProvider>().mergeProfilesFromSync(
+          profiles,
+          activeId: activeProfileId,
+          serverIndex: serverIndex,
+        );
+      }
+
+      if (watchlist.isNotEmpty && mounted) {
+        await context.read<WatchlistProvider>().mergeWatchlistFromSync(watchlist);
+      }
+
+      if (history.isNotEmpty && mounted) {
+        await context.read<HistoryProvider>().mergeHistoryFromSync(history);
+      }
+
+      if (mounted) {
+        final active = context.read<ProfileProvider>().activeProfile;
+        context.read<MediaProvider>().fetchPersonalizedForProfile(active, force: true);
+        _showSyncToast('📱 Synced with $mobileName • Profiles, History & Watchlist updated');
+      }
+    } catch (e) {
+      debugPrint('[VoidCast] Sync handling error: $e');
+    }
+  }
+
+  void _showSyncToast(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).removeCurrentSnackBar();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        behavior: SnackBarBehavior.floating,
+        backgroundColor: const Color(0xFF1E1E2C),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(12),
+          side: const BorderSide(color: Color(0xFF00B4D8), width: 1.2),
+        ),
+        margin: const EdgeInsets.only(bottom: 24, left: 80, right: 80),
+        duration: const Duration(seconds: 4),
+        content: Row(
+          children: [
+            const Icon(Icons.sync_rounded, color: Color(0xFF00B4D8), size: 24),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Text(
+                message,
+                style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.bold),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 
   void _onNavItemSelected(int index) {
@@ -174,17 +241,6 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
       case 8:
         Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SettingsScreen()));
         break;
-      case 9:
-        TvModeService().setTvMode(false);
-        if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
-          SystemChrome.setPreferredOrientations([
-            DeviceOrientation.portraitUp,
-            DeviceOrientation.portraitDown,
-            DeviceOrientation.landscapeLeft,
-            DeviceOrientation.landscapeRight,
-          ]);
-        }
-        break;
     }
   }
 
@@ -199,7 +255,11 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
           backdropPath: item.backdropPath,
         ),
       ),
-    );
+    ).then((_) {
+      if (mounted) {
+        TvModeService().restoreSafeOrientations();
+      }
+    });
   }
 
   void _openDetail(MediaItem item) {
@@ -311,12 +371,6 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
       {'icon': Icons.sports_cricket_rounded, 'label': 'Sports & Live TV'},
       {'icon': Icons.cast_connected_rounded, 'label': 'Link Phone'},
       {'icon': Icons.settings_outlined, 'label': 'Settings'},
-      {
-        'icon': Icons.desktop_windows_rounded,
-        'label': (!kIsWeb && (Platform.isWindows || Platform.isLinux || Platform.isMacOS))
-            ? 'Desktop UI'
-            : 'Mobile UI',
-      },
     ];
 
     // Key handler: intercept up/down arrows and move focus within our list

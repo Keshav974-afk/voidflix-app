@@ -2262,6 +2262,14 @@ class _LiveChannelPlayerScreenState extends State<LiveChannelPlayerScreen> {
   }
 
   void _toggleOrientation() {
+    final isTv = TvModeService().isTvMode || TvModeService().isHardwareTv;
+    if (isTv) {
+      SystemChrome.setPreferredOrientations([
+        DeviceOrientation.landscapeLeft,
+        DeviceOrientation.landscapeRight,
+      ]);
+      return;
+    }
     setState(() => _isLandscape = !_isLandscape);
     if (_isLandscape) {
       SystemChrome.setPreferredOrientations([
@@ -2290,12 +2298,20 @@ class _LiveChannelPlayerScreenState extends State<LiveChannelPlayerScreen> {
     _hideControlsTimer?.cancel();
     _videoPlayerController?.dispose();
     // Restore orientation and system chrome on exit
-    SystemChrome.setPreferredOrientations([
-      DeviceOrientation.portraitUp,
-      DeviceOrientation.portraitDown,
-      DeviceOrientation.landscapeLeft,
-      DeviceOrientation.landscapeRight,
-    ]);
+    final isTv = TvModeService().isTvMode || TvModeService().isHardwareTv;
+    if (isTv) {
+      SystemChrome.setPreferredOrientations([
+        DeviceOrientation.landscapeLeft,
+        DeviceOrientation.landscapeRight,
+      ]);
+    } else {
+      SystemChrome.setPreferredOrientations([
+        DeviceOrientation.portraitUp,
+        DeviceOrientation.portraitDown,
+        DeviceOrientation.landscapeLeft,
+        DeviceOrientation.landscapeRight,
+      ]);
+    }
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     super.dispose();
   }

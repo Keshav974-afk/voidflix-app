@@ -815,19 +815,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
           // ═══════════════════════════════════════════════
           _buildCategoryHeader('TV & Casting'),
           if (tvMode.isHardwareTv) ...[
-            _buildSwitchTile(
+            _buildSettingTile(
               leading: Icons.tv_rounded,
+              onTap: () {},
               title: 'Android TV Leanback UI',
-              subtitle: tvMode.isTvMode
-                  ? 'Active (10-Foot Remote & D-pad Layout)'
-                  : 'Switch to TV 10-foot remote interface',
-              value: tvMode.isTvMode,
-              onChanged: (val) async {
-                await tvMode.setTvMode(val);
-                if (val && context.mounted) {
-                  Navigator.of(context).pop();
-                }
-              },
+              subtitle: 'Permanently Active for TV Screen',
+              trailing: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                decoration: BoxDecoration(
+                  color: AppTheme.primaryRed.withValues(alpha: 0.2),
+                  borderRadius: BorderRadius.circular(6),
+                  border: Border.all(color: AppTheme.primaryRed, width: 0.8),
+                ),
+                child: const Text('ACTIVE', style: TextStyle(color: AppTheme.primaryRed, fontSize: 11, fontWeight: FontWeight.bold)),
+              ),
             ),
             const Divider(height: 1, color: Color(0xFF1E1E1E)),
           ],

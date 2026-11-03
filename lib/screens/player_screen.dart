@@ -155,6 +155,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
   DateTime? _lastSeekTime;
   int _consecutiveBufferingStalls = 0;
   int _lastBufferingStallTime = 0;
+  int _lastUiPositionUpdateTime = 0;
+  final FocusNode _qualityFocusNode = FocusNode();
   bool _hasAutoDowngradedForNetwork = false;
 
   // Full-screen Zoom to fill system
@@ -450,11 +452,20 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
     // Release screen wakelock
     WakelockPlus.disable();
+    _qualityFocusNode.dispose();
 
-    // Restore portrait orientation and standard edge-to-edge UI
-    SystemChrome.setPreferredOrientations([
-      DeviceOrientation.portraitUp,
-    ]);
+    // Safely restore orientation: preserve landscape on Android TV
+    final isTvDevice = TvModeService().isTvMode || TvModeService().isHardwareTv;
+    if (isTvDevice) {
+      SystemChrome.setPreferredOrientations([
+        DeviceOrientation.landscapeLeft,
+        DeviceOrientation.landscapeRight,
+      ]);
+    } else {
+      SystemChrome.setPreferredOrientations([
+        DeviceOrientation.portraitUp,
+      ]);
+    }
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     super.dispose();
   }
@@ -1330,15 +1341,27 @@ class _PlayerScreenState extends State<PlayerScreen> {
         }
       }
 
-      setState(() {
-        if (_pendingSeekTarget == null) {
-          _currentPosition = val.position;
-        }
-        _totalDuration = val.duration;
-        _bufferedPosition = maxBuffered;
+      if (_pendingSeekTarget == null) {
+        _currentPosition = val.position;
+      }
+      _totalDuration = val.duration;
+      _bufferedPosition = maxBuffered;
+
+      final now = DateTime.now().millisecondsSinceEpoch;
+      final stateChanged = _isPlaying != val.isPlaying || _isBuffering != val.isBuffering;
+
+      // Throttle heavy setState calls: when controls are hidden, only update periodically
+      // or on state changes, eliminating the 10Hz CPU bottleneck on Android TV!
+      if (stateChanged || (_showControls && now - _lastUiPositionUpdateTime > 250) || (now - _lastUiPositionUpdateTime > 500)) {
+        _lastUiPositionUpdateTime = now;
+        setState(() {
+          _isPlaying = val.isPlaying;
+          _isBuffering = val.isBuffering;
+        });
+      } else {
         _isPlaying = val.isPlaying;
         _isBuffering = val.isBuffering;
-      });
+      }
 
       // Broadcast TV live playback progress to VoidCast phone remotes
       if (VoidCastService().isHostingTv) {
@@ -1919,10 +1942,18 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _disposeVideoController();
     WakelockPlus.disable();
 
-    // Cleanly restore portrait orientation
-    await SystemChrome.setPreferredOrientations([
-      DeviceOrientation.portraitUp,
-    ]);
+    // Cleanly restore orientation: keep landscape on Android TV
+    final isTvDevice = TvModeService().isTvMode || TvModeService().isHardwareTv;
+    if (isTvDevice) {
+      await SystemChrome.setPreferredOrientations([
+        DeviceOrientation.landscapeLeft,
+        DeviceOrientation.landscapeRight,
+      ]);
+    } else {
+      await SystemChrome.setPreferredOrientations([
+        DeviceOrientation.portraitUp,
+      ]);
+    }
     await SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
 
     await Future.delayed(const Duration(milliseconds: 120));
@@ -2603,60 +2634,110 @@ class _PlayerScreenState extends State<PlayerScreen> {
                     const SizedBox(height: 12),
                     const Divider(color: Colors.white12, height: 1),
                     const SizedBox(height: 12),
-                    // Bottom actions: Cancel & Apply pills
+                    // Bottom actions: Cancel & Apply pills (Fully TV D-pad focusable)
                     Row(
                       mainAxisAlignment: MainAxisAlignment.end,
                       children: [
                         // Cancel pill button
-                        InkWell(
-                          borderRadius: BorderRadius.circular(24),
-                          onTap: () => Navigator.pop(ctx),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 10),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF262626),
-                              borderRadius: BorderRadius.circular(24),
-                              border: Border.all(color: Colors.white24, width: 0.8),
-                            ),
-                            child: const Text(
-                              'Cancel',
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontWeight: FontWeight.w600,
-                                fontSize: 14,
+                        isTv
+                            ? TvFocusable(
+                                borderRadius: BorderRadius.circular(24),
+                                onPressed: () => Navigator.pop(ctx),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 10),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF262626),
+                                    borderRadius: BorderRadius.circular(24),
+                                    border: Border.all(color: Colors.white24, width: 0.8),
+                                  ),
+                                  child: const Text(
+                                    'Cancel',
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w600,
+                                      fontSize: 14,
+                                    ),
+                                  ),
+                                ),
+                              )
+                            : InkWell(
+                                borderRadius: BorderRadius.circular(24),
+                                onTap: () => Navigator.pop(ctx),
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 10),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF262626),
+                                    borderRadius: BorderRadius.circular(24),
+                                    border: Border.all(color: Colors.white24, width: 0.8),
+                                  ),
+                                  child: const Text(
+                                    'Cancel',
+                                    style: TextStyle(
+                                      color: Colors.white,
+                                      fontWeight: FontWeight.w600,
+                                      fontSize: 14,
+                                    ),
+                                  ),
+                                ),
                               ),
-                            ),
-                          ),
-                        ),
                         const SizedBox(width: 12),
                         // Apply pill button
-                        InkWell(
-                          borderRadius: BorderRadius.circular(24),
-                          onTap: () {
-                            if (tempAudioIndex != _selectedStreamIndex) {
-                              _selectAudioSource(tempAudioIndex);
-                            }
-                            if (tempSubtitle != _selectedSubtitle) {
-                              _selectSubtitle(tempSubtitle);
-                            }
-                            Navigator.pop(ctx);
-                          },
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(horizontal: 26, vertical: 10),
-                            decoration: BoxDecoration(
-                              color: Colors.white,
-                              borderRadius: BorderRadius.circular(24),
-                            ),
-                            child: const Text(
-                              'Apply',
-                              style: TextStyle(
-                                color: Colors.black,
-                                fontWeight: FontWeight.bold,
-                                fontSize: 14,
+                        isTv
+                            ? TvFocusable(
+                                borderRadius: BorderRadius.circular(24),
+                                glowColor: AppTheme.primaryRed,
+                                onPressed: () {
+                                  if (tempAudioIndex != _selectedStreamIndex) {
+                                    _selectAudioSource(tempAudioIndex);
+                                  }
+                                  if (tempSubtitle != _selectedSubtitle) {
+                                    _selectSubtitle(tempSubtitle);
+                                  }
+                                  Navigator.pop(ctx);
+                                },
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 26, vertical: 10),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white,
+                                    borderRadius: BorderRadius.circular(24),
+                                  ),
+                                  child: const Text(
+                                    'Apply',
+                                    style: TextStyle(
+                                      color: Colors.black,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 14,
+                                    ),
+                                  ),
+                                ),
+                              )
+                            : InkWell(
+                                borderRadius: BorderRadius.circular(24),
+                                onTap: () {
+                                  if (tempAudioIndex != _selectedStreamIndex) {
+                                    _selectAudioSource(tempAudioIndex);
+                                  }
+                                  if (tempSubtitle != _selectedSubtitle) {
+                                    _selectSubtitle(tempSubtitle);
+                                  }
+                                  Navigator.pop(ctx);
+                                },
+                                child: Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 26, vertical: 10),
+                                  decoration: BoxDecoration(
+                                    color: Colors.white,
+                                    borderRadius: BorderRadius.circular(24),
+                                  ),
+                                  child: const Text(
+                                    'Apply',
+                                    style: TextStyle(
+                                      color: Colors.black,
+                                      fontWeight: FontWeight.bold,
+                                      fontSize: 14,
+                                    ),
+                                  ),
+                                ),
                               ),
-                            ),
-                          ),
-                        ),
                       ],
                     ),
                   ],
@@ -5241,7 +5322,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                     ),
                                   ),
 
-                                  // Bottom Actions Row (Matching Screenshot 1: Clip, Speed, Episodes, Audio & Subtitles, Next Ep.)
+                                  // Bottom Actions Row (Quality, Server, Audio, Episodes, Next Ep, Speed)
                                   Padding(
                                     padding: const EdgeInsets.fromLTRB(16, 4, 16, 12),
                                     child: Row(
@@ -5249,10 +5330,38 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                       children: [
                                         if (_isNativeMode)
                                           _NetflixBarButton(
+                                            focusNode: _qualityFocusNode,
                                             icon: Icons.tune_rounded,
                                             label: 'Quality',
                                             onTap: _openQualitySheet,
                                           ),
+                                        _NetflixBarButton(
+                                          icon: Icons.dns_rounded,
+                                          label: 'Server',
+                                          onTap: _openServerPicker,
+                                        ),
+                                        _NetflixBarButton(
+                                          icon: Icons.chat_bubble_outline_rounded,
+                                          label: 'Audio & Subtitles',
+                                          onTap: _openAudioAndSubtitlesSheet,
+                                        ),
+                                        if (widget.mediaType == 'tv') ...[
+                                          _NetflixBarButton(
+                                            icon: Icons.view_carousel_outlined,
+                                            label: 'Episodes',
+                                            onTap: _openEpisodesSheet,
+                                          ),
+                                          _NetflixBarButton(
+                                            icon: Icons.skip_next_rounded,
+                                            label: 'Next Ep.',
+                                            onTap: _nextEpisode,
+                                          ),
+                                        ],
+                                        _NetflixBarButton(
+                                          icon: Icons.speed_rounded,
+                                          label: 'Speed (${_playbackSpeed == 1.0 ? '1x' : '${_playbackSpeed}x'})',
+                                          onTap: _openSpeedSheet,
+                                        ),
                                         if (isPc)
                                           _NetflixBarButton(
                                             icon: _isMuted || _volume == 0
@@ -5260,34 +5369,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                                 : (_volume > 0.5 ? Icons.volume_up_rounded : Icons.volume_down_rounded),
                                             label: _isMuted ? 'Mute' : '${(_volume * 100).round()}%',
                                             onTap: _toggleMute,
-                                          ),
-                                        _NetflixBarButton(
-                                          icon: Icons.speed_rounded,
-                                          label: 'Speed (${_playbackSpeed == 1.0 ? '1x' : '${_playbackSpeed}x'})',
-                                          onTap: _openSpeedSheet,
-                                        ),
-                                        if (widget.mediaType == 'tv')
-                                          _NetflixBarButton(
-                                            icon: Icons.view_carousel_outlined,
-                                            label: 'Episodes',
-                                            onTap: _openEpisodesSheet,
-                                          ),
-                                        _NetflixBarButton(
-                                          icon: Icons.chat_bubble_outline_rounded,
-                                          label: 'Audio & Subtitles',
-                                          onTap: _openAudioAndSubtitlesSheet,
-                                        ),
-                                        if (widget.mediaType == 'tv')
-                                          _NetflixBarButton(
-                                            icon: Icons.skip_next_rounded,
-                                            label: 'Next Ep.',
-                                            onTap: _nextEpisode,
-                                          )
-                                        else
-                                          _NetflixBarButton(
-                                            icon: Icons.dns_rounded,
-                                            label: 'Server',
-                                            onTap: _openServerPicker,
                                           ),
                                         if (_isNativeMode && !isTv)
                                           _NetflixBarButton(
@@ -7163,16 +7244,24 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _seekRelative(10);
       _revealControls();
     } else if (key == LogicalKeyboardKey.arrowUp) {
+      final isTv = TvModeService().isTvMode || TvModeService().isHardwareTv;
       if (!_showControls) {
         _revealControls();
-      } else {
+      } else if (!isTv) {
         _adjustVolume(0.05);
+      } else {
+        _revealControls();
+        _playerFocusNode.requestFocus();
       }
     } else if (key == LogicalKeyboardKey.arrowDown) {
+      final isTv = TvModeService().isTvMode || TvModeService().isHardwareTv;
       if (!_showControls) {
         _revealControls();
-      } else {
+      } else if (!isTv) {
         _adjustVolume(-0.05);
+      } else {
+        _revealControls();
+        _qualityFocusNode.requestFocus();
       }
     } else if (key == LogicalKeyboardKey.keyM) {
       _toggleMute();
@@ -7221,38 +7310,59 @@ class _NetflixBarButton extends StatelessWidget {
   final String label;
   final VoidCallback onTap;
   final Color? color;
+  final FocusNode? focusNode;
+  
 
   const _NetflixBarButton({
     required this.icon,
     required this.label,
     required this.onTap,
     this.color,
+    this.focusNode,
+    
   });
 
   @override
   Widget build(BuildContext context) {
     final effectiveColor = color ?? Colors.white;
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(6),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, color: effectiveColor, size: 18),
-            const SizedBox(width: 6),
-            Text(
-              label,
-              style: TextStyle(
-                color: effectiveColor,
-                fontSize: 13,
-                fontWeight: FontWeight.w500,
-              ),
+    final isTv = TvModeService().isTvMode || TvModeService().isHardwareTv;
+
+    final content = Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, color: effectiveColor, size: 18),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: TextStyle(
+              color: effectiveColor,
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
             ),
-          ],
-        ),
+          ),
+        ],
       ),
+    );
+
+    if (isTv) {
+      return TvFocusable(
+        focusNode: focusNode,
+        
+        scaleFactor: 1.08,
+        glowColor: AppTheme.primaryRed,
+        borderRadius: BorderRadius.circular(8),
+        onPressed: onTap,
+        child: content,
+      );
+    }
+
+    return InkWell(
+      focusNode: focusNode,
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(8),
+      child: content,
     );
   }
 }

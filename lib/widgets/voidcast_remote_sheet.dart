@@ -1,3 +1,6 @@
+import '../providers/profile_provider.dart';
+import '../providers/watchlist_provider.dart';
+import '../providers/history_provider.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -56,6 +59,27 @@ class _VoidCastRemoteSheetState extends State<VoidCastRemoteSheet>
     super.dispose();
   }
 
+  void _syncUserDataToTv() {
+    try {
+      final profileProv = context.read<ProfileProvider>();
+      final watchlistProv = context.read<WatchlistProvider>();
+      final historyProv = context.read<HistoryProvider>();
+
+      final syncPayload = {
+        'profiles': profileProv.profiles.map((p) => p.toJson()).toList(),
+        'activeProfileId': profileProv.activeProfileOrNull?.id,
+        'serverIndex': profileProv.selectedServerIndex,
+        'watchlist': watchlistProv.items.map((m) => m.toJson()).toList(),
+        'history': historyProv.items.map((h) => h.toJson()).toList(),
+        'mobileName': VoidCastService().myDeviceName,
+      };
+
+      VoidCastService().syncStateToTv(syncPayload);
+    } catch (e) {
+      debugPrint('[VoidCast] Sync error: $e');
+    }
+  }
+
   Future<void> _handleConnectWithCode() async {
     final code = _codeController.text.trim();
     if (code.length != 6) {
@@ -75,6 +99,8 @@ class _VoidCastRemoteSheetState extends State<VoidCastRemoteSheet>
         _isConnecting = false;
         if (!success) {
           _errorMessage = 'Could not find TV. Make sure Voidflix is open on your TV.';
+        } else {
+          _syncUserDataToTv();
         }
       });
     }
@@ -93,6 +119,8 @@ class _VoidCastRemoteSheetState extends State<VoidCastRemoteSheet>
         _isConnecting = false;
         if (!success) {
           _errorMessage = 'Could not connect directly to ${tv.name}.';
+        } else {
+          _syncUserDataToTv();
         }
       });
     }

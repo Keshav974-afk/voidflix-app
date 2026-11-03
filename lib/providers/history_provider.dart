@@ -72,6 +72,33 @@ class HistoryProvider extends ChangeNotifier {
     await _saveToPrefs();
   }
 
+  Future<void> mergeHistoryFromSync(List<dynamic> rawList) async {
+    final List<WatchProgress> incoming = [];
+    for (final raw in rawList) {
+      if (raw is Map<String, dynamic>) {
+        try {
+          incoming.add(WatchProgress.fromJson(raw));
+        } catch (_) {}
+      }
+    }
+    if (incoming.isEmpty) return;
+
+    final Map<int, WatchProgress> map = {};
+    for (final h in _history) {
+      map[h.id] = h;
+    }
+    for (final inc in incoming) {
+      if (!map.containsKey(inc.id) || inc.lastWatched.isAfter(map[inc.id]!.lastWatched)) {
+        map[inc.id] = inc;
+      }
+    }
+
+    _history = map.values.toList();
+    _history.sort((a, b) => b.lastWatched.compareTo(a.lastWatched));
+    notifyListeners();
+    await _saveToPrefs();
+  }
+
   Future<void> clearHistory() async {
     _history.clear();
     notifyListeners();

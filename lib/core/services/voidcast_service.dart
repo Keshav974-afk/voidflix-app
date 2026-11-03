@@ -617,6 +617,11 @@ class VoidCastService extends ChangeNotifier {
   /// Remote search keyboard text input to TV
   void sendSearchText(String query) => _sendCommand('search', {'query': query});
 
+  /// Syncs profiles, names, avatar, history, and preferences to TV
+  void syncStateToTv(Map<String, dynamic> payload) {
+    _sendCommand('sync_user_state', payload);
+  }
+
   void exitPlayerOnTv() => _sendCommand('exit', {});
 
   // ==========================================

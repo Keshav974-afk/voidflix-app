@@ -18,7 +18,10 @@ import android.media.MediaFormat
 import android.media.MediaMuxer
 import android.media.MediaScannerConnection
 import android.app.PictureInPictureParams
+import android.content.pm.ActivityInfo
+import android.content.pm.PackageManager
 import android.content.res.Configuration
+import android.os.Bundle
 import android.util.Rational
 import java.io.File
 import java.nio.ByteBuffer
@@ -29,6 +32,42 @@ class MainActivity : FlutterActivity() {
     private var pendingSpeechResult: MethodChannel.Result? = null
     private var wakeLock: PowerManager.WakeLock? = null
     private var multicastLock: android.net.wifi.WifiManager.MulticastLock? = null
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        if (isTelevisionDevice()) {
+            try {
+                requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+            } catch (_: Exception) {}
+        }
+    }
+
+    private fun isTelevisionDevice(): Boolean {
+        try {
+            val uiModeManager = getSystemService(Context.UI_MODE_SERVICE) as? android.app.UiModeManager
+            if (uiModeManager?.currentModeType == Configuration.UI_MODE_TYPE_TELEVISION) return true
+            if (packageManager.hasSystemFeature(PackageManager.FEATURE_LEANBACK)) return true
+            if (packageManager.hasSystemFeature(PackageManager.FEATURE_TELEVISION)) return true
+            if (packageManager.hasSystemFeature("android.hardware.type.television")) return true
+            if (packageManager.hasSystemFeature("amazon.hardware.fire_tv")) return true
+
+            val hasTouch = packageManager.hasSystemFeature(PackageManager.FEATURE_TOUCHSCREEN)
+            if (!hasTouch) return true
+
+            val brand = (Build.BRAND ?: "").lowercase()
+            val manufacturer = (Build.MANUFACTURER ?: "").lowercase()
+            val model = (Build.MODEL ?: "").lowercase()
+            val product = (Build.PRODUCT ?: "").lowercase()
+            val tvKeywords = listOf("tv", "smarttv", "tcl", "blaupunkt", "hisense", "aft", "box", "bravia", "mstar", "realtek", "amlogic", "skyworth", "changhong", "haier", "vestel", "konka", "droidtv")
+            if (tvKeywords.any { brand.contains(it) || manufacturer.contains(it) || model.contains(it) || product.contains(it) }) {
+                val dm = resources.displayMetrics
+                if (dm.widthPixels >= dm.heightPixels) {
+                    return true
+                }
+            }
+        } catch (_: Exception) {}
+        return false
+    }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -227,15 +266,7 @@ class MainActivity : FlutterActivity() {
                     }
                 }
                 "isTelevision" -> {
-                    try {
-                        val uiModeManager = getSystemService(Context.UI_MODE_SERVICE) as? android.app.UiModeManager
-                        val isTvUi = uiModeManager?.currentModeType == Configuration.UI_MODE_TYPE_TELEVISION
-                        val hasLeanback = packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_LEANBACK)
-                        val hasFireTv = packageManager.hasSystemFeature("amazon.hardware.fire_tv")
-                        result.success(isTvUi || hasLeanback || hasFireTv)
-                    } catch (e: Exception) {
-                        result.success(false)
-                    }
+                    result.success(isTelevisionDevice())
                 }
                 "acquireMulticastLock" -> {
                     try {

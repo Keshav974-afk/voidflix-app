@@ -352,6 +352,52 @@ class ProfileProvider extends ChangeNotifier {
     return profile;
   }
 
+  Future<void> mergeProfilesFromSync(
+    List<dynamic> rawProfiles, {
+    String? activeId,
+    int? serverIndex,
+  }) async {
+    final prefs = await SharedPreferences.getInstance();
+    final List<UserProfile> incoming = [];
+    for (final raw in rawProfiles) {
+      if (raw is Map<String, dynamic>) {
+        try {
+          incoming.add(UserProfile.fromJson(raw));
+        } catch (_) {}
+      }
+    }
+    if (incoming.isEmpty) return;
+
+    final Map<String, UserProfile> merged = {};
+    for (final p in _profiles) {
+      merged[p.id] = p;
+    }
+    for (final inc in incoming) {
+      merged[inc.id] = inc;
+    }
+
+    _profiles = merged.values.toList();
+    await _saveProfilesList();
+
+    if (activeId != null && merged.containsKey(activeId)) {
+      _activeProfile = merged[activeId];
+      await prefs.setString(_keyProfile, activeId);
+    } else if (_activeProfile == null && _profiles.isNotEmpty) {
+      _activeProfile = _profiles.first;
+      await prefs.setString(_keyProfile, _activeProfile!.id);
+    }
+
+    if (serverIndex != null && serverIndex >= 0) {
+      _selectedServerIndex = serverIndex;
+      await prefs.setInt(_keyServer, serverIndex);
+    }
+
+    _globalOnboardingCompleted = true;
+    await prefs.setBool(_keyGlobalOnboarding, true);
+
+    notifyListeners();
+  }
+
   Future<void> updateProfilePreferences(
     String id, {
     List<String>? preferredLanguages,

@@ -69,6 +69,30 @@ class WatchlistProvider extends ChangeNotifier {
     await _saveToPrefs();
   }
 
+  Future<void> mergeWatchlistFromSync(List<dynamic> rawList) async {
+    final List<MediaItem> incoming = [];
+    for (final raw in rawList) {
+      if (raw is Map<String, dynamic>) {
+        try {
+          incoming.add(MediaItem.fromJson(raw));
+        } catch (_) {}
+      }
+    }
+    if (incoming.isEmpty) return;
+
+    final Map<int, MediaItem> map = {};
+    for (final item in _items) {
+      map[item.id] = item;
+    }
+    for (final inc in incoming) {
+      map[inc.id] = inc;
+    }
+
+    _items = map.values.toList();
+    notifyListeners();
+    await _saveToPrefs();
+  }
+
   Future<void> clearWatchlist() async {
     _items.clear();
     notifyListeners();

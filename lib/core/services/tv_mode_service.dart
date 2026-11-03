@@ -34,29 +34,47 @@ class TvModeService extends ChangeNotifier {
 
     try {
       final prefs = await SharedPreferences.getInstance();
-      if (_isHardwareTv) {
-        // Genuine Android TV / Google TV / Fire TV hardware -> ALWAYS auto-enable TV UI
+      final savedPref = prefs.getBool(_prefKey);
+      if (_isHardwareTv || savedPref == true) {
         _isTvMode = true;
       } else {
-        // Mobile phones & tablets -> strictly disable TV mode
         _isTvMode = false;
-        await prefs.remove(_prefKey);
       }
     } catch (_) {
       _isTvMode = _isHardwareTv;
+    }
+
+    if (_isTvMode && !kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
+      try {
+        await SystemChrome.setPreferredOrientations([
+          DeviceOrientation.landscapeLeft,
+          DeviceOrientation.landscapeRight,
+        ]);
+      } catch (_) {}
     }
 
     _initialized = true;
     notifyListeners();
   }
 
-  Future<void> setTvMode(bool enabled) async {
-    // Strictly disallow TV Mode on mobile devices
-    if (!_isHardwareTv) {
-      _isTvMode = false;
-      notifyListeners();
-      return;
+  Future<void> restoreSafeOrientations() async {
+    if (!kIsWeb && (Platform.isAndroid || Platform.isIOS)) {
+      try {
+        if (_isTvMode || _isHardwareTv) {
+          await SystemChrome.setPreferredOrientations([
+            DeviceOrientation.landscapeLeft,
+            DeviceOrientation.landscapeRight,
+          ]);
+        } else {
+          await SystemChrome.setPreferredOrientations([
+            DeviceOrientation.portraitUp,
+          ]);
+        }
+      } catch (_) {}
     }
+  }
+
+  Future<void> setTvMode(bool enabled) async {
     if (_isTvMode == enabled) return;
     _isTvMode = enabled;
     notifyListeners();
@@ -65,6 +83,8 @@ class TvModeService extends ChangeNotifier {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool(_prefKey, enabled);
     } catch (_) {}
+
+    await restoreSafeOrientations();
   }
 
   Future<void> toggleTvMode() async {
