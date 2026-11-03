@@ -4,6 +4,7 @@ import '../providers/history_provider.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:cached_network_image/cached_network_image.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../core/services/voidcast_service.dart';
 
 class VoidCastRemoteSheet extends StatefulWidget {
@@ -59,24 +60,50 @@ class _VoidCastRemoteSheetState extends State<VoidCastRemoteSheet>
     super.dispose();
   }
 
-  void _syncUserDataToTv() {
+    Future<void> _syncUserDataToTv() async {
     try {
       final profileProv = context.read<ProfileProvider>();
       final watchlistProv = context.read<WatchlistProvider>();
       final historyProv = context.read<HistoryProvider>();
+      final prefs = await SharedPreferences.getInstance();
+
+      final activeProfile = profileProv.activeProfileOrNull;
+      final prefAudio = prefs.getString('voidflix_preferred_audio_lang') ?? activeProfile?.preferredAudioLang;
+      final prefSub = prefs.getString('voidflix_preferred_sub_lang') ?? activeProfile?.preferredSubtitleLang;
+      final prefQuality = prefs.getString('voidflix_preferred_quality');
+      final serverIdx = prefs.getInt('voidflix_preferred_server_index') ?? profileProv.selectedServerIndex;
+
+      final subSize = prefs.getInt('sub_size');
+      final subTextColor = prefs.getString('sub_text_color');
+      final subEdgeStyle = prefs.getString('sub_edge_style');
+      final subEdgeColor = prefs.getString('sub_edge_color');
+      final subBgColor = prefs.getString('sub_bg_color');
+      final subBgTrans = prefs.getBool('sub_bg_transparent');
 
       final syncPayload = {
         'profiles': profileProv.profiles.map((p) => p.toJson()).toList(),
-        'activeProfileId': profileProv.activeProfileOrNull?.id,
-        'serverIndex': profileProv.selectedServerIndex,
+        'activeProfileId': activeProfile?.id,
+        'serverIndex': serverIdx,
         'watchlist': watchlistProv.items.map((m) => m.toJson()).toList(),
         'history': historyProv.items.map((h) => h.toJson()).toList(),
+        'preferences': {
+          'preferredAudioLang': prefAudio,
+          'preferredSubtitleLang': prefSub,
+          'preferredQuality': prefQuality,
+          'serverIndex': serverIdx,
+          'sub_size': subSize,
+          'sub_text_color': subTextColor,
+          'sub_edge_style': subEdgeStyle,
+          'sub_edge_color': subEdgeColor,
+          'sub_bg_color': subBgColor,
+          'sub_bg_transparent': subBgTrans,
+        },
         'mobileName': VoidCastService().myDeviceName,
       };
 
       VoidCastService().syncStateToTv(syncPayload);
     } catch (e) {
-      debugPrint('[VoidCast] Sync error: $e');
+      debugPrint('[VoidCast] Sync error: ');
     }
   }
 

@@ -1,4 +1,5 @@
 import '../providers/profile_provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:async';
 import 'dart:io';
 import 'package:flutter/foundation.dart';
@@ -101,6 +102,14 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
           final poster = payload['poster']?.toString();
           final season = int.tryParse(payload['season']?.toString() ?? '1') ?? 1;
           final episode = int.tryParse(payload['episode']?.toString() ?? '1') ?? 1;
+          final position = (payload['position'] as num?)?.toDouble() ?? 0.0;
+          final audioLanguage = payload['audioLanguage'] as String?;
+          final audioIndex = (payload['audioIndex'] as num?)?.toInt();
+          final subtitleUrl = payload['subtitleUrl'] as String?;
+          final subtitleLanguage = payload['subtitleLanguage'] as String?;
+          final subtitleLabel = payload['subtitleLabel'] as String?;
+          final serverIndex = (payload['serverIndex'] as num?)?.toInt();
+          final qualityIndex = (payload['qualityIndex'] as num?)?.toInt();
 
           Navigator.of(context).push(
             MaterialPageRoute(
@@ -111,6 +120,14 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
                 season: season,
                 episode: episode,
                 posterPath: poster,
+                startPositionSeconds: position,
+                initialAudioLanguage: audioLanguage,
+                initialAudioIndex: audioIndex,
+                initialSubtitleUrl: subtitleUrl,
+                initialSubtitleLanguage: subtitleLanguage,
+                initialSubtitleLabel: subtitleLabel,
+                initialServerIndex: serverIndex,
+                initialQualityIndex: qualityIndex,
               ),
             ),
           );
@@ -152,6 +169,7 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
       final serverIndex = payload['serverIndex'] as int?;
       final watchlist = payload['watchlist'] as List<dynamic>? ?? [];
       final history = payload['history'] as List<dynamic>? ?? [];
+      final preferences = payload['preferences'] as Map<String, dynamic>? ?? {};
       final mobileName = payload['mobileName'] as String? ?? 'Phone';
 
       if (profiles.isNotEmpty && mounted) {
@@ -170,10 +188,43 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
         await context.read<HistoryProvider>().mergeHistoryFromSync(history);
       }
 
+      // Persist synced global preferences & subtitle settings to TV storage
+      final prefs = await SharedPreferences.getInstance();
+      if (preferences.isNotEmpty) {
+        final prefAudio = preferences['preferredAudioLang'] as String?;
+        final prefSub = preferences['preferredSubtitleLang'] as String?;
+        final prefQuality = preferences['preferredQuality'] as String?;
+        final prefServer = preferences['serverIndex'] as int?;
+
+        if (prefAudio != null && prefAudio.isNotEmpty) {
+          await prefs.setString('voidflix_preferred_audio_lang', prefAudio);
+        }
+        if (prefSub != null && prefSub.isNotEmpty) {
+          await prefs.setString('voidflix_preferred_sub_lang', prefSub);
+        }
+        if (prefQuality != null && prefQuality.isNotEmpty) {
+          await prefs.setString('voidflix_preferred_quality', prefQuality);
+        }
+        if (prefServer != null) {
+          await prefs.setInt('voidflix_preferred_server_index', prefServer);
+        }
+
+        // Subtitle appearance preferences
+        if (preferences['sub_size'] != null) await prefs.setInt('sub_size', preferences['sub_size'] as int);
+        if (preferences['sub_text_color'] != null) await prefs.setString('sub_text_color', preferences['sub_text_color'] as String);
+        if (preferences['sub_edge_style'] != null) await prefs.setString('sub_edge_style', preferences['sub_edge_style'] as String);
+        if (preferences['sub_edge_color'] != null) await prefs.setString('sub_edge_color', preferences['sub_edge_color'] as String);
+        if (preferences['sub_bg_color'] != null) await prefs.setString('sub_bg_color', preferences['sub_bg_color'] as String);
+        if (preferences['sub_bg_transparent'] != null) await prefs.setBool('sub_bg_transparent', preferences['sub_bg_transparent'] as bool);
+      }
+
       if (mounted) {
         final active = context.read<ProfileProvider>().activeProfile;
         context.read<MediaProvider>().fetchPersonalizedForProfile(active, force: true);
-        _showSyncToast('📱 Synced with $mobileName • Profiles, History & Watchlist updated');
+        final audioLabel = preferences['preferredAudioLang'] ?? 'Default';
+        final subLabel = preferences['preferredSubtitleLang'] ?? 'Default';
+        final qualityLabel = preferences['preferredQuality'] ?? 'High';
+        _showSyncToast('📱 Synced with $mobileName • Audio: $audioLabel, Subs: $subLabel, Quality: $qualityLabel');
       }
     } catch (e) {
       debugPrint('[VoidCast] Sync handling error: $e');

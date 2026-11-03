@@ -49,6 +49,15 @@ class PlayerScreen extends StatefulWidget {
   final String? backdropPath;
   final String? localFilePath;
   final String? localSubtitlePath;
+  final double? startPositionSeconds;
+  final String? initialAudioLanguage;
+  final int? initialAudioIndex;
+  final String? initialSubtitleUrl;
+  final String? initialSubtitleLanguage;
+  final String? initialSubtitleLabel;
+  final int? initialServerIndex;
+  final int? initialQualityIndex;
+  final String? initialQualityLabel;
 
   const PlayerScreen({
     super.key,
@@ -61,6 +70,15 @@ class PlayerScreen extends StatefulWidget {
     this.backdropPath,
     this.localFilePath,
     this.localSubtitlePath,
+    this.startPositionSeconds,
+    this.initialAudioLanguage,
+    this.initialAudioIndex,
+    this.initialSubtitleUrl,
+    this.initialSubtitleLanguage,
+    this.initialSubtitleLabel,
+    this.initialServerIndex,
+    this.initialQualityIndex,
+    this.initialQualityLabel,
   });
 
   @override
@@ -131,6 +149,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
   // Qualities system (Netflix feature)
   List<StreamQuality> _availableQualities = [];
   int _selectedQualityIndex = 0;
+
+  // Pending initial state for Cast / Sync
+  double? _pendingStartPositionSeconds;
+  String? _pendingAudioLanguage;
+  int? _pendingAudioIndex;
+  String? _pendingSubtitleUrl;
+  String? _pendingSubtitleLanguage;
+  int? _pendingQualityIndex;
 
   // Web fallback player state
   WebViewController? _webViewController;
@@ -321,9 +347,18 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _currentSeason = widget.season;
     _currentEpisode = widget.episode;
     final savedServer = context.read<ProfileProvider>().selectedServerIndex;
-    _selectedServerIndex = (savedServer >= 0 && savedServer < ServerConfig.servers.length)
-        ? savedServer
-        : 0;
+    _selectedServerIndex = (widget.initialServerIndex != null && widget.initialServerIndex! >= 0 && widget.initialServerIndex! < ServerConfig.servers.length)
+        ? widget.initialServerIndex!
+        : ((savedServer >= 0 && savedServer < ServerConfig.servers.length) ? savedServer : 0);
+    if (widget.initialServerIndex != null) {
+      _userExplicitlySelectedServer = true;
+    }
+    _pendingStartPositionSeconds = widget.startPositionSeconds;
+    _pendingAudioLanguage = widget.initialAudioLanguage;
+    _pendingAudioIndex = widget.initialAudioIndex;
+    _pendingSubtitleUrl = widget.initialSubtitleUrl;
+    _pendingSubtitleLanguage = widget.initialSubtitleLanguage;
+    _pendingQualityIndex = widget.initialQualityIndex;
 
     _partyMemberId = 'usr_${DateTime.now().millisecondsSinceEpoch % 100000}';
     final activeProfile = context.read<ProfileProvider>().activeProfileOrNull;
@@ -346,7 +381,71 @@ class _PlayerScreenState extends State<PlayerScreen> {
       final action = cmd['action'] as String? ?? '';
       final payload = cmd['payload'] as Map<String, dynamic>? ?? {};
 
-      if (action == 'pause') {
+      if (action == 'play') {
+        final newTmdbId = int.tryParse(payload['tmdbId']?.toString() ?? '0') ?? 0;
+        final newTitle = payload['title']?.toString() ?? '';
+        final newType = payload['type']?.toString() ?? 'movie';
+        final newSeason = int.tryParse(payload['season']?.toString() ?? '1') ?? 1;
+        final newEpisode = int.tryParse(payload['episode']?.toString() ?? '1') ?? 1;
+        final newPos = (payload['position'] as num?)?.toDouble() ?? 0.0;
+        final newAudioLang = payload['audioLanguage'] as String?;
+        final newAudioIdx = (payload['audioIndex'] as num?)?.toInt();
+        final newSubUrl = payload['subtitleUrl'] as String?;
+        final newSubLang = payload['subtitleLanguage'] as String?;
+        final newServerIdx = (payload['serverIndex'] as num?)?.toInt();
+        final newQualityIdx = (payload['qualityIndex'] as num?)?.toInt();
+
+        if (newTmdbId == widget.mediaId && newSeason == _currentSeason && newEpisode == _currentEpisode) {
+          if (newPos > 0 && _videoPlayerController != null) {
+            _videoPlayerController!.seekTo(Duration(seconds: newPos.toInt()));
+          }
+          if (newAudioLang != null && _directStreams.isNotEmpty) {
+            final matchIdx = _directStreams.indexWhere((s) => LanguageUtils.matches(s.language, newAudioLang));
+            if (matchIdx != -1 && matchIdx != _selectedStreamIndex) {
+              _selectAudioSource(matchIdx);
+            }
+          }
+          if (newSubUrl != null) {
+            if (newSubUrl == 'off' || newSubLang == 'Off') {
+              setState(() {
+                _selectedSubtitle = null;
+                _currentCues = [];
+                _activeCueText = null;
+              });
+            } else {
+              final sub = _subtitles.firstWhere(
+                (s) => s.url == newSubUrl || LanguageUtils.matches(s.language, newSubLang ?? ''),
+                orElse: () => _subtitles.first,
+              );
+              _selectSubtitle(sub);
+            }
+          }
+          if (!_isPlaying && _videoPlayerController != null) {
+            _videoPlayerController!.play();
+            setState(() => _isPlaying = true);
+          }
+        } else if (mounted) {
+          Navigator.of(context).pushReplacement(
+            MaterialPageRoute(
+              builder: (_) => PlayerScreen(
+                mediaId: newTmdbId,
+                mediaTitle: newTitle,
+                mediaType: newType,
+                season: newSeason,
+                episode: newEpisode,
+                posterPath: payload['poster']?.toString(),
+                startPositionSeconds: newPos,
+                initialAudioLanguage: newAudioLang,
+                initialAudioIndex: newAudioIdx,
+                initialSubtitleUrl: newSubUrl,
+                initialSubtitleLanguage: newSubLang,
+                initialServerIndex: newServerIdx,
+                initialQualityIndex: newQualityIdx,
+              ),
+            ),
+          );
+        }
+      } else if (action == 'pause') {
         final controller = _videoPlayerController;
         if (controller != null && controller.value.isPlaying) {
           controller.pause();
@@ -490,7 +589,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _availableQualities = [
         StreamQuality(label: 'Offline (Downloaded)', height: 1080, url: filePath),
       ];
-      _selectedQualityIndex = 0;
+      _selectedQualityIndex = (_pendingQualityIndex != null && _availableQualities.isNotEmpty)
+          ? _pendingQualityIndex!.clamp(0, _availableQualities.length - 1)
+          : 0;
+      _pendingQualityIndex = null;
     });
 
     try {
@@ -689,10 +791,15 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _selectedServerIndex = safeIdx;
     }
 
+    Duration? initialPos;
+    if (_pendingStartPositionSeconds != null && _pendingStartPositionSeconds! > 0) {
+      initialPos = Duration(milliseconds: (_pendingStartPositionSeconds! * 1000).round());
+    }
+
     _triedNativeServerIndices.clear();
     final server = ServerConfig.servers[safeIdx];
     if (server.isDirectPlay) {
-      await _loadServerDirect(safeIdx);
+      await _loadServerDirect(safeIdx, startPosition: initialPos);
     } else {
       if (_isDeveloperMode) {
         _loadWebEmbed();
@@ -1042,11 +1149,24 @@ class _PlayerScreenState extends State<PlayerScreen> {
           ...preferredList,
         ];
 
-        // 1. Pick audio stream index with user priority (profile -> English -> any)
-        final chosenAudioIdx = LanguageUtils.pickBestAudioIndex(
-          streams,
-          preferredLangs: audioPrefs,
-        );
+        // 1. Pick audio stream index with user priority (initial cast audio -> profile -> English -> any)
+        int chosenAudioIdx = -1;
+        if (_pendingAudioLanguage != null && _pendingAudioLanguage!.isNotEmpty) {
+          final mIdx = streams.indexWhere(
+            (s) => LanguageUtils.matches(s.language, _pendingAudioLanguage!) ||
+                   LanguageUtils.matches(s.sourceName, _pendingAudioLanguage!),
+          );
+          if (mIdx != -1) chosenAudioIdx = mIdx;
+        }
+        if (chosenAudioIdx == -1 && _pendingAudioIndex != null && _pendingAudioIndex! >= 0 && _pendingAudioIndex! < streams.length) {
+          chosenAudioIdx = _pendingAudioIndex!;
+        }
+        if (chosenAudioIdx == -1) {
+          chosenAudioIdx = LanguageUtils.pickBestAudioIndex(
+            streams,
+            preferredLangs: audioPrefs,
+          );
+        }
         _selectedStreamIndex = chosenAudioIdx;
 
         // Aggregate subtitles from all sources
@@ -1079,14 +1199,39 @@ class _PlayerScreenState extends State<PlayerScreen> {
         }
         _subtitles = allSubs;
 
-        // 2. Pick subtitle with user priority (profile -> English -> any)
-        final bestSub = LanguageUtils.pickBestSubtitle(
-          allSubs,
-          preferredLangs: subPrefs,
-        );
-        if (bestSub != null) {
-          _selectSubtitle(bestSub);
+        // 2. Pick subtitle with user priority (initial cast subtitle -> profile -> English -> any)
+        if (_pendingSubtitleUrl == 'off' || _pendingSubtitleLanguage == 'Off') {
+          _selectedSubtitle = null;
+          _currentCues = [];
+          _activeCueText = null;
+        } else {
+          SubtitleTrack? chosenSub;
+          if (_pendingSubtitleUrl != null && _pendingSubtitleUrl!.isNotEmpty) {
+            chosenSub = allSubs.cast<SubtitleTrack?>().firstWhere(
+              (s) => s?.url == _pendingSubtitleUrl,
+              orElse: () => null,
+            );
+          }
+          if (chosenSub == null && _pendingSubtitleLanguage != null && _pendingSubtitleLanguage!.isNotEmpty) {
+            chosenSub = allSubs.cast<SubtitleTrack?>().firstWhere(
+              (s) => s != null && LanguageUtils.matches(s.language, _pendingSubtitleLanguage!),
+              orElse: () => null,
+            );
+          }
+          chosenSub ??= LanguageUtils.pickBestSubtitle(
+            allSubs,
+            preferredLangs: subPrefs,
+          );
+          if (chosenSub != null) {
+            _selectSubtitle(chosenSub);
+          }
         }
+
+        _pendingStartPositionSeconds = null;
+        _pendingAudioLanguage = null;
+        _pendingAudioIndex = null;
+        _pendingSubtitleUrl = null;
+        _pendingSubtitleLanguage = null;
 
         await _initNativePlayer(streams[chosenAudioIdx], startPosition: startPosition);
       } else {
@@ -1126,7 +1271,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
               StreamQuality(label: '720p HD', height: 720, url: stream.url),
               StreamQuality(label: '480p (Fast / Low Data)', height: 480, url: stream.url),
             ];
-      _selectedQualityIndex = 0;
+      _selectedQualityIndex = (_pendingQualityIndex != null && _availableQualities.isNotEmpty)
+          ? _pendingQualityIndex!.clamp(0, _availableQualities.length - 1)
+          : 0;
+      _pendingQualityIndex = null;
     });
 
     try {
@@ -3763,6 +3911,26 @@ class _PlayerScreenState extends State<PlayerScreen> {
       title: _currentEpisodeTitle,
       posterUrl: widget.posterPath,
       currentPosition: _currentPosition,
+      tmdbId: widget.mediaId.toString(),
+      mediaType: widget.mediaType,
+      season: _currentSeason,
+      episode: _currentEpisode,
+      audioLanguage: _directStreams.isNotEmpty && _selectedStreamIndex < _directStreams.length
+          ? _directStreams[_selectedStreamIndex].language
+          : null,
+      audioIndex: _selectedStreamIndex,
+      subtitleUrl: _selectedSubtitle?.url ?? (_subtitles.isEmpty ? null : 'off'),
+      subtitleLanguage: _selectedSubtitle?.language ?? (_subtitles.isEmpty ? null : 'Off'),
+      subtitleLabel: _selectedSubtitle?.label ?? 'Off',
+      serverIndex: _selectedServerIndex,
+      qualityIndex: _selectedQualityIndex,
+      onVoidCastBeamed: () async {
+        final controller = _videoPlayerController;
+        if (controller != null && controller.value.isPlaying) {
+          await controller.pause();
+          if (mounted) setState(() => _isPlaying = false);
+        }
+      },
       headers: _directStreams.isNotEmpty && _selectedStreamIndex < _directStreams.length
           ? _directStreams[_selectedStreamIndex].headers
           : null,

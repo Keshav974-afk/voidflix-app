@@ -14,6 +14,7 @@ import '../models/media_detail.dart';
 import '../providers/download_provider.dart';
 import '../providers/history_provider.dart';
 import '../providers/watchlist_provider.dart';
+import '../providers/profile_provider.dart';
 import '../widgets/netflix_season_picker.dart';
 import '../widgets/cast_dialog.dart';
 import '../core/services/cast_service.dart';
@@ -660,6 +661,8 @@ class _DetailScreenState extends State<DetailScreen> {
                             final saved = context.read<HistoryProvider>().getProgress(detail.id);
                             final s = saved?.season ?? _selectedSeason;
                             final e = saved?.episode ?? 1;
+                            final activeProfile = context.read<ProfileProvider>().activeProfileOrNull;
+                            final serverIdx = context.read<ProfileProvider>().selectedServerIndex;
                             voidCast.playOnTv(
                               tmdbId: detail.id.toString(),
                               type: widget.mediaType,
@@ -668,6 +671,9 @@ class _DetailScreenState extends State<DetailScreen> {
                               season: s,
                               episode: e,
                               position: 0.0,
+                              audioLanguage: activeProfile?.preferredAudioLang,
+                              subtitleLanguage: activeProfile?.preferredSubtitleLang,
+                              serverIndex: serverIdx,
                             );
                             VoidCastRemoteSheet.show(context);
                           },

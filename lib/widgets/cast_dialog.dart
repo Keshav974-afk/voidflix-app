@@ -3,6 +3,8 @@ import 'package:cached_network_image/cached_network_image.dart';
 import 'package:google_fonts/google_fonts.dart';
 import '../core/constants/theme_constants.dart';
 import '../core/services/cast_service.dart';
+import '../core/services/voidcast_service.dart';
+import 'voidcast_remote_sheet.dart';
 
 class CastDialog extends StatefulWidget {
   final String videoUrl;
@@ -10,6 +12,18 @@ class CastDialog extends StatefulWidget {
   final String? posterUrl;
   final Duration currentPosition;
   final Map<String, String>? headers;
+  final String? tmdbId;
+  final String? mediaType;
+  final int season;
+  final int episode;
+  final String? audioLanguage;
+  final int? audioIndex;
+  final String? subtitleUrl;
+  final String? subtitleLanguage;
+  final String? subtitleLabel;
+  final int? serverIndex;
+  final int? qualityIndex;
+  final VoidCallback? onVoidCastBeamed;
 
   const CastDialog({
     super.key,
@@ -18,6 +32,18 @@ class CastDialog extends StatefulWidget {
     this.posterUrl,
     this.currentPosition = Duration.zero,
     this.headers,
+    this.tmdbId,
+    this.mediaType,
+    this.season = 1,
+    this.episode = 1,
+    this.audioLanguage,
+    this.audioIndex,
+    this.subtitleUrl,
+    this.subtitleLanguage,
+    this.subtitleLabel,
+    this.serverIndex,
+    this.qualityIndex,
+    this.onVoidCastBeamed,
   });
 
   static Future<void> show(
@@ -27,6 +53,18 @@ class CastDialog extends StatefulWidget {
     String? posterUrl,
     Duration currentPosition = Duration.zero,
     Map<String, String>? headers,
+    String? tmdbId,
+    String? mediaType,
+    int season = 1,
+    int episode = 1,
+    String? audioLanguage,
+    int? audioIndex,
+    String? subtitleUrl,
+    String? subtitleLanguage,
+    String? subtitleLabel,
+    int? serverIndex,
+    int? qualityIndex,
+    VoidCallback? onVoidCastBeamed,
   }) {
     return showModalBottomSheet(
       context: context,
@@ -38,6 +76,18 @@ class CastDialog extends StatefulWidget {
         posterUrl: posterUrl,
         currentPosition: currentPosition,
         headers: headers,
+        tmdbId: tmdbId,
+        mediaType: mediaType,
+        season: season,
+        episode: episode,
+        audioLanguage: audioLanguage,
+        audioIndex: audioIndex,
+        subtitleUrl: subtitleUrl,
+        subtitleLanguage: subtitleLanguage,
+        subtitleLabel: subtitleLabel,
+        serverIndex: serverIndex,
+        qualityIndex: qualityIndex,
+        onVoidCastBeamed: onVoidCastBeamed,
       ),
     );
   }
@@ -398,12 +448,202 @@ class _CastDialogState extends State<CastDialog> {
     );
   }
 
+  Widget _buildVoidCastSection() {
+    final voidCast = VoidCastService();
+    final isVoidCastConnected = voidCast.isConnected;
+    final hasTmdbId = widget.tmdbId != null && widget.tmdbId!.isNotEmpty;
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1B1B26),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: isVoidCastConnected ? AppTheme.primaryRed.withValues(alpha: 0.6) : Colors.white12,
+          width: isVoidCastConnected ? 1.5 : 1.0,
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+            decoration: BoxDecoration(
+              color: isVoidCastConnected
+                  ? AppTheme.primaryRed.withValues(alpha: 0.15)
+                  : Colors.white.withValues(alpha: 0.05),
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(9)),
+            ),
+            child: Row(
+              children: [
+                Icon(
+                  Icons.tv_rounded,
+                  color: isVoidCastConnected ? AppTheme.primaryRed : Colors.white70,
+                  size: 18,
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  isVoidCastConnected ? 'VOIDCAST CONNECTED TV' : 'VOIDFLIX ANDROID TV',
+                  style: TextStyle(
+                    color: isVoidCastConnected ? AppTheme.primaryRed : Colors.white70,
+                    fontWeight: FontWeight.bold,
+                    fontSize: 11,
+                    letterSpacing: 1.0,
+                  ),
+                ),
+                const Spacer(),
+                if (isVoidCastConnected)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF00E676).withValues(alpha: 0.2),
+                      borderRadius: BorderRadius.circular(4),
+                    ),
+                    child: const Text(
+                      'LINKED',
+                      style: TextStyle(
+                        color: Color(0xFF00E676),
+                        fontSize: 10,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.all(12),
+            child: isVoidCastConnected
+                ? Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Row(
+                        children: [
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  voidCast.connectedTvName,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 15,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                const SizedBox(height: 3),
+                                Text(
+                                  'Resumes at ${_formatDuration(widget.currentPosition)} • Audio: ${widget.audioLanguage ?? "Default"} • Sub: ${widget.subtitleLabel ?? "Off"}',
+                                  style: const TextStyle(
+                                    color: Colors.white60,
+                                    fontSize: 12,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ),
+                          ElevatedButton.icon(
+                            style: ElevatedButton.styleFrom(
+                              backgroundColor: AppTheme.primaryRed,
+                              foregroundColor: Colors.white,
+                              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                            ),
+                            icon: const Icon(Icons.cast_connected_rounded, size: 16),
+                            label: const Text('Cast to TV', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                            onPressed: () {
+                              if (!hasTmdbId) return;
+                              voidCast.playOnTv(
+                                tmdbId: widget.tmdbId!,
+                                type: widget.mediaType ?? 'movie',
+                                title: widget.title,
+                                poster: widget.posterUrl,
+                                season: widget.season,
+                                episode: widget.episode,
+                                position: widget.currentPosition.inSeconds.toDouble(),
+                                audioLanguage: widget.audioLanguage,
+                                audioIndex: widget.audioIndex,
+                                subtitleUrl: widget.subtitleUrl,
+                                subtitleLanguage: widget.subtitleLanguage,
+                                subtitleLabel: widget.subtitleLabel,
+                                serverIndex: widget.serverIndex,
+                                qualityIndex: widget.qualityIndex,
+                              );
+                              widget.onVoidCastBeamed?.call();
+                              Navigator.of(context).pop();
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                SnackBar(
+                                  backgroundColor: const Color(0xFF1E1E2C),
+                                  behavior: SnackBarBehavior.floating,
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                                  content: Row(
+                                    children: [
+                                      const Icon(Icons.cast_connected_rounded, color: Color(0xFF00E676)),
+                                      const SizedBox(width: 10),
+                                      Expanded(
+                                        child: Text(
+                                          'Beamed "${widget.title}" to ${voidCast.connectedTvName} at ${_formatDuration(widget.currentPosition)}',
+                                          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                              );
+                            },
+                          ),
+                        ],
+                      ),
+                    ],
+                  )
+                : Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const Text(
+                        'Watching on Android TV? Pair with your TV to cast movies with exact subtitles, audio & timestamp.',
+                        style: TextStyle(color: Colors.white60, fontSize: 12),
+                      ),
+                      const SizedBox(height: 10),
+                      InkWell(
+                        onTap: () {
+                          Navigator.of(context).pop();
+                          VoidCastRemoteSheet.show(context);
+                        },
+                        borderRadius: BorderRadius.circular(6),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.08),
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(color: Colors.white24),
+                          ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.pin_rounded, color: AppTheme.primaryRed, size: 16),
+                              SizedBox(width: 6),
+                              Text('Pair TV via 6-Digit Code / Wi-Fi', style: TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.bold)),
+                              SizedBox(width: 4),
+                              Icon(Icons.chevron_right_rounded, color: Colors.white54, size: 16),
+                            ],
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildDeviceList() {
     final devices = _castService.devices;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
+        _buildVoidCastSection(),
         // Available Devices Header
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),

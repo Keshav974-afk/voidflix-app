@@ -1,4 +1,7 @@
 import '../core/services/voidcast_service.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import '../providers/watchlist_provider.dart';
+import '../providers/history_provider.dart';
 import 'dart:async';
 import '../providers/download_provider.dart';
 import 'dart:io';
@@ -48,17 +51,69 @@ class _ProfileGateScreenState extends State<ProfileGateScreen> {
     super.initState();
     _isManaging = widget.initialEditMode;
     _fetchTrendingPosters();
-    _voidCastGateSub = VoidCastService().onCommand.listen((cmd) {
+    _voidCastGateSub = VoidCastService().onCommand.listen((cmd) async {
       if (cmd['action'] == 'sync_user_state' && mounted) {
         final payload = cmd['payload'] as Map<String, dynamic>? ?? {};
         final profiles = payload['profiles'] as List<dynamic>? ?? [];
         final activeId = payload['activeProfileId'] as String?;
         final serverIndex = payload['serverIndex'] as int?;
+        final watchlist = payload['watchlist'] as List<dynamic>? ?? [];
+        final history = payload['history'] as List<dynamic>? ?? [];
+        final preferences = payload['preferences'] as Map<String, dynamic>? ?? {};
+        final mobileName = payload['mobileName'] as String? ?? 'Mobile';
+
         if (profiles.isNotEmpty) {
-          context.read<ProfileProvider>().mergeProfilesFromSync(
+          await context.read<ProfileProvider>().mergeProfilesFromSync(
             profiles,
             activeId: activeId,
             serverIndex: serverIndex,
+          );
+        }
+        if (watchlist.isNotEmpty && mounted) {
+          await context.read<WatchlistProvider>().mergeWatchlistFromSync(watchlist);
+        }
+        if (history.isNotEmpty && mounted) {
+          await context.read<HistoryProvider>().mergeHistoryFromSync(history);
+        }
+
+        final prefs = await SharedPreferences.getInstance();
+        if (preferences.isNotEmpty) {
+          final prefAudio = preferences['preferredAudioLang'] as String?;
+          final prefSub = preferences['preferredSubtitleLang'] as String?;
+          final prefQuality = preferences['preferredQuality'] as String?;
+          final prefServer = preferences['serverIndex'] as int?;
+
+          if (prefAudio != null && prefAudio.isNotEmpty) {
+            await prefs.setString('voidflix_preferred_audio_lang', prefAudio);
+          }
+          if (prefSub != null && prefSub.isNotEmpty) {
+            await prefs.setString('voidflix_preferred_sub_lang', prefSub);
+          }
+          if (prefQuality != null && prefQuality.isNotEmpty) {
+            await prefs.setString('voidflix_preferred_quality', prefQuality);
+          }
+          if (prefServer != null) {
+            await prefs.setInt('voidflix_preferred_server_index', prefServer);
+          }
+          if (preferences['sub_size'] != null) await prefs.setInt('sub_size', preferences['sub_size'] as int);
+          if (preferences['sub_text_color'] != null) await prefs.setString('sub_text_color', preferences['sub_text_color'] as String);
+          if (preferences['sub_edge_style'] != null) await prefs.setString('sub_edge_style', preferences['sub_edge_style'] as String);
+          if (preferences['sub_edge_color'] != null) await prefs.setString('sub_edge_color', preferences['sub_edge_color'] as String);
+          if (preferences['sub_bg_color'] != null) await prefs.setString('sub_bg_color', preferences['sub_bg_color'] as String);
+          if (preferences['sub_bg_transparent'] != null) await prefs.setBool('sub_bg_transparent', preferences['sub_bg_transparent'] as bool);
+        }
+
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              behavior: SnackBarBehavior.floating,
+              backgroundColor: const Color(0xFF1E1E2C),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+              content: Text(
+                'Synced profiles & preferences from $mobileName',
+                style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+              ),
+            ),
           );
         }
       }

@@ -558,7 +558,7 @@ class VoidCastService extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Beam Movie / Episode to TV
+  /// Beam Movie / Episode to TV with exact playback position, audio track, subtitles & quality
   void playOnTv({
     required String tmdbId,
     required String type,
@@ -567,6 +567,14 @@ class VoidCastService extends ChangeNotifier {
     int season = 1,
     int episode = 1,
     double position = 0,
+    String? audioLanguage,
+    int? audioIndex,
+    String? subtitleUrl,
+    String? subtitleLanguage,
+    String? subtitleLabel,
+    int? serverIndex,
+    int? qualityIndex,
+    String? qualityLabel,
   }) {
     if (!_isConnected) return;
 
@@ -579,6 +587,14 @@ class VoidCastService extends ChangeNotifier {
       'season': season,
       'episode': episode,
       'position': position,
+      'audioLanguage': audioLanguage,
+      'audioIndex': audioIndex,
+      'subtitleUrl': subtitleUrl,
+      'subtitleLanguage': subtitleLanguage,
+      'subtitleLabel': subtitleLabel,
+      'serverIndex': serverIndex,
+      'qualityIndex': qualityIndex,
+      'qualityLabel': qualityLabel,
     };
 
     _sendCommand('play', data);
