@@ -23,6 +23,7 @@ import 'live_tv_screen.dart';
 import 'movies_screen.dart';
 import 'new_popular_screen.dart';
 import 'player_screen.dart';
+import 'profile_gate_screen.dart';
 import 'search_screen.dart';
 import 'series_screen.dart';
 import 'settings_screen.dart';
@@ -36,14 +37,16 @@ class TvLeanbackScreen extends StatefulWidget {
 }
 
 class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
-  int _activeNavIndex = 1;
+  int _activeNavIndex = 2;
   bool _isNavRailFocused = false;
 
   MediaItem? _focusedItem;
   final ScrollController _mainScrollController = ScrollController();
 
-  // Explicit FocusNodes for the nav-rail items so we can arrow-key between them
-  final List<FocusNode> _navFocusNodes = List.generate(9, (_) => FocusNode());
+  // Explicit FocusNodes for the nav-rail items (10 items total: Profile + 9 nav sections)
+  final List<FocusNode> _navFocusNodes = List.generate(10, (_) => FocusNode());
+  final FocusNode _heroPlayFocusNode = FocusNode();
+  DateTime? _lastBackPressTime;
   StreamSubscription? _voidCastSub;
 
   static const Map<int, String> _genreMap = {
@@ -144,7 +147,7 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
         if (k == 'back' && mounted) {
           Navigator.of(context).maybePop();
         } else if (k == 'home' && mounted) {
-          _onNavItemSelected(1);
+          _onNavItemSelected(2);
         }
       } else if (action == 'sync_user_state') {
         _handleIncomingUserStateSync(payload);
@@ -158,6 +161,7 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
     for (final node in _navFocusNodes) {
       node.dispose();
     }
+    _heroPlayFocusNode.dispose();
     _mainScrollController.dispose();
     super.dispose();
   }
@@ -264,32 +268,40 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
     setState(() => _activeNavIndex = index);
     switch (index) {
       case 0:
-        Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SearchScreen()));
+        Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => const ProfileGateScreen(canPop: true)),
+        );
         break;
       case 1:
+        Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SearchScreen()));
+        break;
+      case 2:
         if (_mainScrollController.hasClients) {
           _mainScrollController.animateTo(0, duration: const Duration(milliseconds: 300), curve: Curves.easeOut);
         }
-        break;
-      case 2:
-        Navigator.of(context).push(MaterialPageRoute(builder: (_) => const NewPopularScreen()));
+        if (_heroPlayFocusNode.canRequestFocus) {
+          _heroPlayFocusNode.requestFocus();
+        }
         break;
       case 3:
-        Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SeriesScreen()));
+        Navigator.of(context).push(MaterialPageRoute(builder: (_) => const NewPopularScreen()));
         break;
       case 4:
-        Navigator.of(context).push(MaterialPageRoute(builder: (_) => const MoviesScreen()));
+        Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SeriesScreen()));
         break;
       case 5:
-        Navigator.of(context).push(MaterialPageRoute(builder: (_) => const WatchlistScreen()));
+        Navigator.of(context).push(MaterialPageRoute(builder: (_) => const MoviesScreen()));
         break;
       case 6:
-        Navigator.of(context).push(MaterialPageRoute(builder: (_) => const LiveTvScreen()));
+        Navigator.of(context).push(MaterialPageRoute(builder: (_) => const WatchlistScreen()));
         break;
       case 7:
-        TvCastDialog.show(context);
+        Navigator.of(context).push(MaterialPageRoute(builder: (_) => const LiveTvScreen()));
         break;
       case 8:
+        TvCastDialog.show(context);
+        break;
+      case 9:
         Navigator.of(context).push(MaterialPageRoute(builder: (_) => const SettingsScreen()));
         break;
     }
@@ -340,66 +352,99 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
 
     final displayHeroItem = _focusedItem ?? mediaProvider.heroItem;
 
-    return Scaffold(
-      backgroundColor: Colors.black,
-      body: Row(
-        children: [
-          // ═══════════════════════════════════════════════════════════
-          // 1. LEFT NAVIGATION RAIL (TV D-Pad Up/Down fixed)
-          // ═══════════════════════════════════════════════════════════
-          _buildNavigationRail(),
-
-          // ═══════════════════════════════════════════════════════════
-          // 2. MAIN 10-FOOT VIEWPORT
-          // ═══════════════════════════════════════════════════════════
-          Expanded(
-            child: Stack(
-              fit: StackFit.expand,
-              children: [
-                // Top Dynamic Backdrop
-                Positioned(
-                  top: 0,
-                  left: 0,
-                  right: 0,
-                  height: MediaQuery.of(context).size.height * 0.65,
-                  child: _buildDynamicHeroBackdrop(displayHeroItem),
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) return;
+        if (!_isNavRailFocused) {
+          // If in content area, Back moves focus into the Navigation Rail
+          setState(() => _isNavRailFocused = true);
+          _navFocusNodes[_activeNavIndex].requestFocus();
+        } else {
+          // If already in rail, require double-back press within 2 seconds to exit app
+          final now = DateTime.now();
+          if (_lastBackPressTime == null || now.difference(_lastBackPressTime!) > const Duration(seconds: 2)) {
+            _lastBackPressTime = now;
+            ScaffoldMessenger.of(context).removeCurrentSnackBar();
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                behavior: SnackBarBehavior.floating,
+                backgroundColor: const Color(0xFF1E1E2C),
+                duration: const Duration(seconds: 2),
+                content: const Text(
+                  'Press back again to exit Voidflix',
+                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                  textAlign: TextAlign.center,
                 ),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+            );
+          } else {
+            SystemNavigator.pop();
+          }
+        }
+      },
+      child: Scaffold(
+        backgroundColor: Colors.black,
+        body: Row(
+          children: [
+            // ═══════════════════════════════════════════════════════════
+            // 1. LEFT NAVIGATION RAIL (TV D-Pad Up/Down fixed)
+            // ═══════════════════════════════════════════════════════════
+            _buildNavigationRail(),
 
-                // Main Scrolling Content Layer
-                ListView(
-                  controller: _mainScrollController,
-                  padding: const EdgeInsets.only(bottom: 40),
-                  children: [
-                    _buildHeroBillboardDetails(displayHeroItem),
+            // ═══════════════════════════════════════════════════════════
+            // 2. MAIN 10-FOOT VIEWPORT
+            // ═══════════════════════════════════════════════════════════
+            Expanded(
+              child: Stack(
+                fit: StackFit.expand,
+                children: [
+                  // Top Dynamic Backdrop
+                  Positioned(
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    height: MediaQuery.of(context).size.height * 0.65,
+                    child: _buildDynamicHeroBackdrop(displayHeroItem),
+                  ),
 
-                    const SizedBox(height: 16),
+                  // Main Scrolling Content Layer
+                  ListView(
+                    controller: _mainScrollController,
+                    padding: const EdgeInsets.only(bottom: 40),
+                    children: [
+                      _buildHeroBillboardDetails(displayHeroItem),
 
-                    if (historyProvider.items.isNotEmpty)
-                      _buildContinueWatchingRow(historyProvider),
+                      const SizedBox(height: 16),
 
-                    if (mediaProvider.trending.isNotEmpty)
-                      _buildMediaRow('POPULAR ON VOIDFLIX', mediaProvider.trending, isLandscape: true),
+                      if (historyProvider.items.isNotEmpty)
+                        _buildContinueWatchingRow(historyProvider),
 
-                    if (mediaProvider.popularMovies.isNotEmpty)
-                      _buildMediaRow('TOP MOVIES', mediaProvider.popularMovies),
+                      if (mediaProvider.trending.isNotEmpty)
+                        _buildMediaRow('POPULAR ON VOIDFLIX', mediaProvider.trending, isLandscape: true),
 
-                    if (mediaProvider.popularTV.isNotEmpty)
-                      _buildMediaRow('POPULAR TV SERIES', mediaProvider.popularTV),
+                      if (mediaProvider.popularMovies.isNotEmpty)
+                        _buildMediaRow('TOP MOVIES', mediaProvider.popularMovies),
 
-                    if (mediaProvider.actionMovies.isNotEmpty)
-                      _buildMediaRow('ACTION & THRILLERS', mediaProvider.actionMovies),
+                      if (mediaProvider.popularTV.isNotEmpty)
+                        _buildMediaRow('POPULAR TV SERIES', mediaProvider.popularTV),
 
-                    if (mediaProvider.topRatedMovies.isNotEmpty)
-                      _buildMediaRow('CRITICALLY ACCLAIMED CLASSICS', mediaProvider.topRatedMovies),
+                      if (mediaProvider.actionMovies.isNotEmpty)
+                        _buildMediaRow('ACTION & THRILLERS', mediaProvider.actionMovies),
 
-                    if (mediaProvider.anime.isNotEmpty)
-                      _buildMediaRow('ANIME & ANIMATION', mediaProvider.anime),
-                  ],
-                ),
-              ],
+                      if (mediaProvider.topRatedMovies.isNotEmpty)
+                        _buildMediaRow('CRITICALLY ACCLAIMED CLASSICS', mediaProvider.topRatedMovies),
+
+                      if (mediaProvider.anime.isNotEmpty)
+                        _buildMediaRow('ANIME & ANIMATION', mediaProvider.anime),
+                    ],
+                  ),
+                ],
+              ),
             ),
-          ),
-        ],
+          ],
+        ),
       ),
     );
   }
@@ -413,6 +458,7 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
     final railWidth = isExpanded ? 220.0 : 72.0;
 
     final navItems = [
+      {'icon': Icons.account_circle_rounded, 'label': 'Switch Profile'},
       {'icon': Icons.search_rounded, 'label': 'Search'},
       {'icon': Icons.home_rounded, 'label': 'Home'},
       {'icon': Icons.local_fire_department_rounded, 'label': 'New & Popular'},
@@ -424,7 +470,7 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
       {'icon': Icons.settings_outlined, 'label': 'Settings'},
     ];
 
-    // Key handler: intercept up/down arrows and move focus within our list
+    // Key handler: intercept up/down/enter/select arrows and move focus within our list
     KeyEventResult handleNavKey(FocusNode node, KeyEvent event) {
       if (event is! KeyDownEvent) return KeyEventResult.ignored;
       final key = event.logicalKey;
@@ -444,8 +490,22 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
           return KeyEventResult.handled;
         }
       } else if (key == LogicalKeyboardKey.arrowRight) {
-        // Move focus to the main content area
-        FocusScope.of(context).focusInDirection(TraversalDirection.right);
+        // Move focus into hero Play button or main content area
+        if (_heroPlayFocusNode.canRequestFocus) {
+          _heroPlayFocusNode.requestFocus();
+        } else {
+          FocusScope.of(context).focusInDirection(TraversalDirection.right);
+        }
+        return KeyEventResult.handled;
+      } else if (key == LogicalKeyboardKey.select ||
+          key == LogicalKeyboardKey.enter ||
+          key == LogicalKeyboardKey.space ||
+          key == LogicalKeyboardKey.gameButtonA ||
+          key == LogicalKeyboardKey.gameButtonSelect ||
+          key == LogicalKeyboardKey.numpadEnter ||
+          key.keyId == 0x00100000017 ||
+          key.keyId == 23) {
+        _onNavItemSelected(currentIdx);
         return KeyEventResult.handled;
       }
       return KeyEventResult.ignored;
@@ -455,7 +515,6 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
       onFocusChange: (focused) {
         setState(() => _isNavRailFocused = focused);
       },
-      skipTraversal: true,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 240),
         curve: Curves.easeOutCubic,
@@ -816,25 +875,35 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
           Row(
             children: [
               // Play
-              TvFocusable(
-                autofocus: true,
-                scaleFactor: 1.06,
-                glowColor: Colors.white,
-                borderRadius: BorderRadius.circular(8),
-                onPressed: () => _playMedia(item),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 13),
-                  decoration: BoxDecoration(
-                    color: Colors.white,
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: const Row(
-                    children: [
-                      Icon(Icons.play_arrow_rounded, color: Colors.black, size: 28),
-                      SizedBox(width: 8),
-                      Text('Play',
-                          style: TextStyle(color: Colors.black, fontSize: 17, fontWeight: FontWeight.bold)),
-                    ],
+              Focus(
+                onKeyEvent: (node, event) {
+                  if (event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+                    _navFocusNodes[_activeNavIndex].requestFocus();
+                    return KeyEventResult.handled;
+                  }
+                  return KeyEventResult.ignored;
+                },
+                child: TvFocusable(
+                  focusNode: _heroPlayFocusNode,
+                  autofocus: true,
+                  scaleFactor: 1.06,
+                  glowColor: Colors.white,
+                  borderRadius: BorderRadius.circular(8),
+                  onPressed: () => _playMedia(item),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 13),
+                    decoration: BoxDecoration(
+                      color: Colors.white,
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: const Row(
+                      children: [
+                        Icon(Icons.play_arrow_rounded, color: Colors.black, size: 28),
+                        SizedBox(width: 8),
+                        Text('Play',
+                            style: TextStyle(color: Colors.black, fontSize: 17, fontWeight: FontWeight.bold)),
+                      ],
+                    ),
                   ),
                 ),
               ),
@@ -937,7 +1006,7 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
                   ? ApiConstants.getImageUrl(item.backdropPath ?? item.posterPath, size: 'w780')
                   : ApiConstants.getImageUrl(item.posterPath, size: 'w342');
 
-              return TvFocusable(
+              final cardWidget = TvFocusable(
                 scaleFactor: 1.08,
                 glowColor: AppTheme.primaryRed,
                 borderRadius: BorderRadius.circular(10),
@@ -1044,6 +1113,21 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
                   ),
                 ),
               );
+
+              if (idx == 0) {
+                return Focus(
+                  onKeyEvent: (node, event) {
+                    if (event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+                      _navFocusNodes[_activeNavIndex].requestFocus();
+                      return KeyEventResult.handled;
+                    }
+                    return KeyEventResult.ignored;
+                  },
+                  child: cardWidget,
+                );
+              }
+
+              return cardWidget;
             },
           ),
         ),
@@ -1093,7 +1177,7 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
                 mediaType: item.mediaType,
               );
 
-              return TvFocusable(
+              final cardWidget = TvFocusable(
                 scaleFactor: 1.08,
                 glowColor: AppTheme.primaryRed,
                 borderRadius: BorderRadius.circular(10),
@@ -1201,6 +1285,21 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
                   ),
                 ),
               );
+
+              if (idx == 0) {
+                return Focus(
+                  onKeyEvent: (node, event) {
+                    if (event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.arrowLeft) {
+                      _navFocusNodes[_activeNavIndex].requestFocus();
+                      return KeyEventResult.handled;
+                    }
+                    return KeyEventResult.ignored;
+                  },
+                  child: cardWidget,
+                );
+              }
+
+              return cardWidget;
             },
           ),
         ),

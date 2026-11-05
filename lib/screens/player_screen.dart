@@ -34,6 +34,7 @@ import '../core/services/cast_service.dart';
 import '../core/services/voidcast_service.dart';
 import '../core/services/tv_mode_service.dart';
 import '../widgets/tv_focusable.dart';
+import 'main_navigation_screen.dart';
 import 'package:flutter/foundation.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:window_manager/window_manager.dart';
@@ -183,6 +184,30 @@ class _PlayerScreenState extends State<PlayerScreen> {
   int _lastBufferingStallTime = 0;
   int _lastUiPositionUpdateTime = 0;
   final FocusNode _qualityFocusNode = FocusNode();
+  final FocusNode _serverFocusNode = FocusNode();
+  final FocusNode _audioFocusNode = FocusNode();
+  final FocusNode _episodesFocusNode = FocusNode();
+  final FocusNode _nextEpFocusNode = FocusNode();
+  final FocusNode _speedFocusNode = FocusNode();
+
+  List<FocusNode> _getBottomBarFocusNodes() {
+    final nodes = <FocusNode>[];
+    if (_isNativeMode) nodes.add(_qualityFocusNode);
+    nodes.add(_serverFocusNode);
+    nodes.add(_audioFocusNode);
+    if (widget.mediaType == 'tv') {
+      nodes.add(_episodesFocusNode);
+      nodes.add(_nextEpFocusNode);
+    }
+    nodes.add(_speedFocusNode);
+    return nodes;
+  }
+
+  bool _isAnyBottomBarFocused() {
+    final nodes = _getBottomBarFocusNodes();
+    return nodes.any((n) => n.hasFocus);
+  }
+
   bool _hasAutoDowngradedForNetwork = false;
 
   // Full-screen Zoom to fill system
@@ -552,6 +577,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
     // Release screen wakelock
     WakelockPlus.disable();
     _qualityFocusNode.dispose();
+    _serverFocusNode.dispose();
+    _audioFocusNode.dispose();
+    _episodesFocusNode.dispose();
+    _nextEpFocusNode.dispose();
+    _speedFocusNode.dispose();
 
     // Safely restore orientation: preserve landscape on Android TV
     final isTvDevice = TvModeService().isTvMode || TvModeService().isHardwareTv;
@@ -2084,7 +2114,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   Future<void> _handleSmoothBack() async {
     if (_isExiting) return;
-    setState(() => _isExiting = true);
+    _isExiting = true;
+    if (mounted) setState(() {});
     _cancelAutoplayTimer();
     _hideControlsTimer?.cancel();
     _disposeVideoController();
@@ -2107,7 +2138,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
     await Future.delayed(const Duration(milliseconds: 120));
 
     if (mounted) {
-      Navigator.of(context).pop();
+      if (Navigator.of(context).canPop()) {
+        Navigator.of(context).pop();
+      } else {
+        Navigator.of(context).pushReplacement(
+          MaterialPageRoute(builder: (_) => const MainNavigationScreen()),
+        );
+      }
     }
   }
 
@@ -4924,6 +4961,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
           if (_isClippingMoment) {
             setState(() => _isClippingMoment = false);
             _startHideControlsTimer();
+          } else if (_showControls) {
+            setState(() => _showControls = false);
+            _playerFocusNode.requestFocus();
           } else {
             _handleSmoothBack();
           }
@@ -5504,28 +5544,33 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                             onTap: _openQualitySheet,
                                           ),
                                         _NetflixBarButton(
+                                          focusNode: _serverFocusNode,
                                           icon: Icons.dns_rounded,
                                           label: 'Server',
                                           onTap: _openServerPicker,
                                         ),
                                         _NetflixBarButton(
+                                          focusNode: _audioFocusNode,
                                           icon: Icons.chat_bubble_outline_rounded,
                                           label: 'Audio & Subtitles',
                                           onTap: _openAudioAndSubtitlesSheet,
                                         ),
                                         if (widget.mediaType == 'tv') ...[
                                           _NetflixBarButton(
+                                            focusNode: _episodesFocusNode,
                                             icon: Icons.view_carousel_outlined,
                                             label: 'Episodes',
                                             onTap: _openEpisodesSheet,
                                           ),
                                           _NetflixBarButton(
+                                            focusNode: _nextEpFocusNode,
                                             icon: Icons.skip_next_rounded,
                                             label: 'Next Ep.',
                                             onTap: _nextEpisode,
                                           ),
                                         ],
                                         _NetflixBarButton(
+                                          focusNode: _speedFocusNode,
                                           icon: Icons.speed_rounded,
                                           label: 'Speed (${_playbackSpeed == 1.0 ? '1x' : '${_playbackSpeed}x'})',
                                           onTap: _openSpeedSheet,
@@ -7395,25 +7440,52 @@ class _PlayerScreenState extends State<PlayerScreen> {
         key == LogicalKeyboardKey.gameButtonA ||
         key == LogicalKeyboardKey.gameButtonSelect ||
         key == LogicalKeyboardKey.keyK ||
-        key.keyId == 0x00100000017; // Android KEYCODE_DPAD_CENTER
+        key.keyId == 0x00100000017 || // Android KEYCODE_DPAD_CENTER
+        key.keyId == 23;
+
+    final isBottomFocused = _isAnyBottomBarFocused();
 
     if (isCenterKey) {
       if (!_showControls) {
         _revealControls();
+      } else if (isBottomFocused) {
+        // Let the focused bottom bar button handle activation via its TvFocusable
+        return;
       } else {
         _togglePlayPause();
       }
     } else if (key == LogicalKeyboardKey.arrowLeft ||
         key == LogicalKeyboardKey.keyJ) {
-      _seekRelative(-10);
-      _revealControls();
+      if (isBottomFocused) {
+        final nodes = _getBottomBarFocusNodes();
+        final currentIdx = nodes.indexWhere((n) => n.hasFocus);
+        if (currentIdx > 0) {
+          nodes[currentIdx - 1].requestFocus();
+        }
+        _revealControls();
+      } else {
+        _seekRelative(-10);
+        _revealControls();
+      }
     } else if (key == LogicalKeyboardKey.arrowRight ||
         key == LogicalKeyboardKey.keyL) {
-      _seekRelative(10);
-      _revealControls();
+      if (isBottomFocused) {
+        final nodes = _getBottomBarFocusNodes();
+        final currentIdx = nodes.indexWhere((n) => n.hasFocus);
+        if (currentIdx >= 0 && currentIdx < nodes.length - 1) {
+          nodes[currentIdx + 1].requestFocus();
+        }
+        _revealControls();
+      } else {
+        _seekRelative(10);
+        _revealControls();
+      }
     } else if (key == LogicalKeyboardKey.arrowUp) {
       final isTv = TvModeService().isTvMode || TvModeService().isHardwareTv;
       if (!_showControls) {
+        _revealControls();
+      } else if (isBottomFocused) {
+        _playerFocusNode.requestFocus();
         _revealControls();
       } else if (!isTv) {
         _adjustVolume(0.05);
@@ -7429,7 +7501,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
         _adjustVolume(-0.05);
       } else {
         _revealControls();
-        _qualityFocusNode.requestFocus();
+        final nodes = _getBottomBarFocusNodes();
+        if (nodes.isNotEmpty && !nodes.any((n) => n.hasFocus)) {
+          nodes.first.requestFocus();
+        }
       }
     } else if (key == LogicalKeyboardKey.keyM) {
       _toggleMute();
@@ -7442,10 +7517,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
     } else if (key == LogicalKeyboardKey.bracketRight) {
       _adjustSpeed(1);
     } else if (key == LogicalKeyboardKey.escape ||
-        key == LogicalKeyboardKey.backspace ||
-        key == LogicalKeyboardKey.goBack) {
+        key == LogicalKeyboardKey.backspace) {
       if (_showControls) {
         setState(() => _showControls = false);
+        _playerFocusNode.requestFocus();
       } else {
         _handleSmoothBack();
       }

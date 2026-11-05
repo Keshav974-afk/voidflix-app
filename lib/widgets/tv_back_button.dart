@@ -126,27 +126,36 @@ class TvScreenWrapper extends StatelessWidget {
   Widget build(BuildContext context) {
     if (!enableBackShortcut) return child;
 
-    return Focus(
-      canRequestFocus: false,
-      onKeyEvent: (node, event) {
-        if (event is KeyDownEvent) {
-          final key = event.logicalKey;
-          if (key == LogicalKeyboardKey.escape ||
-              key == LogicalKeyboardKey.backspace ||
-              key == LogicalKeyboardKey.goBack ||
-              key == LogicalKeyboardKey.browserBack) {
-            if (onBack != null) {
-              onBack!();
-              return KeyEventResult.handled;
-            } else if (Navigator.of(context).canPop()) {
-              Navigator.of(context).maybePop();
-              return KeyEventResult.handled;
+    return PopScope(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) return;
+        if (onBack != null) {
+          onBack!();
+        } else if (Navigator.of(context).canPop()) {
+          Navigator.of(context).maybePop();
+        }
+      },
+      child: Focus(
+        canRequestFocus: false,
+        onKeyEvent: (node, event) {
+          if (event is KeyDownEvent) {
+            final key = event.logicalKey;
+            // Desktop keyboard back navigation shortcuts (hardware back handled by PopScope)
+            if (key == LogicalKeyboardKey.escape || key == LogicalKeyboardKey.backspace) {
+              if (onBack != null) {
+                onBack!();
+                return KeyEventResult.handled;
+              } else if (Navigator.of(context).canPop()) {
+                Navigator.of(context).maybePop();
+                return KeyEventResult.handled;
+              }
             }
           }
-        }
-        return KeyEventResult.ignored;
-      },
-      child: child,
+          return KeyEventResult.ignored;
+        },
+        child: child,
+      ),
     );
   }
 }

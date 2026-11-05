@@ -88,7 +88,10 @@ class _TvFocusableState extends State<TvFocusable> {
           key == LogicalKeyboardKey.enter ||
           key == LogicalKeyboardKey.space ||
           key == LogicalKeyboardKey.gameButtonA ||
-          key == LogicalKeyboardKey.numpadEnter) {
+          key == LogicalKeyboardKey.gameButtonSelect ||
+          key == LogicalKeyboardKey.numpadEnter ||
+          key.keyId == 0x00100000017 || // KEYCODE_DPAD_CENTER
+          key.keyId == 23) {
         widget.onPressed?.call();
         return KeyEventResult.handled;
       }
