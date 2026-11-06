@@ -9,6 +9,7 @@ import '../widgets/profile_avatar.dart';
 import 'choose_icon_screen.dart';
 import 'subtitle_appearance_screen.dart';
 import '../widgets/tv_back_button.dart';
+import '../widgets/tv_focusable.dart';
 
 class EditProfileScreen extends StatefulWidget {
   final UserProfile profile;
@@ -143,6 +144,11 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
             const SizedBox(height: 16),
             TextField(
               controller: ctl,
+              textInputAction: TextInputAction.done,
+              onSubmitted: (_) {
+                setState(() => _gameHandle = ctl.text.trim());
+                Navigator.pop(ctx);
+              },
               style: const TextStyle(color: Colors.white),
               decoration: InputDecoration(
                 hintText: 'e.g. ShadowHunter',
@@ -159,13 +165,22 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
             onPressed: () => Navigator.pop(ctx),
             child: const Text('Cancel', style: TextStyle(color: Colors.white60)),
           ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryRed),
+          TvFocusable(
+            scaleFactor: 1.02,
+            glowColor: AppTheme.primaryRed,
+            borderRadius: BorderRadius.circular(8),
             onPressed: () {
               setState(() => _gameHandle = ctl.text.trim());
               Navigator.pop(ctx);
             },
-            child: const Text('Save', style: TextStyle(color: Colors.white)),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              decoration: BoxDecoration(
+                color: AppTheme.primaryRed,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Text('Save', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+            ),
           ),
         ],
       ),
@@ -643,11 +658,20 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
             style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 20),
           ),
           actions: [
-            TextButton(
-              onPressed: _saveProfile,
-              child: const Text(
-                'Save',
-                style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+            Padding(
+              padding: const EdgeInsets.only(right: 8),
+              child: TvFocusable(
+                scaleFactor: 1.05,
+                glowColor: Colors.white,
+                borderRadius: BorderRadius.circular(6),
+                onPressed: _saveProfile,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                  child: const Text(
+                    'Save',
+                    style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 16),
+                  ),
+                ),
               ),
             ),
           ],
@@ -657,8 +681,11 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
         children: [
           // 1. Profile Avatar with Pencil badge (Screenshot 5)
           Center(
-            child: GestureDetector(
-              onTap: _openChooseIcon,
+            child: TvFocusable(
+              scaleFactor: 1.06,
+              glowColor: AppTheme.primaryRed,
+              borderRadius: BorderRadius.circular(16),
+              onPressed: _openChooseIcon,
               child: Stack(
                 children: [
                   ClipRRect(
@@ -713,6 +740,8 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
             ),
             child: TextField(
               controller: _nameController,
+              textInputAction: TextInputAction.done,
+              onSubmitted: (_) => _saveProfile(),
               style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w600),
               decoration: const InputDecoration(
                 contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 14),
@@ -869,19 +898,60 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
           ),
           const SizedBox(height: 28),
 
-          // 11. Delete Profile (Screenshot 5)
+          // 11. Save Profile Changes Button (Prominent for TV Remote)
+          TvFocusable(
+            scaleFactor: 1.02,
+            glowColor: AppTheme.primaryRed,
+            borderRadius: BorderRadius.circular(10),
+            onPressed: _saveProfile,
+            child: Container(
+              width: double.infinity,
+              height: 50,
+              alignment: Alignment.center,
+              decoration: BoxDecoration(
+                color: AppTheme.primaryRed,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: const Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.check_circle_rounded, color: Colors.white, size: 20),
+                  SizedBox(width: 8),
+                  Text(
+                    'Save Profile Changes',
+                    style: TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.bold),
+                  ),
+                ],
+              ),
+            ),
+          ),
+          const SizedBox(height: 18),
+
+          // 12. Delete Profile (Screenshot 5)
           if (totalProfiles > 1)
             Center(
-              child: TextButton.icon(
-                icon: const Icon(Icons.delete_outline, color: Colors.redAccent, size: 20),
-                label: const Text(
-                  'Delete Profile',
-                  style: TextStyle(color: Colors.redAccent, fontSize: 15, fontWeight: FontWeight.bold),
-                ),
+              child: TvFocusable(
+                scaleFactor: 1.04,
+                glowColor: Colors.redAccent,
+                borderRadius: BorderRadius.circular(8),
                 onPressed: () {
                   context.read<ProfileProvider>().deleteProfile(widget.profile.id);
                   Navigator.of(context).pop();
                 },
+                child: const Padding(
+                  padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(Icons.delete_outline, color: Colors.redAccent, size: 20),
+                      SizedBox(width: 8),
+                      Text(
+                        'Delete Profile',
+                        style: TextStyle(color: Colors.redAccent, fontSize: 15, fontWeight: FontWeight.bold),
+                      ),
+                    ],
+                  ),
+                ),
               ),
             ),
           const SizedBox(height: 40),
@@ -897,28 +967,34 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     required String subtitle,
     required VoidCallback onTap,
   }) {
-    return Container(
-      decoration: BoxDecoration(
-        color: const Color(0xFF16161D),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-      ),
-      child: ListTile(
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
-        leading: Icon(icon, color: Colors.white70, size: 22),
-        title: Text(
-          title,
-          style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 15),
+    return TvFocusable(
+      scaleFactor: 1.02,
+      glowColor: AppTheme.primaryRed,
+      borderRadius: BorderRadius.circular(10),
+      onPressed: onTap,
+      child: Container(
+        decoration: BoxDecoration(
+          color: const Color(0xFF16161D),
+          borderRadius: BorderRadius.circular(10),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
         ),
-        subtitle: Padding(
-          padding: const EdgeInsets.only(top: 2),
-          child: Text(
-            subtitle,
-            style: const TextStyle(color: Colors.white54, fontSize: 12),
+        child: ListTile(
+          contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 4),
+          leading: Icon(icon, color: Colors.white70, size: 22),
+          title: Text(
+            title,
+            style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 15),
           ),
+          subtitle: Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Text(
+              subtitle,
+              style: const TextStyle(color: Colors.white54, fontSize: 12),
+            ),
+          ),
+          trailing: const Icon(Icons.chevron_right, color: Colors.white38, size: 20),
+          onTap: onTap,
         ),
-        trailing: const Icon(Icons.chevron_right, color: Colors.white38, size: 20),
-        onTap: onTap,
       ),
     );
   }

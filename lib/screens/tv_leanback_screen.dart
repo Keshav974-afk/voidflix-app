@@ -157,6 +157,7 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
 
   @override
   void dispose() {
+    _exitToastTimer?.cancel();
     _voidCastSub?.cancel();
     for (final node in _navFocusNodes) {
       node.dispose();
@@ -308,6 +309,9 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
   }
 
   void _playMedia(MediaItem item) {
+    _lastBackPressTime = null;
+    _exitToastTimer?.cancel();
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => PlayerScreen(
@@ -326,6 +330,9 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
   }
 
   void _openDetail(MediaItem item) {
+    _lastBackPressTime = null;
+    _exitToastTimer?.cancel();
+    ScaffoldMessenger.of(context).hideCurrentSnackBar();
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => DetailScreen(
@@ -345,37 +352,58 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
         .join(' • ');
   }
 
+  Timer? _exitToastTimer;
+
   void _handleTvBack() {
+    // 1. If another screen (Detail, Player, Settings, Search) is currently open on top, NEVER exit!
+    final route = ModalRoute.of(context);
+    if (route != null && !route.isCurrent) {
+      return;
+    }
+    // 2. If any dialog/sheet is active, pop it instead of exiting
+    if (Navigator.of(context).canPop()) {
+      Navigator.of(context).pop();
+      return;
+    }
+
     final now = DateTime.now();
-    if (_lastBackPressTime != null && now.difference(_lastBackPressTime!) < const Duration(milliseconds: 300)) {
+    if (_lastBackPressTime != null && now.difference(_lastBackPressTime!) < const Duration(milliseconds: 350)) {
       return;
     }
 
     if (!_isNavRailFocused) {
-      // If in content area, Back moves focus into the Navigation Rail
+      // If in content area, Back simply shifts focus into the Left Navigation Rail!
       setState(() => _isNavRailFocused = true);
       _navFocusNodes[_activeNavIndex].requestFocus();
-    } else {
-      // If already in rail, require double-back press within 2 seconds to exit app
-      if (_lastBackPressTime == null || now.difference(_lastBackPressTime!) > const Duration(seconds: 2)) {
-        _lastBackPressTime = now;
-        ScaffoldMessenger.of(context).removeCurrentSnackBar();
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(
-            behavior: SnackBarBehavior.floating,
-            backgroundColor: const Color(0xFF1E1E2C),
-            duration: const Duration(seconds: 2),
-            content: const Text(
-              'Press back again to exit Voidflix',
-              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-              textAlign: TextAlign.center,
-            ),
-            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+      _lastBackPressTime = now;
+      return;
+    }
+
+    // Only if ALREADY in the Left Navigation Rail: double-back within 2 seconds exits the app.
+    if (_lastBackPressTime == null || now.difference(_lastBackPressTime!) > const Duration(seconds: 2)) {
+      _lastBackPressTime = now;
+      _exitToastTimer?.cancel();
+      _exitToastTimer = Timer(const Duration(seconds: 2), () {
+        _lastBackPressTime = null;
+      });
+      ScaffoldMessenger.of(context).removeCurrentSnackBar();
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          behavior: SnackBarBehavior.floating,
+          backgroundColor: const Color(0xFF1E1E2C),
+          duration: const Duration(seconds: 2),
+          content: const Text(
+            'Press back again to exit Voidflix',
+            style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+            textAlign: TextAlign.center,
           ),
-        );
-      } else {
-        SystemNavigator.pop();
-      }
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+        ),
+      );
+    } else {
+      _lastBackPressTime = null;
+      _exitToastTimer?.cancel();
+      SystemNavigator.pop();
     }
   }
 
@@ -397,12 +425,8 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
         onKeyEvent: (node, event) {
           if (event is KeyDownEvent) {
             final key = event.logicalKey;
-            if (key == LogicalKeyboardKey.goBack ||
-                key == LogicalKeyboardKey.escape ||
-                key == LogicalKeyboardKey.backspace ||
-                key == LogicalKeyboardKey.browserBack ||
-                key.keyId == 0x00100000004 ||
-                key.keyId == 4) {
+            // Desktop keyboard shortcut (escape). Hardware back is handled natively by PopScope.
+            if (key == LogicalKeyboardKey.escape) {
               _handleTvBack();
               return KeyEventResult.handled;
             }

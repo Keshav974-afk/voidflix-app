@@ -7526,12 +7526,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _adjustSpeed(-1);
     } else if (key == LogicalKeyboardKey.bracketRight) {
       _adjustSpeed(1);
-    } else if (key == LogicalKeyboardKey.escape ||
-        key == LogicalKeyboardKey.backspace ||
-        key == LogicalKeyboardKey.goBack ||
-        key == LogicalKeyboardKey.browserBack ||
-        key.keyId == 0x00100000004 ||
-        key.keyId == 4) {
+    } else if (key == LogicalKeyboardKey.escape) {
       if (_showControls) {
         setState(() => _showControls = false);
         _playerFocusNode.requestFocus();

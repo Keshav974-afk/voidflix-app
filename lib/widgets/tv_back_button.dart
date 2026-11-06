@@ -138,7 +138,7 @@ class _TvScreenWrapperState extends State<TvScreenWrapper> {
     if (widget.onBack != null) {
       widget.onBack!();
     } else if (Navigator.of(context).canPop()) {
-      Navigator.of(context).maybePop();
+      Navigator.of(context).pop();
     }
   }
 
@@ -157,12 +157,9 @@ class _TvScreenWrapperState extends State<TvScreenWrapper> {
         onKeyEvent: (node, event) {
           if (event is KeyDownEvent) {
             final key = event.logicalKey;
-            if (key == LogicalKeyboardKey.goBack ||
-                key == LogicalKeyboardKey.escape ||
-                key == LogicalKeyboardKey.backspace ||
-                key == LogicalKeyboardKey.browserBack ||
-                key.keyId == 0x00100000004 ||
-                key.keyId == 4) {
+            // Desktop keyboard shortcut (escape). Hardware back is handled natively by PopScope.
+            // Do NOT intercept backspace (breaks text fields) or duplicate hardware back.
+            if (key == LogicalKeyboardKey.escape) {
               _triggerBack();
               return KeyEventResult.handled;
             }

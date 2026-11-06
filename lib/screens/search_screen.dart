@@ -22,6 +22,8 @@ class SearchScreen extends StatefulWidget {
 
 class _SearchScreenState extends State<SearchScreen> {
   final TextEditingController _controller = TextEditingController();
+  final FocusNode _searchFocusNode = FocusNode();
+  final FocusNode _firstResultFocusNode = FocusNode();
   final ApiService _apiService = ApiService();
   Timer? _debounce;
   List<MediaItem> _results = [];
@@ -142,6 +144,8 @@ class _SearchScreenState extends State<SearchScreen> {
   void dispose() {
     _debounce?.cancel();
     _controller.dispose();
+    _searchFocusNode.dispose();
+    _firstResultFocusNode.dispose();
     super.dispose();
   }
 
@@ -167,10 +171,25 @@ class _SearchScreenState extends State<SearchScreen> {
             color: const Color(0xFF23232B),
             borderRadius: BorderRadius.circular(6),
           ),
-          child: TextField(
-            controller: _controller,
-            onChanged: _onSearchChanged,
-            style: const TextStyle(color: Colors.white, fontSize: 15),
+          child: Focus(
+            onKeyEvent: (node, event) {
+              if (event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.arrowDown) {
+                _firstResultFocusNode.requestFocus();
+                return KeyEventResult.handled;
+              }
+              return KeyEventResult.ignored;
+            },
+            child: TextField(
+              focusNode: _searchFocusNode,
+              controller: _controller,
+              textInputAction: TextInputAction.search,
+              onSubmitted: (query) {
+                _performSearch(query);
+                FocusScope.of(context).unfocus();
+                _firstResultFocusNode.requestFocus();
+              },
+              onChanged: _onSearchChanged,
+              style: const TextStyle(color: Colors.white, fontSize: 15),
             decoration: InputDecoration(
               hintText: 'Search shows, movies, games...',
               hintStyle: const TextStyle(color: Colors.white54, fontSize: 14),
@@ -191,6 +210,7 @@ class _SearchScreenState extends State<SearchScreen> {
               border: InputBorder.none,
               contentPadding: const EdgeInsets.symmetric(vertical: 12),
             ),
+          ),
           ),
         ),
       ),
@@ -323,6 +343,7 @@ class _SearchScreenState extends State<SearchScreen> {
                           if (index % 4 == 3) badgeText = 'New Episode';
 
                           return TvFocusable(
+                            focusNode: index == 0 ? _firstResultFocusNode : null,
                             scaleFactor: 1.02,
                             glowColor: AppTheme.primaryRed,
                             borderRadius: BorderRadius.circular(8),

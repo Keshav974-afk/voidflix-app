@@ -4,6 +4,7 @@ import 'package:cached_network_image/cached_network_image.dart';
 import '../providers/profile_provider.dart';
 import '../services/avatar_service.dart';
 import '../widgets/tv_back_button.dart';
+import '../widgets/tv_focusable.dart';
 
 class AvatarItem {
   final String id;
@@ -80,8 +81,11 @@ class _ChooseIconScreenState extends State<ChooseIconScreen> {
   }
 
   Widget _buildAvatarCard(AvatarItem item) {
-    return GestureDetector(
-      onTap: () => _selectAvatar(item),
+    return TvFocusable(
+      scaleFactor: 1.1,
+      glowColor: const Color(0xFFE50914),
+      borderRadius: BorderRadius.circular(10),
+      onPressed: () => _selectAvatar(item),
       child: ClipRRect(
         borderRadius: BorderRadius.circular(10),
         child: Container(
@@ -249,6 +253,8 @@ class _ChooseIconScreenState extends State<ChooseIconScreen> {
                     ),
                     child: TextField(
                       controller: _searchController,
+                      textInputAction: TextInputAction.search,
+                      onSubmitted: (_) => FocusScope.of(context).nextFocus(),
                       style: const TextStyle(color: Colors.white, fontSize: 14),
                       decoration: InputDecoration(
                         hintText: 'Search 970+ characters or shows...',

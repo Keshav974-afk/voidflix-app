@@ -10,6 +10,7 @@ import '../services/avatar_service.dart';
 import '../screens/choose_icon_screen.dart';
 import '../screens/profile_gate_screen.dart';
 import 'profile_avatar.dart';
+import 'tv_focusable.dart';
 
 /// Authentic Netflix "Choose your profile" bottom modal matching Screenshot 1.
 ///
@@ -60,6 +61,19 @@ class ProfileSwitcherSheet extends StatelessWidget {
           content: TextField(
             controller: pinCtl,
             keyboardType: TextInputType.number,
+            textInputAction: TextInputAction.done,
+            onSubmitted: (_) {
+              if (pinCtl.text == profile.pin) {
+                context.read<ProfileProvider>().setActiveProfile(profile);
+                Navigator.of(dialogCtx).pop();
+                Navigator.of(context).pop();
+              } else {
+                setDialogState(() {
+                  errorText = 'Incorrect PIN';
+                  pinCtl.clear();
+                });
+              }
+            },
             maxLength: 4,
             obscureText: true,
             autofocus: true,
@@ -91,12 +105,24 @@ class ProfileSwitcherSheet extends StatelessWidget {
             },
           ),
           actions: [
-            TextButton(
+            TvFocusable(
+              scaleFactor: 1.05,
+              borderRadius: BorderRadius.circular(8),
               onPressed: () => Navigator.of(dialogCtx).pop(),
-              child: const Text('Cancel', style: TextStyle(color: Colors.white60)),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                decoration: BoxDecoration(
+                  color: Colors.white10,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Text('Cancel', style: TextStyle(color: Colors.white70, fontWeight: FontWeight.w600)),
+              ),
             ),
-            ElevatedButton(
-              style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryRed),
+            const SizedBox(width: 8),
+            TvFocusable(
+              scaleFactor: 1.05,
+              glowColor: AppTheme.primaryRed,
+              borderRadius: BorderRadius.circular(8),
               onPressed: () {
                 if (pinCtl.text == profile.pin) {
                   context.read<ProfileProvider>().setActiveProfile(profile);
@@ -109,7 +135,14 @@ class ProfileSwitcherSheet extends StatelessWidget {
                   });
                 }
               },
-              child: const Text('Unlock', style: TextStyle(color: Colors.white)),
+              child: Container(
+                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                decoration: BoxDecoration(
+                  color: AppTheme.primaryRed,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: const Text('Unlock', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+              ),
             ),
           ],
         ),
@@ -272,16 +305,19 @@ class ProfileSwitcherSheet extends StatelessWidget {
                         itemBuilder: (ctx, idx) {
                           final av = AvatarService.defaultFeatured[idx];
                           final isSelected = av.url == selectedAvatarUrl;
-                          return GestureDetector(
-                            onTap: () => setModalState(() => selectedAvatarUrl = av.url),
+                          return TvFocusable(
+                            scaleFactor: 1.1,
+                            glowColor: isSelected ? Colors.white : AppTheme.primaryRed,
+                            borderRadius: BorderRadius.circular(10),
+                            onPressed: () => setModalState(() => selectedAvatarUrl = av.url),
                             child: Container(
                               width: 54,
                               height: 54,
                               decoration: BoxDecoration(
                                 borderRadius: BorderRadius.circular(10),
                                 border: Border.all(
-                                  color: isSelected ? Colors.white : Colors.transparent,
-                                  width: 2.5,
+                                  color: isSelected ? Colors.white : Colors.white24,
+                                  width: isSelected ? 2.5 : 1.0,
                                 ),
                               ),
                               child: ClipRRect(
@@ -301,6 +337,8 @@ class ProfileSwitcherSheet extends StatelessWidget {
                     const SizedBox(height: 18),
                     TextField(
                       controller: nameController,
+                      textInputAction: TextInputAction.next,
+                      onSubmitted: (_) => FocusScope.of(ctx).nextFocus(),
                       style: const TextStyle(color: Colors.white),
                       decoration: InputDecoration(
                         labelText: 'Profile Name',
@@ -328,6 +366,19 @@ class ProfileSwitcherSheet extends StatelessWidget {
                     TextField(
                       controller: pinController,
                       keyboardType: TextInputType.number,
+                      textInputAction: TextInputAction.done,
+                      onSubmitted: (_) {
+                        final name = nameController.text.trim();
+                        if (name.isEmpty) return;
+                        context.read<ProfileProvider>().addProfile(
+                              name: name,
+                              colorIndex: 0,
+                              isKids: isKids,
+                              pin: pinController.text.trim().isEmpty ? null : pinController.text.trim(),
+                              avatar: selectedAvatarUrl,
+                            );
+                        Navigator.of(bottomCtx).pop();
+                      },
                       maxLength: 4,
                       obscureText: true,
                       style: const TextStyle(color: Colors.white, letterSpacing: 4),
@@ -343,26 +394,30 @@ class ProfileSwitcherSheet extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(height: 24),
-                    SizedBox(
-                      width: double.infinity,
-                      height: 48,
-                      child: ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: AppTheme.primaryRed,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    TvFocusable(
+                      scaleFactor: 1.02,
+                      glowColor: AppTheme.primaryRed,
+                      borderRadius: BorderRadius.circular(10),
+                      onPressed: () {
+                        final name = nameController.text.trim();
+                        if (name.isEmpty) return;
+                        context.read<ProfileProvider>().addProfile(
+                              name: name,
+                              colorIndex: 0,
+                              isKids: isKids,
+                              pin: pinController.text.trim().isEmpty ? null : pinController.text.trim(),
+                              avatar: selectedAvatarUrl,
+                            );
+                        Navigator.of(bottomCtx).pop();
+                      },
+                      child: Container(
+                        width: double.infinity,
+                        height: 48,
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          color: AppTheme.primaryRed,
+                          borderRadius: BorderRadius.circular(10),
                         ),
-                        onPressed: () {
-                          final name = nameController.text.trim();
-                          if (name.isEmpty) return;
-                          context.read<ProfileProvider>().addProfile(
-                                name: name,
-                                colorIndex: 0,
-                                isKids: isKids,
-                                pin: pinController.text.trim().isEmpty ? null : pinController.text.trim(),
-                                avatar: selectedAvatarUrl,
-                              );
-                          Navigator.of(bottomCtx).pop();
-                        },
                         child: const Text('Save Profile', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
                       ),
                     ),

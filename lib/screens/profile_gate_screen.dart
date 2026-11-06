@@ -262,6 +262,8 @@ class _ProfileGateScreenState extends State<ProfileGateScreen> {
                     TextField(
                       controller: pinController,
                       keyboardType: TextInputType.number,
+                      textInputAction: TextInputAction.done,
+                      onSubmitted: (_) => handleUnlock(),
                       maxLength: 4,
                       obscureText: true,
                       autofocus: true,
@@ -305,35 +307,57 @@ class _ProfileGateScreenState extends State<ProfileGateScreen> {
                     Row(
                       children: [
                         Expanded(
-                          child: TextButton(
+                          child: TvFocusable(
+                            scaleFactor: 1.05,
+                            borderRadius: BorderRadius.circular(8),
                             onPressed: () => Navigator.of(dialogCtx).pop(),
-                            child: const Text('Cancel', style: TextStyle(color: Colors.white60)),
+                            child: Container(
+                              alignment: Alignment.center,
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              decoration: BoxDecoration(
+                                color: Colors.white10,
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: const Text('Cancel', style: TextStyle(color: Colors.white70, fontWeight: FontWeight.w600)),
+                            ),
                           ),
                         ),
                         const SizedBox(width: 12),
                         Expanded(
-                          child: ElevatedButton(
-                            style: ElevatedButton.styleFrom(
-                              backgroundColor: AppTheme.primaryRed,
-                              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                            ),
+                          child: TvFocusable(
+                            scaleFactor: 1.05,
+                            glowColor: AppTheme.primaryRed,
+                            borderRadius: BorderRadius.circular(8),
                             onPressed: handleUnlock,
-                            child: const Text('Unlock', style: TextStyle(color: Colors.white)),
+                            child: Container(
+                              alignment: Alignment.center,
+                              padding: const EdgeInsets.symmetric(vertical: 12),
+                              decoration: BoxDecoration(
+                                color: AppTheme.primaryRed,
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: const Text('Unlock', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+                            ),
                           ),
                         ),
                       ],
                     ),
                     const SizedBox(height: 12),
-                    TextButton(
+                    TvFocusable(
+                      scaleFactor: 1.05,
+                      borderRadius: BorderRadius.circular(8),
                       onPressed: () {
                         _showForgotPinDeleteDialog(profile, dialogCtx);
                       },
-                      child: const Text(
-                        'Forgot PIN? Delete Profile',
-                        style: TextStyle(
-                          color: Colors.redAccent,
-                          fontSize: 13,
-                          fontWeight: FontWeight.w600,
+                      child: const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 8),
+                        child: Text(
+                          'Forgot PIN? Delete Profile',
+                          style: TextStyle(
+                            color: Colors.redAccent,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
                       ),
                     ),
@@ -362,12 +386,24 @@ class _ProfileGateScreenState extends State<ProfileGateScreen> {
           style: const TextStyle(color: Colors.white70, fontSize: 14),
         ),
         actions: [
-          TextButton(
+          TvFocusable(
+            scaleFactor: 1.05,
+            borderRadius: BorderRadius.circular(8),
             onPressed: () => Navigator.of(confirmCtx).pop(),
-            child: const Text('Cancel', style: TextStyle(color: Colors.white60)),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              decoration: BoxDecoration(
+                color: Colors.white10,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Text('Cancel', style: TextStyle(color: Colors.white70, fontWeight: FontWeight.w600)),
+            ),
           ),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: const Color(0xFFE50914)),
+          const SizedBox(width: 8),
+          TvFocusable(
+            scaleFactor: 1.05,
+            glowColor: const Color(0xFFE50914),
+            borderRadius: BorderRadius.circular(8),
             onPressed: () async {
               Navigator.of(confirmCtx).pop();
               Navigator.of(pinDialogCtx).pop();
@@ -381,7 +417,14 @@ class _ProfileGateScreenState extends State<ProfileGateScreen> {
                 );
               }
             },
-            child: const Text('Delete Profile', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+              decoration: BoxDecoration(
+                color: const Color(0xFFE50914),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Text('Delete Profile', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+            ),
           ),
         ],
       ),
@@ -543,16 +586,19 @@ class _ProfileGateScreenState extends State<ProfileGateScreen> {
                         itemBuilder: (ctx, idx) {
                           final av = AvatarService.defaultFeatured[idx];
                           final isSelected = av.url == selectedAvatarUrl;
-                          return GestureDetector(
-                            onTap: () => setModalState(() => selectedAvatarUrl = av.url),
+                          return TvFocusable(
+                            scaleFactor: 1.1,
+                            glowColor: isSelected ? Colors.white : AppTheme.primaryRed,
+                            borderRadius: BorderRadius.circular(10),
+                            onPressed: () => setModalState(() => selectedAvatarUrl = av.url),
                             child: Container(
                               width: 54,
                               height: 54,
                               decoration: BoxDecoration(
                                 borderRadius: BorderRadius.circular(10),
                                 border: Border.all(
-                                  color: isSelected ? Colors.white : Colors.transparent,
-                                  width: 2.5,
+                                  color: isSelected ? Colors.white : Colors.white24,
+                                  width: isSelected ? 2.5 : 1.0,
                                 ),
                               ),
                               child: ClipRRect(
@@ -572,6 +618,8 @@ class _ProfileGateScreenState extends State<ProfileGateScreen> {
                     const SizedBox(height: 18),
                     TextField(
                       controller: nameController,
+                      textInputAction: TextInputAction.next,
+                      onSubmitted: (_) => FocusScope.of(ctx).nextFocus(),
                       style: const TextStyle(color: Colors.white),
                       decoration: InputDecoration(
                         labelText: 'Profile Name',
@@ -599,6 +647,19 @@ class _ProfileGateScreenState extends State<ProfileGateScreen> {
                     TextField(
                       controller: pinController,
                       keyboardType: TextInputType.number,
+                      textInputAction: TextInputAction.done,
+                      onSubmitted: (_) {
+                        final name = nameController.text.trim();
+                        if (name.isEmpty) return;
+                        context.read<ProfileProvider>().addProfile(
+                              name: name,
+                              colorIndex: 0,
+                              isKids: isKids,
+                              pin: pinController.text.trim().isEmpty ? null : pinController.text.trim(),
+                              avatar: selectedAvatarUrl,
+                            );
+                        Navigator.of(bottomCtx).pop();
+                      },
                       maxLength: 4,
                       obscureText: true,
                       style: const TextStyle(color: Colors.white, letterSpacing: 4),
@@ -614,26 +675,30 @@ class _ProfileGateScreenState extends State<ProfileGateScreen> {
                       ),
                     ),
                     const SizedBox(height: 24),
-                    SizedBox(
-                      width: double.infinity,
-                      height: 48,
-                      child: ElevatedButton(
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: AppTheme.primaryRed,
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                    TvFocusable(
+                      scaleFactor: 1.02,
+                      glowColor: AppTheme.primaryRed,
+                      borderRadius: BorderRadius.circular(10),
+                      onPressed: () {
+                        final name = nameController.text.trim();
+                        if (name.isEmpty) return;
+                        context.read<ProfileProvider>().addProfile(
+                              name: name,
+                              colorIndex: 0,
+                              isKids: isKids,
+                              pin: pinController.text.trim().isEmpty ? null : pinController.text.trim(),
+                              avatar: selectedAvatarUrl,
+                            );
+                        Navigator.of(bottomCtx).pop();
+                      },
+                      child: Container(
+                        width: double.infinity,
+                        height: 48,
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
+                          color: AppTheme.primaryRed,
+                          borderRadius: BorderRadius.circular(10),
                         ),
-                        onPressed: () {
-                          final name = nameController.text.trim();
-                          if (name.isEmpty) return;
-                          context.read<ProfileProvider>().addProfile(
-                                name: name,
-                                colorIndex: 0,
-                                isKids: isKids,
-                                pin: pinController.text.trim().isEmpty ? null : pinController.text.trim(),
-                                avatar: selectedAvatarUrl,
-                              );
-                          Navigator.of(bottomCtx).pop();
-                        },
                         child: const Text('Save Profile', style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.white)),
                       ),
                     ),
@@ -875,18 +940,29 @@ class _ProfileGateScreenState extends State<ProfileGateScreen> {
                                       style: TextStyle(color: Colors.white60, fontSize: 13),
                                     ),
                                     const SizedBox(height: 18),
-                                    ElevatedButton.icon(
-                                      style: ElevatedButton.styleFrom(
-                                        backgroundColor: AppTheme.primaryRed,
-                                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                                      ),
-                                      icon: const Icon(Icons.add, color: Colors.white),
-                                      label: const Text(
-                                        'Create Profile',
-                                        style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-                                      ),
+                                    TvFocusable(
+                                      scaleFactor: 1.05,
+                                      glowColor: AppTheme.primaryRed,
+                                      borderRadius: BorderRadius.circular(10),
                                       onPressed: _showAddProfileModal,
+                                      child: Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
+                                        decoration: BoxDecoration(
+                                          color: AppTheme.primaryRed,
+                                          borderRadius: BorderRadius.circular(10),
+                                        ),
+                                        child: const Row(
+                                          mainAxisSize: MainAxisSize.min,
+                                          children: [
+                                            Icon(Icons.add, color: Colors.white),
+                                            SizedBox(width: 8),
+                                            Text(
+                                              'Create Profile',
+                                              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+                                            ),
+                                          ],
+                                        ),
+                                      ),
                                     ),
                                   ],
                                 )

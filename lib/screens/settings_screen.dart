@@ -402,6 +402,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
                         padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
                         child: TextField(
                           onChanged: (q) => setModalState(() => query = q),
+                          textInputAction: TextInputAction.search,
+                          onSubmitted: (_) => FocusScope.of(ctx).nextFocus(),
                           style: const TextStyle(color: Colors.white, fontSize: 14),
                           decoration: InputDecoration(
                             hintText: 'Search language...',

@@ -286,32 +286,38 @@ class _DetailScreenState extends State<DetailScreen> {
   @override
   Widget build(BuildContext context) {
     if (_isLoading) {
-      return const Scaffold(
-        backgroundColor: AppTheme.background,
-        body: Center(
-          child: CircularProgressIndicator(color: AppTheme.primaryRed),
+      return TvScreenWrapper(
+        onBack: () => Navigator.of(context).pop(),
+        child: const Scaffold(
+          backgroundColor: AppTheme.background,
+          body: Center(
+            child: CircularProgressIndicator(color: AppTheme.primaryRed),
+          ),
         ),
       );
     }
 
     if (_error != null || _detail == null) {
-      return Scaffold(
-        backgroundColor: AppTheme.background,
-        appBar: AppBar(),
-        body: Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Icon(Icons.error_outline, color: AppTheme.primaryRed, size: 48),
-              const SizedBox(height: 16),
-              const Text('Failed to load media details', style: TextStyle(color: Colors.white)),
-              const SizedBox(height: 12),
-              ElevatedButton(
-                onPressed: _loadDetail,
-                style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryRed),
-                child: const Text('Retry'),
-              ),
-            ],
+      return TvScreenWrapper(
+        onBack: () => Navigator.of(context).pop(),
+        child: Scaffold(
+          backgroundColor: AppTheme.background,
+          appBar: AppBar(leading: const TvBackButton()),
+          body: Center(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.error_outline, color: AppTheme.primaryRed, size: 48),
+                const SizedBox(height: 16),
+                const Text('Failed to load media details', style: TextStyle(color: Colors.white)),
+                const SizedBox(height: 12),
+                ElevatedButton(
+                  onPressed: _loadDetail,
+                  style: ElevatedButton.styleFrom(backgroundColor: AppTheme.primaryRed),
+                  child: const Text('Retry'),
+                ),
+              ],
+            ),
           ),
         ),
       );
