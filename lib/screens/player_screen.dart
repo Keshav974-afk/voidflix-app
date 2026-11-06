@@ -5341,9 +5341,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                 padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
                                 child: Row(
                                   children: [
-                                    IconButton(
-                                      icon: const Icon(Icons.arrow_back, color: Colors.white, size: 26),
-                                      onPressed: _handleSmoothBack,
+                                    ExcludeFocus(
+                                      child: IconButton(
+                                        icon: const Icon(Icons.arrow_back, color: Colors.white, size: 26),
+                                        onPressed: _handleSmoothBack,
+                                      ),
                                     ),
                                     Expanded(
                                       child: Center(
@@ -5413,34 +5415,36 @@ class _PlayerScreenState extends State<PlayerScreen> {
                             ),
 
                             // --- Center Controls (Matching Screenshot 1: 10s Rewind, Solid White Play/Pause, 10s Forward) ---
-                            Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                IconButton(
-                                  iconSize: 44,
-                                  icon: const Icon(Icons.replay_10_rounded, color: Colors.white),
-                                  tooltip: 'Rewind 10s',
-                                  onPressed: () => _seekRelative(-10),
-                                ),
-                                const SizedBox(width: 48),
-                                IconButton(
-                                  iconSize: 68,
-                                  padding: EdgeInsets.zero,
-                                  icon: Icon(
-                                    _isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
-                                    color: Colors.white,
+                            ExcludeFocus(
+                              child: Row(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  IconButton(
+                                    iconSize: 44,
+                                    icon: const Icon(Icons.replay_10_rounded, color: Colors.white),
+                                    tooltip: 'Rewind 10s',
+                                    onPressed: () => _seekRelative(-10),
                                   ),
-                                  tooltip: _isPlaying ? 'Pause' : 'Play',
-                                  onPressed: _togglePlayPause,
-                                ),
-                                const SizedBox(width: 48),
-                                IconButton(
-                                  iconSize: 44,
-                                  icon: const Icon(Icons.forward_10_rounded, color: Colors.white),
-                                  tooltip: 'Forward 10s',
-                                  onPressed: () => _seekRelative(10),
-                                ),
-                              ],
+                                  const SizedBox(width: 48),
+                                  IconButton(
+                                    iconSize: 68,
+                                    padding: EdgeInsets.zero,
+                                    icon: Icon(
+                                      _isPlaying ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                                      color: Colors.white,
+                                    ),
+                                    tooltip: _isPlaying ? 'Pause' : 'Play',
+                                    onPressed: _togglePlayPause,
+                                  ),
+                                  const SizedBox(width: 48),
+                                  IconButton(
+                                    iconSize: 44,
+                                    icon: const Icon(Icons.forward_10_rounded, color: Colors.white),
+                                    tooltip: 'Forward 10s',
+                                    onPressed: () => _seekRelative(10),
+                                  ),
+                                ],
+                              ),
                             ),
 
                             // --- Bottom Controls (Matching Screenshot 1: Seekbar with remaining time, 5 actions) ---
@@ -5466,7 +5470,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                               thumbShape: const RoundSliderThumbShape(enabledThumbRadius: 7),
                                               overlayShape: const RoundSliderOverlayShape(overlayRadius: 14),
                                             ),
-                                            child: Slider(
+                                            child: ExcludeFocus(
+                                              child: Slider(
                                               value: (_isDraggingSeekbar
                                                       ? _dragPositionSec
                                                       : _currentPosition.inSeconds.toDouble())
@@ -5509,6 +5514,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                                 });
                                                 _startHideControlsTimer();
                                               },
+                                            ),
                                             ),
                                           ),
                                         ),
@@ -7461,6 +7467,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
         final currentIdx = nodes.indexWhere((n) => n.hasFocus);
         if (currentIdx > 0) {
           nodes[currentIdx - 1].requestFocus();
+        } else if (currentIdx == 0) {
+          nodes[0].requestFocus();
         }
         _revealControls();
       } else {
@@ -7474,6 +7482,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
         final currentIdx = nodes.indexWhere((n) => n.hasFocus);
         if (currentIdx >= 0 && currentIdx < nodes.length - 1) {
           nodes[currentIdx + 1].requestFocus();
+        } else if (currentIdx == nodes.length - 1) {
+          nodes.last.requestFocus();
         }
         _revealControls();
       } else {
@@ -7517,7 +7527,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
     } else if (key == LogicalKeyboardKey.bracketRight) {
       _adjustSpeed(1);
     } else if (key == LogicalKeyboardKey.escape ||
-        key == LogicalKeyboardKey.backspace) {
+        key == LogicalKeyboardKey.backspace ||
+        key == LogicalKeyboardKey.goBack ||
+        key == LogicalKeyboardKey.browserBack ||
+        key.keyId == 0x00100000004 ||
+        key.keyId == 4) {
       if (_showControls) {
         setState(() => _showControls = false);
         _playerFocusNode.requestFocus();

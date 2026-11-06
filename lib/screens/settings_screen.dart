@@ -16,6 +16,7 @@ import '../core/services/tv_mode_service.dart';
 import '../core/services/cast_service.dart';
 import '../widgets/cast_dialog.dart';
 import '../widgets/tv_back_button.dart';
+import '../widgets/tv_focusable.dart';
 import 'profile_gate_screen.dart';
 
 enum SettingsSection { appSettings, account, help }
@@ -214,37 +215,52 @@ class _SettingsScreenState extends State<SettingsScreen> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
-      builder: (ctx) => Container(
-        padding: const EdgeInsets.symmetric(vertical: 16),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Padding(
-              padding: EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-              child: Text(
-                'Mobile Data Usage',
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
-              ),
-            ),
-            const Divider(color: Color(0xFF262638)),
-            ...options.map((opt) {
-              final isSel = _cellularDataUsage == opt;
-              return ListTile(
-                leading: Icon(
-                  isSel ? Icons.radio_button_checked : Icons.radio_button_off,
-                  color: isSel ? const Color(0xFF0071eb) : Colors.white54,
+      builder: (ctx) => TvScreenWrapper(
+        onBack: () => Navigator.pop(ctx),
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Padding(
+                padding: EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                child: Text(
+                  'Mobile Data Usage',
+                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
                 ),
-                title: Text(opt, style: TextStyle(color: isSel ? Colors.white : Colors.white70)),
-                onTap: () async {
-                  setState(() => _cellularDataUsage = opt);
-                  final prefs = await SharedPreferences.getInstance();
-                  await prefs.setString('voidflix_cellular_data', opt);
-                  if (ctx.mounted) Navigator.pop(ctx);
-                },
-              );
-            }),
-          ],
+              ),
+              const Divider(color: Color(0xFF262638)),
+              ...options.map((opt) {
+                final isSel = _cellularDataUsage == opt;
+                return TvFocusable(
+                  autofocus: isSel,
+                  scaleFactor: 1.02,
+                  glowColor: const Color(0xFF0071eb),
+                  borderRadius: BorderRadius.circular(8),
+                  onPressed: () async {
+                    setState(() => _cellularDataUsage = opt);
+                    final prefs = await SharedPreferences.getInstance();
+                    await prefs.setString('voidflix_cellular_data', opt);
+                    if (ctx.mounted) Navigator.pop(ctx);
+                  },
+                  child: ListTile(
+                    leading: Icon(
+                      isSel ? Icons.radio_button_checked : Icons.radio_button_off,
+                      color: isSel ? const Color(0xFF0071eb) : Colors.white54,
+                    ),
+                    title: Text(opt, style: TextStyle(color: isSel ? Colors.white : Colors.white70)),
+                    onTap: () async {
+                      setState(() => _cellularDataUsage = opt);
+                      final prefs = await SharedPreferences.getInstance();
+                      await prefs.setString('voidflix_cellular_data', opt);
+                      if (ctx.mounted) Navigator.pop(ctx);
+                    },
+                  ),
+                );
+              }),
+            ],
+          ),
         ),
       ),
     );
@@ -263,47 +279,66 @@ class _SettingsScreenState extends State<SettingsScreen> {
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
-      builder: (ctx) => Container(
-        padding: const EdgeInsets.symmetric(vertical: 16),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-              child: Text(
-                isDownload ? 'Download Video Quality' : 'Preferred Video Quality',
-                style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
-              ),
-            ),
-            const Divider(color: Color(0xFF262638)),
-            ...options.map((opt) {
-              final currentVal = isDownload ? _downloadQuality : _preferredQuality;
-              final isSel = currentVal == opt['title'] ||
-                  (currentVal.contains('1080') && opt['title']!.contains('1080')) ||
-                  (currentVal.contains('4K') && opt['title']!.contains('4K')) ||
-                  (currentVal.contains('720') && opt['title']!.contains('720')) ||
-                  (currentVal.contains('480') && opt['title']!.contains('480'));
-              return ListTile(
-                leading: Icon(
-                  isSel ? Icons.radio_button_checked : Icons.radio_button_off,
-                  color: isSel ? const Color(0xFF0071eb) : Colors.white54,
+      builder: (ctx) => TvScreenWrapper(
+        onBack: () => Navigator.pop(ctx),
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
+                child: Text(
+                  isDownload ? 'Download Video Quality' : 'Preferred Video Quality',
+                  style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
                 ),
-                title: Text(opt['title']!, style: TextStyle(color: isSel ? Colors.white : Colors.white70, fontWeight: FontWeight.bold)),
-                subtitle: Text(opt['desc']!, style: const TextStyle(color: Colors.white38, fontSize: 12)),
-                onTap: () async {
-                  setState(() {
-                    _preferredQuality = opt['title']!;
-                    _downloadQuality = opt['title']!;
-                  });
-                  final prefs = await SharedPreferences.getInstance();
-                  await prefs.setString('voidflix_preferred_quality', opt['title']!);
-                  await prefs.setString('voidflix_download_quality', opt['title']!);
-                  if (ctx.mounted) Navigator.pop(ctx);
-                },
-              );
-            }),
-          ],
+              ),
+              const Divider(color: Color(0xFF262638)),
+              ...options.map((opt) {
+                final currentVal = isDownload ? _downloadQuality : _preferredQuality;
+                final isSel = currentVal == opt['title'] ||
+                    (currentVal.contains('1080') && opt['title']!.contains('1080')) ||
+                    (currentVal.contains('4K') && opt['title']!.contains('4K')) ||
+                    (currentVal.contains('720') && opt['title']!.contains('720')) ||
+                    (currentVal.contains('480') && opt['title']!.contains('480'));
+                return TvFocusable(
+                  autofocus: isSel,
+                  scaleFactor: 1.02,
+                  glowColor: const Color(0xFF0071eb),
+                  borderRadius: BorderRadius.circular(8),
+                  onPressed: () async {
+                    setState(() {
+                      _preferredQuality = opt['title']!;
+                      _downloadQuality = opt['title']!;
+                    });
+                    final prefs = await SharedPreferences.getInstance();
+                    await prefs.setString('voidflix_preferred_quality', opt['title']!);
+                    await prefs.setString('voidflix_download_quality', opt['title']!);
+                    if (ctx.mounted) Navigator.pop(ctx);
+                  },
+                  child: ListTile(
+                    leading: Icon(
+                      isSel ? Icons.radio_button_checked : Icons.radio_button_off,
+                      color: isSel ? const Color(0xFF0071eb) : Colors.white54,
+                    ),
+                    title: Text(opt['title']!, style: TextStyle(color: isSel ? Colors.white : Colors.white70, fontWeight: FontWeight.bold)),
+                    subtitle: Text(opt['desc']!, style: const TextStyle(color: Colors.white38, fontSize: 12)),
+                    onTap: () async {
+                      setState(() {
+                        _preferredQuality = opt['title']!;
+                        _downloadQuality = opt['title']!;
+                      });
+                      final prefs = await SharedPreferences.getInstance();
+                      await prefs.setString('voidflix_preferred_quality', opt['title']!);
+                      await prefs.setString('voidflix_download_quality', opt['title']!);
+                      if (ctx.mounted) Navigator.pop(ctx);
+                    },
+                  ),
+                );
+              }),
+            ],
+          ),
         ),
       ),
     );
@@ -329,90 +364,103 @@ class _SettingsScreenState extends State<SettingsScreen> {
             final filtered = options.where((o) => o.toLowerCase().contains(query.toLowerCase())).toList();
 
             return SafeArea(
-              child: Container(
-                height: MediaQuery.of(ctx).size.height * 0.75,
-                padding: const EdgeInsets.symmetric(vertical: 14),
-                child: Column(
-                  children: [
-                    Center(
-                      child: Container(
-                        width: 36,
-                        height: 4,
-                        margin: const EdgeInsets.only(bottom: 12),
-                        decoration: BoxDecoration(
-                          color: Colors.white24,
-                          borderRadius: BorderRadius.circular(2),
-                        ),
-                      ),
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
-                      child: Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(
-                            title,
-                            style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
-                          ),
-                          IconButton(
-                            icon: const Icon(Icons.close, color: Colors.white54, size: 20),
-                            onPressed: () => Navigator.pop(ctx),
-                          ),
-                        ],
-                      ),
-                    ),
-                    Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
-                      child: TextField(
-                        onChanged: (q) => setModalState(() => query = q),
-                        style: const TextStyle(color: Colors.white, fontSize: 14),
-                        decoration: InputDecoration(
-                          hintText: 'Search language...',
-                          hintStyle: const TextStyle(color: Colors.white38, fontSize: 14),
-                          prefixIcon: const Icon(Icons.search, color: Colors.white54, size: 20),
-                          filled: true,
-                          fillColor: const Color(0xFF222222),
-                          contentPadding: const EdgeInsets.symmetric(vertical: 0, horizontal: 16),
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.circular(12),
-                            borderSide: BorderSide.none,
+              child: TvScreenWrapper(
+                onBack: () => Navigator.pop(ctx),
+                child: Container(
+                  height: MediaQuery.of(ctx).size.height * 0.75,
+                  padding: const EdgeInsets.symmetric(vertical: 14),
+                  child: Column(
+                    children: [
+                      Center(
+                        child: Container(
+                          width: 36,
+                          height: 4,
+                          margin: const EdgeInsets.only(bottom: 12),
+                          decoration: BoxDecoration(
+                            color: Colors.white24,
+                            borderRadius: BorderRadius.circular(2),
                           ),
                         ),
                       ),
-                    ),
-                    const Divider(color: Colors.white12, height: 1),
-                    Expanded(
-                      child: ListView.builder(
-                        itemCount: filtered.length,
-                        itemBuilder: (context, idx) {
-                          final opt = filtered[idx];
-                          final isSel = current == opt;
-                          final info = LanguageUtils.getInfo(opt);
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 4),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Text(
+                              title,
+                              style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.white),
+                            ),
+                            IconButton(
+                              icon: const Icon(Icons.close, color: Colors.white54, size: 20),
+                              onPressed: () => Navigator.pop(ctx),
+                            ),
+                          ],
+                        ),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 8),
+                        child: TextField(
+                          onChanged: (q) => setModalState(() => query = q),
+                          style: const TextStyle(color: Colors.white, fontSize: 14),
+                          decoration: InputDecoration(
+                            hintText: 'Search language...',
+                            hintStyle: const TextStyle(color: Colors.white38, fontSize: 14),
+                            prefixIcon: const Icon(Icons.search, color: Colors.white54, size: 20),
+                            filled: true,
+                            fillColor: const Color(0xFF222222),
+                            contentPadding: const EdgeInsets.symmetric(vertical: 0, horizontal: 16),
+                            border: OutlineInputBorder(
+                              borderRadius: BorderRadius.circular(12),
+                              borderSide: BorderSide.none,
+                            ),
+                          ),
+                        ),
+                      ),
+                      const Divider(color: Colors.white12, height: 1),
+                      Expanded(
+                        child: ListView.builder(
+                          itemCount: filtered.length,
+                          itemBuilder: (context, idx) {
+                            final opt = filtered[idx];
+                            final isSel = current == opt;
+                            final info = LanguageUtils.getInfo(opt);
 
-                          return ListTile(
-                            leading: Text(
-                              opt.contains('Original') ? '🔊' : (opt.contains('Off') ? '🚫' : info.flag),
-                              style: const TextStyle(fontSize: 20),
-                            ),
-                            title: Text(
-                              opt,
-                              style: TextStyle(
-                                color: isSel ? Colors.white : Colors.white70,
-                                fontWeight: isSel ? FontWeight.bold : FontWeight.normal,
+                            return TvFocusable(
+                              autofocus: isSel,
+                              scaleFactor: 1.02,
+                              glowColor: AppTheme.primaryRed,
+                              borderRadius: BorderRadius.circular(8),
+                              onPressed: () async {
+                                await onSelected(opt);
+                                if (ctx.mounted) Navigator.pop(ctx);
+                              },
+                              child: ListTile(
+                                leading: Text(
+                                  opt.contains('Original') ? '🔊' : (opt.contains('Off') ? '🚫' : info.flag),
+                                  style: const TextStyle(fontSize: 20),
+                                ),
+                                title: Text(
+                                  opt,
+                                  style: TextStyle(
+                                    color: isSel ? Colors.white : Colors.white70,
+                                    fontWeight: isSel ? FontWeight.bold : FontWeight.normal,
+                                  ),
+                                ),
+                                trailing: isSel
+                                    ? const Icon(Icons.check_circle_rounded, color: AppTheme.primaryRed, size: 22)
+                                    : null,
+                                onTap: () async {
+                                  await onSelected(opt);
+                                  if (ctx.mounted) Navigator.pop(ctx);
+                                },
                               ),
-                            ),
-                            trailing: isSel
-                                ? const Icon(Icons.check_circle_rounded, color: AppTheme.primaryRed, size: 22)
-                                : null,
-                            onTap: () async {
-                              await onSelected(opt);
-                              if (ctx.mounted) Navigator.pop(ctx);
-                            },
-                          );
-                        },
+                            );
+                          },
+                        ),
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
                 ),
               ),
             );
@@ -1141,21 +1189,27 @@ class _SettingsScreenState extends State<SettingsScreen> {
     Widget? trailing,
     required VoidCallback onTap,
   }) {
-    return ListTile(
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
-      leading: Icon(leading, color: Colors.white70, size: 22),
-      title: Text(
-        title,
-        style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w500),
+    return TvFocusable(
+      scaleFactor: 1.02,
+      glowColor: AppTheme.primaryRed,
+      borderRadius: BorderRadius.circular(8),
+      onPressed: onTap,
+      child: ListTile(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+        leading: Icon(leading, color: Colors.white70, size: 22),
+        title: Text(
+          title,
+          style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w500),
+        ),
+        subtitle: subtitle != null
+            ? Text(
+                subtitle,
+                style: const TextStyle(color: Colors.white54, fontSize: 13),
+              )
+            : null,
+        trailing: trailing,
+        onTap: onTap,
       ),
-      subtitle: subtitle != null
-          ? Text(
-              subtitle,
-              style: const TextStyle(color: Colors.white54, fontSize: 13),
-            )
-          : null,
-      trailing: trailing,
-      onTap: onTap,
     );
   }
 
@@ -1166,25 +1220,31 @@ class _SettingsScreenState extends State<SettingsScreen> {
     required bool value,
     required ValueChanged<bool> onChanged,
   }) {
-    return SwitchListTile(
-      contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
-      secondary: Icon(leading, color: Colors.white70, size: 22),
-      title: Text(
-        title,
-        style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w500),
+    return TvFocusable(
+      scaleFactor: 1.02,
+      glowColor: AppTheme.primaryRed,
+      borderRadius: BorderRadius.circular(8),
+      onPressed: () => onChanged(!value),
+      child: SwitchListTile(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 2),
+        secondary: Icon(leading, color: Colors.white70, size: 22),
+        title: Text(
+          title,
+          style: const TextStyle(color: Colors.white, fontSize: 15, fontWeight: FontWeight.w500),
+        ),
+        subtitle: subtitle != null
+            ? Text(
+                subtitle,
+                style: const TextStyle(color: Colors.white54, fontSize: 13),
+              )
+            : null,
+        activeThumbColor: Colors.white,
+        activeTrackColor: const Color(0xFF0071eb),
+        inactiveThumbColor: Colors.white60,
+        inactiveTrackColor: const Color(0xFF333333),
+        value: value,
+        onChanged: onChanged,
       ),
-      subtitle: subtitle != null
-          ? Text(
-              subtitle,
-              style: const TextStyle(color: Colors.white54, fontSize: 13),
-            )
-          : null,
-      activeThumbColor: Colors.white,
-      activeTrackColor: const Color(0xFF0071eb),
-      inactiveThumbColor: Colors.white60,
-      inactiveTrackColor: const Color(0xFF333333),
-      value: value,
-      onChanged: onChanged,
     );
   }
 

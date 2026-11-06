@@ -11,6 +11,7 @@ import '../models/media_item.dart';
 import 'detail_screen.dart';
 import 'player_screen.dart';
 import '../widgets/tv_back_button.dart';
+import '../widgets/tv_focusable.dart';
 
 class SearchScreen extends StatefulWidget {
   const SearchScreen({super.key});
@@ -321,8 +322,11 @@ class _SearchScreenState extends State<SearchScreen> {
                           if (index % 4 == 1) badgeText = 'Recently added';
                           if (index % 4 == 3) badgeText = 'New Episode';
 
-                          return GestureDetector(
-                            onTap: () => _openDetail(item),
+                          return TvFocusable(
+                            scaleFactor: 1.02,
+                            glowColor: AppTheme.primaryRed,
+                            borderRadius: BorderRadius.circular(8),
+                            onPressed: () => _openDetail(item),
                             child: Container(
                               height: 84,
                               color: Colors.transparent,

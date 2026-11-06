@@ -345,6 +345,40 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
         .join(' • ');
   }
 
+  void _handleTvBack() {
+    final now = DateTime.now();
+    if (_lastBackPressTime != null && now.difference(_lastBackPressTime!) < const Duration(milliseconds: 300)) {
+      return;
+    }
+
+    if (!_isNavRailFocused) {
+      // If in content area, Back moves focus into the Navigation Rail
+      setState(() => _isNavRailFocused = true);
+      _navFocusNodes[_activeNavIndex].requestFocus();
+    } else {
+      // If already in rail, require double-back press within 2 seconds to exit app
+      if (_lastBackPressTime == null || now.difference(_lastBackPressTime!) > const Duration(seconds: 2)) {
+        _lastBackPressTime = now;
+        ScaffoldMessenger.of(context).removeCurrentSnackBar();
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            behavior: SnackBarBehavior.floating,
+            backgroundColor: const Color(0xFF1E1E2C),
+            duration: const Duration(seconds: 2),
+            content: const Text(
+              'Press back again to exit Voidflix',
+              style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
+              textAlign: TextAlign.center,
+            ),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+          ),
+        );
+      } else {
+        SystemNavigator.pop();
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final mediaProvider = context.watch<MediaProvider>();
@@ -356,36 +390,27 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
       canPop: false,
       onPopInvokedWithResult: (didPop, result) {
         if (didPop) return;
-        if (!_isNavRailFocused) {
-          // If in content area, Back moves focus into the Navigation Rail
-          setState(() => _isNavRailFocused = true);
-          _navFocusNodes[_activeNavIndex].requestFocus();
-        } else {
-          // If already in rail, require double-back press within 2 seconds to exit app
-          final now = DateTime.now();
-          if (_lastBackPressTime == null || now.difference(_lastBackPressTime!) > const Duration(seconds: 2)) {
-            _lastBackPressTime = now;
-            ScaffoldMessenger.of(context).removeCurrentSnackBar();
-            ScaffoldMessenger.of(context).showSnackBar(
-              SnackBar(
-                behavior: SnackBarBehavior.floating,
-                backgroundColor: const Color(0xFF1E1E2C),
-                duration: const Duration(seconds: 2),
-                content: const Text(
-                  'Press back again to exit Voidflix',
-                  style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-                  textAlign: TextAlign.center,
-                ),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-              ),
-            );
-          } else {
-            SystemNavigator.pop();
-          }
-        }
+        _handleTvBack();
       },
-      child: Scaffold(
-        backgroundColor: Colors.black,
+      child: Focus(
+        canRequestFocus: false,
+        onKeyEvent: (node, event) {
+          if (event is KeyDownEvent) {
+            final key = event.logicalKey;
+            if (key == LogicalKeyboardKey.goBack ||
+                key == LogicalKeyboardKey.escape ||
+                key == LogicalKeyboardKey.backspace ||
+                key == LogicalKeyboardKey.browserBack ||
+                key.keyId == 0x00100000004 ||
+                key.keyId == 4) {
+              _handleTvBack();
+              return KeyEventResult.handled;
+            }
+          }
+          return KeyEventResult.ignored;
+        },
+        child: Scaffold(
+          backgroundColor: Colors.black,
         body: Row(
           children: [
             // ═══════════════════════════════════════════════════════════
@@ -446,6 +471,7 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
           ],
         ),
       ),
+    ),
     );
   }
 

@@ -110,7 +110,7 @@ class TvBackButton extends StatelessWidget {
 /// A wrapper widget that listens for global TV remote back / desktop keyboard back keys
 /// ([LogicalKeyboardKey.escape], [LogicalKeyboardKey.backspace], [LogicalKeyboardKey.goBack])
 /// and automatically invokes [Navigator.maybePop] on the active route.
-class TvScreenWrapper extends StatelessWidget {
+class TvScreenWrapper extends StatefulWidget {
   final Widget child;
   final VoidCallback? onBack;
   final bool enableBackShortcut;
@@ -123,38 +123,53 @@ class TvScreenWrapper extends StatelessWidget {
   });
 
   @override
+  State<TvScreenWrapper> createState() => _TvScreenWrapperState();
+}
+
+class _TvScreenWrapperState extends State<TvScreenWrapper> {
+  DateTime? _lastBackTime;
+
+  void _triggerBack() {
+    final now = DateTime.now();
+    if (_lastBackTime != null && now.difference(_lastBackTime!) < const Duration(milliseconds: 350)) {
+      return;
+    }
+    _lastBackTime = now;
+    if (widget.onBack != null) {
+      widget.onBack!();
+    } else if (Navigator.of(context).canPop()) {
+      Navigator.of(context).maybePop();
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    if (!enableBackShortcut) return child;
+    if (!widget.enableBackShortcut) return widget.child;
 
     return PopScope(
       canPop: false,
       onPopInvokedWithResult: (didPop, result) {
         if (didPop) return;
-        if (onBack != null) {
-          onBack!();
-        } else if (Navigator.of(context).canPop()) {
-          Navigator.of(context).maybePop();
-        }
+        _triggerBack();
       },
       child: Focus(
         canRequestFocus: false,
         onKeyEvent: (node, event) {
           if (event is KeyDownEvent) {
             final key = event.logicalKey;
-            // Desktop keyboard back navigation shortcuts (hardware back handled by PopScope)
-            if (key == LogicalKeyboardKey.escape || key == LogicalKeyboardKey.backspace) {
-              if (onBack != null) {
-                onBack!();
-                return KeyEventResult.handled;
-              } else if (Navigator.of(context).canPop()) {
-                Navigator.of(context).maybePop();
-                return KeyEventResult.handled;
-              }
+            if (key == LogicalKeyboardKey.goBack ||
+                key == LogicalKeyboardKey.escape ||
+                key == LogicalKeyboardKey.backspace ||
+                key == LogicalKeyboardKey.browserBack ||
+                key.keyId == 0x00100000004 ||
+                key.keyId == 4) {
+              _triggerBack();
+              return KeyEventResult.handled;
             }
           }
           return KeyEventResult.ignored;
         },
-        child: child,
+        child: widget.child,
       ),
     );
   }
