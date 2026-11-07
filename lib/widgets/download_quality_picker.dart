@@ -3,7 +3,6 @@ import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
-import '../core/constants/theme_constants.dart';
 import '../core/services/stream_extractor.dart';
 import '../core/services/subtitle_service.dart';
 import '../core/utils/language_utils.dart';
@@ -38,8 +37,8 @@ class _ExtractedQualityItem {
       }
       return '${mb.toStringAsFixed(0)} MB';
     }
-    if (isProbingSize) return 'Checking size…';
-    return isHls ? 'HLS Stream' : 'Direct MP4';
+    if (isProbingSize) return 'Calculating…';
+    return isHls ? 'HLS' : 'MP4';
   }
 }
 
@@ -75,9 +74,9 @@ class DownloadQualityPicker {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: const Color(0xFF14141C),
+      backgroundColor: const Color(0xFF121212),
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(22)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
       ),
       builder: (sheetCtx) {
         return _DownloadOptionsSheetContent(
@@ -135,15 +134,18 @@ class _DownloadOptionsSheetContent extends StatefulWidget {
 
 class _DownloadOptionsSheetContentState
     extends State<_DownloadOptionsSheetContent> {
-  bool _isExtracting = true;
-  String _extractionStatus = 'Extracting available streams from servers…';
+  static const Color _darkRed = Color(0xFFB81D24);
+  static const Color _darkRedBorder = Color(0xFFE50914);
+  static const Color _cardBg = Color(0xFF1A1A1A);
+  static const Color _selectedBg = Color(0xFF221113);
 
+  bool _isExtracting = true;
   final List<_ExtractedAudioGroup> _audioGroups = [];
   final List<SubtitleTrack> _extractedSubtitles = [];
 
   int _selectedAudioIndex = 0;
   int _selectedQualityIndex = 0;
-  int _selectedSubtitleIndex = -1; // -1 = Off / None
+  int _selectedSubtitleIndex = -1; // -1 = Off
 
   String? _savedPreferredQuality;
   String? _savedPreferredAudio;
@@ -172,7 +174,6 @@ class _DownloadOptionsSheetContentState
     for (final s in streams) {
       if (s.url.isEmpty && s.qualities.isEmpty) continue;
 
-      // Ingest any embedded subtitles from this stream
       for (final sub in s.subtitles) {
         if (sub.url.isEmpty) continue;
         final cleanLabel = LanguageUtils.cleanLanguageName(sub.label);
@@ -327,7 +328,6 @@ class _DownloadOptionsSheetContentState
   Future<void> _probeFileSize(_ExtractedQualityItem item) async {
     try {
       final uri = Uri.parse(item.url);
-      // 1. Try HEAD request first
       final headRes = await http
           .head(uri, headers: item.headers)
           .timeout(const Duration(seconds: 4));
@@ -342,14 +342,11 @@ class _DownloadOptionsSheetContentState
         return;
       }
 
-      // 2. Fallback: Range bytes=0-0 GET request to inspect Content-Range
       final rangeHeaders = Map<String, String>.from(item.headers);
       rangeHeaders['Range'] = 'bytes=0-0';
       final req = http.Request('GET', uri)..headers.addAll(rangeHeaders);
-      final streamed =
-          await req.send().timeout(const Duration(seconds: 4));
+      final streamed = await req.send().timeout(const Duration(seconds: 4));
       final contentRange = streamed.headers['content-range'] ?? '';
-      // e.g. "bytes 0-0/845921024"
       if (contentRange.contains('/')) {
         final totalStr = contentRange.split('/').last.trim();
         final totalBytes = int.tryParse(totalStr);
@@ -374,7 +371,6 @@ class _DownloadOptionsSheetContentState
 
   Future<void> _extractRealStreams() async {
     final tasks = <Future<void>>[
-      // 1. StellarHD / NetMirror (Multi-Audio & Multi-Quality Direct MP4)
       () async {
         try {
           final streams = await StreamExtractor.extractNetMirror(
@@ -386,8 +382,6 @@ class _DownloadOptionsSheetContentState
           _ingestStreams(streams);
         } catch (_) {}
       }(),
-
-      // 2. Voidflix Backend
       () async {
         try {
           final stream = await StreamExtractor.extractVoidflixBackend(
@@ -399,8 +393,6 @@ class _DownloadOptionsSheetContentState
           if (stream != null) _ingestStreams([stream]);
         } catch (_) {}
       }(),
-
-      // 3. Vidlink
       () async {
         try {
           final stream = await StreamExtractor.extractVidlink(
@@ -412,8 +404,6 @@ class _DownloadOptionsSheetContentState
           if (stream != null) _ingestStreams([stream]);
         } catch (_) {}
       }(),
-
-      // 4. NebulaHD & Cine4K
       () async {
         try {
           final streams = await StreamExtractor.extractCinejoy(
@@ -426,8 +416,6 @@ class _DownloadOptionsSheetContentState
           _ingestStreams(streams);
         } catch (_) {}
       }(),
-
-      // 5. External Subtitles (Wyzie / OpenSubtitles)
       () async {
         try {
           final extSubs = await StreamExtractor.getSharedSubtitles(
@@ -466,9 +454,6 @@ class _DownloadOptionsSheetContentState
     if (mounted) {
       setState(() {
         _isExtracting = false;
-        if (_audioGroups.isEmpty) {
-          _extractionStatus = 'No direct streams returned. Ready to use fallback downloader.';
-        }
       });
     }
   }
@@ -538,16 +523,19 @@ class _DownloadOptionsSheetContentState
 
     final summary = selectedQuality != null && selectedGroup != null
         ? '${selectedQuality.label} • ${selectedGroup.languageLabel}'
-        : 'Best Available Quality';
+        : 'Standard';
 
     messenger.showSnackBar(
       SnackBar(
-        backgroundColor: const Color(0xFF1F1F28),
+        backgroundColor: const Color(0xFF181818),
         behavior: SnackBarBehavior.floating,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(8),
+          side: const BorderSide(color: Colors.white12),
+        ),
         content: Row(
           children: [
-            const Icon(Icons.downloading_rounded,
-                color: AppTheme.primaryRed, size: 20),
+            const Icon(Icons.downloading_rounded, color: _darkRedBorder, size: 18),
             const SizedBox(width: 10),
             Expanded(
               child: Text(
@@ -565,7 +553,7 @@ class _DownloadOptionsSheetContentState
   @override
   Widget build(BuildContext context) {
     final displaySubtitle = widget.mediaType == 'tv'
-        ? '${widget.title} • S${widget.season}:E${widget.episode}${widget.episodeTitle != null ? ' "${widget.episodeTitle}"' : ''}'
+        ? '${widget.title} · S${widget.season}:E${widget.episode}${widget.episodeTitle != null ? ' "${widget.episodeTitle}"' : ''}'
         : widget.title;
 
     final currentGroup = _audioGroups.isNotEmpty
@@ -580,182 +568,163 @@ class _DownloadOptionsSheetContentState
     return SafeArea(
       child: Padding(
         padding: EdgeInsets.only(
-          left: 18,
-          right: 18,
-          top: 14,
+          left: 20,
+          right: 20,
+          top: 12,
           bottom: MediaQuery.of(context).viewInsets.bottom + 18,
         ),
-        child: SingleChildScrollView(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              // Drag handle
-              Center(
-                child: Container(
-                  width: 38,
-                  height: 4,
-                  margin: const EdgeInsets.only(bottom: 14),
-                  decoration: BoxDecoration(
-                    color: Colors.white24,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            // Drag indicator
+            Center(
+              child: Container(
+                width: 34,
+                height: 3.5,
+                margin: const EdgeInsets.only(bottom: 14),
+                decoration: BoxDecoration(
+                  color: Colors.white24,
+                  borderRadius: BorderRadius.circular(2),
                 ),
               ),
+            ),
 
-              // Header Row
-              Row(
-                children: [
-                  Container(
-                    padding: const EdgeInsets.all(8),
-                    decoration: BoxDecoration(
-                      color: AppTheme.primaryRed.withValues(alpha: 0.15),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: const Icon(
-                      Icons.download_for_offline_rounded,
-                      color: AppTheme.primaryRed,
-                      size: 24,
-                    ),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        const Text(
-                          'Download Options',
-                          style: TextStyle(
-                            color: Colors.white,
-                            fontSize: 18,
-                            fontWeight: FontWeight.bold,
-                          ),
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          displaySubtitle,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            color: Colors.white60,
-                            fontSize: 12,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  if (_isExtracting && _audioGroups.isNotEmpty)
-                    const Padding(
-                      padding: EdgeInsets.only(right: 8),
-                      child: SizedBox(
-                        width: 14,
-                        height: 14,
-                        child: CircularProgressIndicator(
-                          strokeWidth: 2,
-                          color: AppTheme.primaryRed,
-                        ),
-                      ),
-                    ),
-                  IconButton(
-                    icon: const Icon(Icons.close_rounded,
-                        color: Colors.white54, size: 22),
-                    onPressed: () => Navigator.of(context).pop(),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-
-              // Loading state while waiting for first extracted stream
-              if (_audioGroups.isEmpty && _isExtracting)
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 32),
-                  child: Center(
-                    child: Column(
-                      children: [
-                        const CircularProgressIndicator(
-                          color: AppTheme.primaryRed,
-                          strokeWidth: 2.5,
-                        ),
-                        const SizedBox(height: 16),
-                        Text(
-                          _extractionStatus,
-                          textAlign: TextAlign.center,
-                          style: const TextStyle(
-                            color: Colors.white70,
-                            fontSize: 13,
-                          ),
-                        ),
-                        const SizedBox(height: 4),
-                        const Text(
-                          'Fetching real resolutions, audio dubs & subtitles…',
-                          textAlign: TextAlign.center,
-                          style: TextStyle(
-                            color: Colors.white38,
-                            fontSize: 11.5,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                )
-              else if (_audioGroups.isEmpty && !_isExtracting)
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 20),
+            // Minimal Header
+            Row(
+              children: [
+                Expanded(
                   child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      const Icon(Icons.cloud_download_outlined,
-                          color: Colors.white54, size: 36),
-                      const SizedBox(height: 10),
-                      Text(
-                        _extractionStatus,
-                        textAlign: TextAlign.center,
-                        style: const TextStyle(
-                            color: Colors.white70, fontSize: 13),
+                      const Text(
+                        'Download',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 17,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: -0.2,
+                        ),
                       ),
-                      const SizedBox(height: 16),
-                      SizedBox(
-                        width: double.infinity,
-                        height: 46,
-                        child: ElevatedButton.icon(
-                          onPressed: _startDownload,
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: AppTheme.primaryRed,
-                            foregroundColor: Colors.white,
-                          ),
-                          icon: const Icon(Icons.file_download_rounded),
-                          label: const Text('Start Auto-Fallback Download'),
+                      const SizedBox(height: 2),
+                      Text(
+                        displaySubtitle,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.white54,
+                          fontSize: 12,
                         ),
                       ),
                     ],
                   ),
-                )
-              else ...[
-                // 1. Extracted Audio Tracks Section
-                Row(
+                ),
+                if (_isExtracting && _audioGroups.isNotEmpty)
+                  const Padding(
+                    padding: EdgeInsets.only(right: 8),
+                    child: SizedBox(
+                      width: 14,
+                      height: 14,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 1.8,
+                        color: Colors.white54,
+                      ),
+                    ),
+                  ),
+                IconButton(
+                  visualDensity: VisualDensity.compact,
+                  icon: const Icon(Icons.close, color: Colors.white54, size: 20),
+                  onPressed: () => Navigator.of(context).pop(),
+                ),
+              ],
+            ),
+
+            const Divider(color: Colors.white10, height: 22),
+
+            if (_audioGroups.isEmpty && _isExtracting)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 36),
+                child: Center(
+                  child: Column(
+                    children: [
+                      const SizedBox(
+                        width: 24,
+                        height: 24,
+                        child: CircularProgressIndicator(
+                          color: _darkRedBorder,
+                          strokeWidth: 2.2,
+                        ),
+                      ),
+                      const SizedBox(height: 14),
+                      const Text(
+                        'Fetching available streams…',
+                        style: TextStyle(
+                          color: Colors.white70,
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              )
+            else if (_audioGroups.isEmpty && !_isExtracting)
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 20),
+                child: Column(
                   children: [
-                    const Icon(Icons.graphic_eq_rounded,
-                        color: Colors.white70, size: 16),
-                    const SizedBox(width: 6),
-                    Text(
-                      'Available Audio Tracks (${_audioGroups.length})',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 13.5,
-                        fontWeight: FontWeight.w700,
+                    const Text(
+                      'Direct streams unavailable. Use fallback downloader below.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: Colors.white60, fontSize: 13),
+                    ),
+                    const SizedBox(height: 16),
+                    SizedBox(
+                      width: double.infinity,
+                      height: 44,
+                      child: ElevatedButton(
+                        onPressed: _startDownload,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: _darkRed,
+                          foregroundColor: Colors.white,
+                          elevation: 0,
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                        ),
+                        child: const Text(
+                          'Download',
+                          style: TextStyle(fontWeight: FontWeight.w600),
+                        ),
                       ),
                     ),
                   ],
                 ),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: List.generate(_audioGroups.length, (idx) {
+              )
+            else ...[
+              // 1. Audio Track (Horizontal Pill Strip)
+              const Text(
+                'AUDIO',
+                style: TextStyle(
+                  color: Colors.white38,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.8,
+                ),
+              ),
+              const SizedBox(height: 8),
+              SizedBox(
+                height: 36,
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: _audioGroups.length,
+                  separatorBuilder: (_, __) => const SizedBox(width: 8),
+                  itemBuilder: (ctx, idx) {
                     final group = _audioGroups[idx];
                     final isSelected = _selectedAudioIndex == idx;
                     return TvFocusable(
                       autofocus: idx == 0,
-                      borderRadius: BorderRadius.circular(20),
+                      borderRadius: BorderRadius.circular(8),
                       onPressed: () {
                         setState(() {
                           _selectedAudioIndex = idx;
@@ -769,20 +738,15 @@ class _DownloadOptionsSheetContentState
                             _selectedQualityIndex = 0;
                           });
                         },
-                        child: AnimatedContainer(
-                          duration: const Duration(milliseconds: 150),
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 12, vertical: 8),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                          alignment: Alignment.center,
                           decoration: BoxDecoration(
-                            color: isSelected
-                                ? const Color(0xFF0071EB)
-                                : const Color(0xFF1F1F2B),
-                            borderRadius: BorderRadius.circular(20),
+                            color: isSelected ? _selectedBg : _cardBg,
+                            borderRadius: BorderRadius.circular(8),
                             border: Border.all(
-                              color: isSelected
-                                  ? const Color(0xFF3898FF)
-                                  : Colors.white12,
-                              width: isSelected ? 1.5 : 1.0,
+                              color: isSelected ? _darkRedBorder : Colors.white10,
+                              width: isSelected ? 1.2 : 1.0,
                             ),
                           ),
                           child: Row(
@@ -791,31 +755,110 @@ class _DownloadOptionsSheetContentState
                               Text(
                                 group.languageLabel,
                                 style: TextStyle(
-                                  color: isSelected
-                                      ? Colors.white
-                                      : Colors.white70,
+                                  color: isSelected ? Colors.white : Colors.white70,
                                   fontWeight: isSelected
-                                      ? FontWeight.bold
-                                      : FontWeight.w500,
+                                      ? FontWeight.w600
+                                      : FontWeight.w400,
                                   fontSize: 12.5,
                                 ),
                               ),
                               const SizedBox(width: 6),
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                    horizontal: 6, vertical: 1.5),
-                                decoration: BoxDecoration(
-                                  color: Colors.black26,
-                                  borderRadius: BorderRadius.circular(8),
+                              Text(
+                                group.serverName,
+                                style: const TextStyle(
+                                  color: Colors.white38,
+                                  fontSize: 10.5,
                                 ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    );
+                  },
+                ),
+              ),
+              const SizedBox(height: 16),
+
+              // 2. Video Resolution (Clean Minimal List Rows)
+              const Text(
+                'QUALITY',
+                style: TextStyle(
+                  color: Colors.white38,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.8,
+                ),
+              ),
+              const SizedBox(height: 8),
+              ConstrainedBox(
+                constraints: const BoxConstraints(maxHeight: 190),
+                child: ListView.separated(
+                  shrinkWrap: true,
+                  itemCount: currentQualities.length,
+                  separatorBuilder: (_, __) => const SizedBox(height: 6),
+                  itemBuilder: (ctx, qIdx) {
+                    final q = currentQualities[qIdx];
+                    final isSelected = _selectedQualityIndex == qIdx;
+                    return TvFocusable(
+                      borderRadius: BorderRadius.circular(8),
+                      onPressed: () {
+                        setState(() => _selectedQualityIndex = qIdx);
+                      },
+                      child: GestureDetector(
+                        onTap: () {
+                          setState(() => _selectedQualityIndex = qIdx);
+                        },
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 14, vertical: 11),
+                          decoration: BoxDecoration(
+                            color: isSelected ? _selectedBg : _cardBg,
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: isSelected ? _darkRedBorder : Colors.white10,
+                              width: isSelected ? 1.2 : 1.0,
+                            ),
+                          ),
+                          child: Row(
+                            children: [
+                              Icon(
+                                isSelected
+                                    ? Icons.radio_button_checked_rounded
+                                    : Icons.radio_button_off_rounded,
+                                size: 18,
+                                color: isSelected
+                                    ? _darkRedBorder
+                                    : Colors.white30,
+                              ),
+                              const SizedBox(width: 12),
+                              Expanded(
                                 child: Text(
-                                  group.serverName,
+                                  q.label,
                                   style: TextStyle(
                                     color: isSelected
-                                        ? Colors.white70
-                                        : Colors.white38,
-                                    fontSize: 10,
-                                    fontWeight: FontWeight.w600,
+                                        ? Colors.white
+                                        : Colors.white70,
+                                    fontWeight: isSelected
+                                        ? FontWeight.w600
+                                        : FontWeight.w400,
+                                    fontSize: 13.5,
+                                  ),
+                                ),
+                              ),
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                    horizontal: 8, vertical: 3),
+                                decoration: BoxDecoration(
+                                  color: const Color(0xFF262626),
+                                  borderRadius: BorderRadius.circular(5),
+                                ),
+                                child: Text(
+                                  q.formattedSize,
+                                  style: const TextStyle(
+                                    color: Colors.white70,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w500,
                                   ),
                                 ),
                               ),
@@ -824,271 +867,111 @@ class _DownloadOptionsSheetContentState
                         ),
                       ),
                     );
-                  }),
+                  },
                 ),
-                const SizedBox(height: 18),
+              ),
+              const SizedBox(height: 16),
 
-                // 2. Extracted Video Resolutions for Selected Audio Track
-                Row(
-                  children: [
-                    const Icon(Icons.hd_outlined,
-                        color: Colors.white70, size: 16),
-                    const SizedBox(width: 6),
-                    Text(
-                      'Available Resolutions (${currentQualities.length})',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 13.5,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ],
+              // 3. Subtitles (Horizontal Pill Strip)
+              const Text(
+                'SUBTITLES',
+                style: TextStyle(
+                  color: Colors.white38,
+                  fontSize: 11,
+                  fontWeight: FontWeight.w700,
+                  letterSpacing: 0.8,
                 ),
-                const SizedBox(height: 8),
-                GridView.count(
-                  crossAxisCount: 2,
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  mainAxisSpacing: 8,
-                  crossAxisSpacing: 8,
-                  childAspectRatio: 2.55,
-                  children: List.generate(currentQualities.length, (qIdx) {
-                    final q = currentQualities[qIdx];
-                    final isSelected = _selectedQualityIndex == qIdx;
+              ),
+              const SizedBox(height: 8),
+              SizedBox(
+                height: 34,
+                child: ListView.separated(
+                  scrollDirection: Axis.horizontal,
+                  itemCount: _extractedSubtitles.length + 1,
+                  separatorBuilder: (_, __) => const SizedBox(width: 8),
+                  itemBuilder: (ctx, idx) {
+                    final isOff = idx == 0;
+                    final sIdx = idx - 1;
+                    final isSelected = isOff
+                        ? _selectedSubtitleIndex == -1
+                        : _selectedSubtitleIndex == sIdx;
+                    final label =
+                        isOff ? 'Off' : _extractedSubtitles[sIdx].label;
+
                     return TvFocusable(
-                      borderRadius: BorderRadius.circular(10),
+                      borderRadius: BorderRadius.circular(8),
                       onPressed: () {
-                        setState(() => _selectedQualityIndex = qIdx);
+                        setState(() =>
+                            _selectedSubtitleIndex = isOff ? -1 : sIdx);
                       },
                       child: GestureDetector(
                         onTap: () {
-                          setState(() => _selectedQualityIndex = qIdx);
+                          setState(() =>
+                              _selectedSubtitleIndex = isOff ? -1 : sIdx);
                         },
-                        child: AnimatedContainer(
-                          duration: const Duration(milliseconds: 150),
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 10, vertical: 8),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 12),
+                          alignment: Alignment.center,
                           decoration: BoxDecoration(
-                            color: isSelected
-                                ? AppTheme.primaryRed.withValues(alpha: 0.18)
-                                : const Color(0xFF1F1F2B),
-                            borderRadius: BorderRadius.circular(10),
+                            color: isSelected ? _selectedBg : _cardBg,
+                            borderRadius: BorderRadius.circular(8),
                             border: Border.all(
-                              color: isSelected
-                                  ? AppTheme.primaryRed
-                                  : Colors.white12,
-                              width: isSelected ? 1.6 : 1.0,
-                            ),
-                          ),
-                          child: Row(
-                            children: [
-                              Icon(
-                                q.height >= 1080
-                                    ? Icons.hd_rounded
-                                    : q.height >= 720
-                                        ? Icons.high_quality_rounded
-                                        : Icons.sd_rounded,
-                                color: isSelected
-                                    ? AppTheme.primaryRed
-                                    : Colors.white60,
-                                size: 20,
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Column(
-                                  mainAxisAlignment: MainAxisAlignment.center,
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(
-                                      q.label,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: TextStyle(
-                                        color: isSelected
-                                            ? Colors.white
-                                            : Colors.white70,
-                                        fontWeight: FontWeight.bold,
-                                        fontSize: 13,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 2),
-                                    Text(
-                                      q.formattedSize,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: TextStyle(
-                                        color: q.fileSizeBytes != null
-                                            ? Colors.greenAccent
-                                            : Colors.white38,
-                                        fontSize: 10.5,
-                                        fontWeight: q.fileSizeBytes != null
-                                            ? FontWeight.w600
-                                            : FontWeight.normal,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                              if (isSelected)
-                                const Icon(
-                                  Icons.check_circle_rounded,
-                                  color: AppTheme.primaryRed,
-                                  size: 16,
-                                ),
-                            ],
-                          ),
-                        ),
-                      ),
-                    );
-                  }),
-                ),
-                const SizedBox(height: 18),
-
-                // 3. Extracted Subtitles Section
-                Row(
-                  children: [
-                    const Icon(Icons.subtitles_outlined,
-                        color: Colors.white70, size: 16),
-                    const SizedBox(width: 6),
-                    Text(
-                      'Available Subtitles (${_extractedSubtitles.length})',
-                      style: const TextStyle(
-                        color: Colors.white,
-                        fontSize: 13.5,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Wrap(
-                  spacing: 8,
-                  runSpacing: 8,
-                  children: [
-                    // Off / None chip
-                    TvFocusable(
-                      borderRadius: BorderRadius.circular(20),
-                      onPressed: () {
-                        setState(() => _selectedSubtitleIndex = -1);
-                      },
-                      child: GestureDetector(
-                        onTap: () {
-                          setState(() => _selectedSubtitleIndex = -1);
-                        },
-                        child: AnimatedContainer(
-                          duration: const Duration(milliseconds: 150),
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 12, vertical: 7),
-                          decoration: BoxDecoration(
-                            color: _selectedSubtitleIndex == -1
-                                ? const Color(0xFF0071EB)
-                                : const Color(0xFF1F1F2B),
-                            borderRadius: BorderRadius.circular(20),
-                            border: Border.all(
-                              color: _selectedSubtitleIndex == -1
-                                  ? const Color(0xFF3898FF)
-                                  : Colors.white12,
-                              width: _selectedSubtitleIndex == -1 ? 1.5 : 1.0,
+                              color: isSelected ? _darkRedBorder : Colors.white10,
+                              width: isSelected ? 1.2 : 1.0,
                             ),
                           ),
                           child: Text(
-                            'Off / None',
+                            label,
                             style: TextStyle(
-                              color: _selectedSubtitleIndex == -1
-                                  ? Colors.white
-                                  : Colors.white70,
-                              fontWeight: _selectedSubtitleIndex == -1
-                                  ? FontWeight.bold
-                                  : FontWeight.w500,
+                              color: isSelected ? Colors.white : Colors.white70,
+                              fontWeight: isSelected
+                                  ? FontWeight.w600
+                                  : FontWeight.w400,
                               fontSize: 12,
                             ),
                           ),
                         ),
                       ),
-                    ),
-                    // Real extracted subtitles
-                    ...List.generate(_extractedSubtitles.length, (sIdx) {
-                      final sub = _extractedSubtitles[sIdx];
-                      final isSelected = _selectedSubtitleIndex == sIdx;
-                      return TvFocusable(
-                        borderRadius: BorderRadius.circular(20),
-                        onPressed: () {
-                          setState(() => _selectedSubtitleIndex = sIdx);
-                        },
-                        child: GestureDetector(
-                          onTap: () {
-                            setState(() => _selectedSubtitleIndex = sIdx);
-                          },
-                          child: AnimatedContainer(
-                            duration: const Duration(milliseconds: 150),
-                            padding: const EdgeInsets.symmetric(
-                                horizontal: 12, vertical: 7),
-                            decoration: BoxDecoration(
-                              color: isSelected
-                                  ? const Color(0xFF0071EB)
-                                  : const Color(0xFF1F1F2B),
-                              borderRadius: BorderRadius.circular(20),
-                              border: Border.all(
-                                color: isSelected
-                                    ? const Color(0xFF3898FF)
-                                    : Colors.white12,
-                                width: isSelected ? 1.5 : 1.0,
-                              ),
-                            ),
-                            child: Text(
-                              sub.label,
-                              style: TextStyle(
-                                color:
-                                    isSelected ? Colors.white : Colors.white70,
-                                fontWeight: isSelected
-                                    ? FontWeight.bold
-                                    : FontWeight.w500,
-                                fontSize: 12,
-                              ),
-                            ),
-                          ),
-                        ),
-                      );
-                    }),
-                  ],
+                    );
+                  },
                 ),
-                const SizedBox(height: 22),
+              ),
+              const SizedBox(height: 20),
 
-                // 4. Start Download Button
-                TvFocusable(
-                  borderRadius: BorderRadius.circular(10),
-                  onPressed: _startDownload,
-                  child: SizedBox(
-                    width: double.infinity,
-                    height: 48,
-                    child: ElevatedButton.icon(
-                      onPressed: _startDownload,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppTheme.primaryRed,
-                        foregroundColor: Colors.white,
-                        elevation: 0,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
-                        ),
+              // 4. Primary Download Button
+              TvFocusable(
+                borderRadius: BorderRadius.circular(8),
+                onPressed: _startDownload,
+                child: SizedBox(
+                  width: double.infinity,
+                  height: 46,
+                  child: ElevatedButton.icon(
+                    onPressed: _startDownload,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: _darkRed,
+                      foregroundColor: Colors.white,
+                      elevation: 0,
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(8),
                       ),
-                      icon: const Icon(Icons.file_download_rounded,
-                          color: Colors.white, size: 22),
-                      label: Text(
-                        'Download • ${currentQuality?.label ?? ''} • ${currentGroup?.languageLabel ?? ''}${currentQuality?.fileSizeBytes != null ? ' (${currentQuality!.formattedSize})' : ''}',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontWeight: FontWeight.bold,
-                          fontSize: 14,
-                        ),
+                    ),
+                    icon: const Icon(Icons.file_download_outlined,
+                        color: Colors.white, size: 20),
+                    label: Text(
+                      'Download · ${currentQuality?.label ?? ''} · ${currentGroup?.languageLabel ?? ''}${currentQuality?.fileSizeBytes != null ? ' (${currentQuality!.formattedSize})' : ''}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 13.5,
                       ),
                     ),
                   ),
                 ),
-              ],
+              ),
             ],
-          ),
+          ],
         ),
       ),
     );
