@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 import 'subtitle_service.dart';
 import '../constants/api_constants.dart';
+import '../utils/language_utils.dart';
 import 'aoneroom_client.dart';
 import 'aoneroom_matcher.dart';
 
@@ -1378,6 +1379,7 @@ class StreamExtractor {
     int episode = 1,
     String? preferredAudioLang,
     String? dubSubjectId,
+    String? originalLanguage,
   }) async {
     final cacheKey = getCacheKey(type, tmdbId, season, episode, prefix: 'netmirror_${dubSubjectId ?? preferredAudioLang ?? "def"}');
     final cached = await getCachedEntry(cacheKey);
@@ -1398,13 +1400,23 @@ class StreamExtractor {
       return hasSub && !hasDub;
     }
 
-    String cleanDubLang(String raw) {
+    String cleanDubLang(String raw, [String? origLang]) {
       var c = raw.replaceAll(RegExp(r'\s*dub|\s*sub', caseSensitive: false), '').trim();
       if (c.isEmpty || c.toLowerCase() == 'default' || c.toLowerCase() == 'original') {
-        return 'English';
+        if (origLang != null && origLang.isNotEmpty) {
+          final mapped = LanguageUtils.getInfo(origLang).name;
+          if (mapped.isNotEmpty && mapped != 'Subtitle' && mapped != 'Default' && mapped != 'Original') {
+            return '$mapped (Original)';
+          }
+        }
+        return 'Original';
       }
       if (c.toLowerCase() == 'esla') return 'Spanish (Latin)';
       if (c.toLowerCase() == 'ptbr') return 'Portuguese (Brazil)';
+      final mapped = LanguageUtils.getInfo(c).name;
+      if (mapped.isNotEmpty && mapped != 'Subtitle' && mapped != 'Default') {
+        return mapped;
+      }
       return c[0].toUpperCase() + c.substring(1);
     }
 
@@ -1535,24 +1547,35 @@ class StreamExtractor {
           }
         }
 
-        // Determine primary dub
-        String primaryDubId = dubSubjectId ?? '';
-        String primaryDubLabel = 'English';
+        // Resolve media original language to correctly tag Original audio (Japanese for anime, Korean for K-Drama, etc.)
+        String? detectedOriginalLang = originalLanguage;
+        if (detectedOriginalLang == null || detectedOriginalLang.isEmpty) {
+          try {
+            final tmdbUri = Uri.parse(
+              '${ApiConstants.tmdbBaseUrl}/$type/$tmdbId?api_key=${ApiConstants.tmdbApiKey}',
+            );
+            final tmdbRes = await http.get(tmdbUri).timeout(const Duration(seconds: 3));
+            if (tmdbRes.statusCode == 200) {
+              final tmdbData = jsonDecode(tmdbRes.body);
+              detectedOriginalLang = tmdbData['original_language']?.toString();
+            }
+          } catch (_) {}
+        }
 
-        if (primaryDubId.isEmpty && preferredAudioLang != null && availableDubs.isNotEmpty) {
+        final defaultLabel = cleanDubLang('default', detectedOriginalLang);
+        String primaryDubId = dubSubjectId ?? defaultDubId ?? '';
+        String primaryDubLabel = defaultLabel;
+
+        if (dubSubjectId == null && preferredAudioLang != null && availableDubs.isNotEmpty) {
           final prefClean = preferredAudioLang.toLowerCase().replaceAll(RegExp(r'[^a-z]'), '');
           for (final d in availableDubs) {
             final lClean = d['language']!.toLowerCase().replaceAll(RegExp(r'[^a-z]'), '');
             if (lClean.contains(prefClean) || prefClean.contains(lClean)) {
               primaryDubId = d['dubId']!;
-              primaryDubLabel = cleanDubLang(d['language']!);
+              primaryDubLabel = cleanDubLang(d['language']!, detectedOriginalLang);
               break;
             }
           }
-        }
-
-        if (primaryDubId.isEmpty && defaultDubId != null && defaultDubId.isNotEmpty) {
-          primaryDubId = defaultDubId;
         }
 
         // 1. Concurrently fetch primary dub AND all other available dub variants in parallel!
@@ -1562,7 +1585,7 @@ class StreamExtractor {
         for (final d in availableDubs) {
           final dId = d['dubId']!;
           if (dId == primaryDubId) continue;
-          final clean = cleanDubLang(d['language']!);
+          final clean = cleanDubLang(d['language']!, detectedOriginalLang);
           if (!seenLangs.contains(clean.toLowerCase())) {
             seenLangs.add(clean.toLowerCase());
             otherDubs.add({'dubId': dId, 'language': clean});

@@ -18,6 +18,7 @@ class LanguageUtils {
     'en': LanguageInfo(flag: '🇺🇸', code: 'EN', name: 'English'),
     'eng': LanguageInfo(flag: '🇺🇸', code: 'EN', name: 'English'),
     'english': LanguageInfo(flag: '🇺🇸', code: 'EN', name: 'English'),
+    'original': LanguageInfo(flag: '🎬', code: 'ORIG', name: 'Original'),
 
     'es': LanguageInfo(flag: '🇪🇸', code: 'ES', name: 'Spanish'),
     'spa': LanguageInfo(flag: '🇪🇸', code: 'ES', name: 'Spanish'),
@@ -321,9 +322,12 @@ class LanguageUtils {
     cleaned = cleaned.replaceAll(RegExp(r'\b(4k|2160p|1080p|720p|480p|360p)\b', caseSensitive: false), '').trim();
     // 4. Strip server/dub noise words
         // Exclude subtitle releases from audio name cleanup
-    cleaned = cleaned.replaceAll(RegExp(r'\b(dub|sub|audio|original|server|stellarhd|quantumstream|netmirror|cinejoy|screenfetch|stream)\b', caseSensitive: false), '').trim();
+    cleaned = cleaned.replaceAll(RegExp(r'\b(dub|sub|audio|server|stellarhd|quantumstream|netmirror|cinejoy|screenfetch|stream)\b', caseSensitive: false), '').trim();
 
-    if (cleaned.isEmpty) return 'English';
+    if (cleaned.isEmpty) {
+      if (raw.toLowerCase().contains('original')) return 'Original';
+      return 'English';
+    }
     final info = getInfo(cleaned);
     if (info.name.isNotEmpty && info.name != 'Subtitle' && info.name != 'Default') {
       return info.name;

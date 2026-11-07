@@ -7,6 +7,8 @@ class WatchProgress {
   final int season;
   final int episode;
   final double progress; // 0.0 to 1.0
+  final int positionSeconds;
+  final int durationSeconds;
   final DateTime lastWatched;
 
   WatchProgress({
@@ -18,6 +20,8 @@ class WatchProgress {
     this.season = 1,
     this.episode = 1,
     this.progress = 0.0,
+    this.positionSeconds = 0,
+    this.durationSeconds = 0,
     required this.lastWatched,
   });
 
@@ -30,6 +34,8 @@ class WatchProgress {
         'season': season,
         'episode': episode,
         'progress': progress,
+        'position_seconds': positionSeconds,
+        'duration_seconds': durationSeconds,
         'last_watched': lastWatched.toIso8601String(),
       };
 
@@ -42,6 +48,8 @@ class WatchProgress {
         season: json['season'] as int? ?? 1,
         episode: json['episode'] as int? ?? 1,
         progress: (json['progress'] as num?)?.toDouble() ?? 0.0,
+        positionSeconds: (json['position_seconds'] as num?)?.toInt() ?? 0,
+        durationSeconds: (json['duration_seconds'] as num?)?.toInt() ?? 0,
         lastWatched: DateTime.tryParse(json['last_watched'] ?? '') ?? DateTime.now(),
       );
 }

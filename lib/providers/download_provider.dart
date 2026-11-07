@@ -579,6 +579,10 @@ class DownloadProvider extends ChangeNotifier {
     String? preferredQuality,
     String? preferredAudio,
     String? preferredSubtitle,
+    String? directStreamUrl,
+    Map<String, String>? directHeaders,
+    bool? directIsHls,
+    List<SubtitleTrack>? directSubtitles,
   }) async {
     final cleanTitle = sanitizeTitle(title);
     final id = generateId(mediaType, mediaId, season: season, episode: episode);
@@ -664,7 +668,9 @@ class DownloadProvider extends ChangeNotifier {
     try {
       // 2. Build prioritized candidate download stream list from the BEST servers
       final candidates = <_DownloadCandidate>[];
-      final availableSubs = <SubtitleTrack>[];
+      final availableSubs = <SubtitleTrack>[
+        if (directSubtitles != null) ...directSubtitles,
+      ];
 
       final preferredAudioLangs = preferredAudio != null && preferredAudio.isNotEmpty
           ? [preferredAudio, ...await _getPreferredAudioLanguages()]
@@ -677,11 +683,27 @@ class DownloadProvider extends ChangeNotifier {
                   ? 1080
                   : preferredQuality.contains('720')
                       ? 720
-                      : 480)
+                      : preferredQuality.contains('360')
+                          ? 360
+                          : 480)
           : await _getPreferredQualityHeight();
 
-      // Parallel Multi-Source Candidate Extraction (10s timeout per source running concurrently)
-      await Future.wait([
+      if (directStreamUrl != null && directStreamUrl.isNotEmpty) {
+        candidates.add(_DownloadCandidate(
+          url: directStreamUrl,
+          headers: directHeaders ?? const {'User-Agent': 'Mozilla/5.0'},
+          isHls: directIsHls ?? directStreamUrl.contains('.m3u8'),
+          qualityLabel: preferredQuality ?? '${targetHeight}p',
+          serverName: 'Selected',
+          audioLanguage: preferredAudio ?? 'Original',
+          height: targetHeight,
+          score: 999999,
+        ));
+      }
+
+      // Parallel Multi-Source Candidate Extraction (only if no direct pre-extracted URL was chosen)
+      if (candidates.isEmpty) {
+        await Future.wait([
         // Priority 1: NetMirror (Direct High-Speed MP4 CDN with Multi-Quality 1080p/720p/480p, Range 206 & Preferred Dub)
         () async {
           try {
@@ -884,6 +906,7 @@ class DownloadProvider extends ChangeNotifier {
           } catch (_) {}
         }(),
       ]);
+      }
 
       if (candidates.isEmpty) {
         // Retry with fallback before giving up
@@ -914,14 +937,18 @@ class DownloadProvider extends ChangeNotifier {
 
       // Score and sort candidates based on user preferences and server quality
       int scoreCandidate(_DownloadCandidate c) {
+        if (c.score >= 900000) return c.score;
         int score = 0;
 
-        // 1. Audio Language Match (Weight: 3000 points)
+        // 1. Audio Language Match (Weight: 4500 points)
         if (preferredAudioLangs.isNotEmpty) {
           final topPref = preferredAudioLangs.first;
-          if (LanguageUtils.matches(c.audioLanguage, topPref) ||
+          if (topPref.toLowerCase().contains('original') &&
+              c.audioLanguage.toLowerCase().contains('original')) {
+            score += 4500;
+          } else if (LanguageUtils.matches(c.audioLanguage, topPref) ||
               LanguageUtils.matches(c.qualityLabel, topPref)) {
-            score += 3000;
+            score += 4500;
           } else {
             for (int i = 1; i < preferredAudioLangs.length; i++) {
               if (LanguageUtils.matches(c.audioLanguage, preferredAudioLangs[i]) ||
@@ -938,17 +965,17 @@ class DownloadProvider extends ChangeNotifier {
           score += 400; // English fallback bonus
         }
 
-        // 2. Video Quality Match (Weight: 2000 points)
+        // 2. Video Quality Match (Weight: 3000 points)
         if (c.height == targetHeight) {
-          score += 2000;
+          score += 3000;
         } else if (c.height > 0) {
           final diff = (c.height - targetHeight).abs();
           score += (1500 - diff).clamp(100, 1500);
         }
 
         // 3. Best Server Weight
-        if (c.serverName == 'NetMirror') {
-          score += 3500; // Slot #1: NetMirror first priority with preferred dub & qualities
+        if (c.serverName == 'NetMirror' || c.serverName == 'StellarHD') {
+          score += 3500; // Slot #1: NetMirror / StellarHD first priority with preferred dub & qualities
         } else if (c.serverName == 'Meow') {
           score += 1200; // Slot #2: Direct MP4 from 25k Telegram channel
         } else if (c.serverName.contains('NebulaHD')) {
@@ -973,25 +1000,27 @@ class DownloadProvider extends ChangeNotifier {
 
       // Download and cache offline subtitles in background respecting user preference
       final preferredSubLang = preferredSubtitle ?? await _getPreferredSubtitleLanguage();
-      _downloadLocalSubtitle(
-        id: id,
-        mediaType: mediaType,
-        mediaId: mediaId,
-        season: season,
-        episode: episode,
-        downloadDir: downloadDir,
-        availableSubs: availableSubs,
-        preferredSubLang: preferredSubLang,
-      ).then((savedSubPath) {
-        if (savedSubPath != null) {
-          final idx = _items.indexWhere((i) => i.id == id);
-          if (idx != -1) {
-            _items[idx] = _items[idx].copyWith(localSubtitlePath: savedSubPath);
-            notifyListeners();
-            _saveDownloads();
+      if (preferredSubLang != 'Off / None') {
+        _downloadLocalSubtitle(
+          id: id,
+          mediaType: mediaType,
+          mediaId: mediaId,
+          season: season,
+          episode: episode,
+          downloadDir: downloadDir,
+          availableSubs: availableSubs,
+          preferredSubLang: preferredSubLang,
+        ).then((savedSubPath) {
+          if (savedSubPath != null) {
+            final idx = _items.indexWhere((i) => i.id == id);
+            if (idx != -1) {
+              _items[idx] = _items[idx].copyWith(localSubtitlePath: savedSubPath);
+              notifyListeners();
+              _saveDownloads();
+            }
           }
-        }
-      });
+        });
+      }
 
       // 3. Attempt download across candidates with resumption
       bool downloadSuccess = false;

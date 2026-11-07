@@ -121,6 +121,7 @@ class MediaDetail {
   final String? trailerKey;
   final List<MediaVideo> videos;
   final String? logoPath;
+  final String? originalLanguage;
 
   MediaDetail({
     required this.id,
@@ -140,6 +141,7 @@ class MediaDetail {
     this.trailerKey,
     this.videos = const [],
     this.logoPath,
+    this.originalLanguage,
   });
 
   factory MediaDetail.fromJson(Map<String, dynamic> json, String type) {
@@ -226,6 +228,7 @@ class MediaDetail {
       trailerKey: trailer,
       videos: videoResults,
       logoPath: logoPath,
+      originalLanguage: json['original_language'] as String?,
     );
   }
 

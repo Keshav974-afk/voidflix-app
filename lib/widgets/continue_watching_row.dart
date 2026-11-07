@@ -61,15 +61,24 @@ class ContinueWatchingRow extends StatelessWidget {
                   Navigator.of(sheetCtx).pop();
                   Navigator.of(context).push(
                     MaterialPageRoute(
-                      builder: (_) => PlayerScreen(
-                        mediaId: id,
-                        mediaTitle: title,
-                        mediaType: mediaType,
-                        season: season,
-                        episode: episode,
-                        posterPath: posterPath,
-                        backdropPath: backdropPath,
-                      ),
+                      builder: (_) {
+                        final saved = context.read<HistoryProvider>().getProgress(id);
+                        final posSec = (saved != null && saved.positionSeconds > 0)
+                            ? saved.positionSeconds.toDouble()
+                            : (saved != null && saved.progress > 0.02 && saved.durationSeconds > 0
+                                ? (saved.progress * saved.durationSeconds).toDouble()
+                                : null);
+                        return PlayerScreen(
+                          mediaId: id,
+                          mediaTitle: title,
+                          mediaType: mediaType,
+                          season: season,
+                          episode: episode,
+                          posterPath: posterPath,
+                          backdropPath: backdropPath,
+                          startPositionSeconds: posSec,
+                        );
+                      },
                     ),
                   );
                 },
@@ -237,6 +246,11 @@ class ContinueWatchingRow extends StatelessWidget {
                                 episode: episode,
                                 posterPath: posterPath,
                                 backdropPath: backdropPath,
+                                startPositionSeconds: raw.positionSeconds > 0
+                                    ? raw.positionSeconds.toDouble()
+                                    : (raw.progress > 0.02 && raw.durationSeconds > 0
+                                        ? (raw.progress * raw.durationSeconds).toDouble()
+                                        : null),
                               ),
                             ),
                           );

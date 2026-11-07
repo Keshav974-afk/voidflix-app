@@ -1248,6 +1248,11 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
                         episode: item.episode,
                         posterPath: item.posterPath,
                         backdropPath: item.backdropPath,
+                        startPositionSeconds: item.positionSeconds > 0
+                            ? item.positionSeconds.toDouble()
+                            : (item.progress > 0.02 && item.durationSeconds > 0
+                                ? (item.progress * item.durationSeconds).toDouble()
+                                : null),
                       ),
                     ),
                   );

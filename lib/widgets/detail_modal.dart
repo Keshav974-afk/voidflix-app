@@ -12,6 +12,7 @@ import '../providers/history_provider.dart';
 import '../providers/watchlist_provider.dart';
 import '../screens/downloads_screen.dart';
 import '../screens/player_screen.dart';
+import 'download_quality_picker.dart';
 import 'media_card.dart';
 import 'netflix_season_picker.dart';
 
@@ -88,6 +89,7 @@ class _DetailModalState extends State<DetailModal> {
     int episode = 1,
     String? localFilePath,
     String? episodeTitle,
+    double? startPositionSeconds,
   }) {
     Navigator.of(context).pop(); // Dismiss modal
     final title = widget.item.mediaType == 'tv' && episodeTitle != null
@@ -105,6 +107,8 @@ class _DetailModalState extends State<DetailModal> {
           posterPath: widget.item.posterPath,
           backdropPath: widget.item.backdropPath,
           localFilePath: localFilePath,
+          startPositionSeconds: startPositionSeconds,
+          originalLanguage: _detail?.originalLanguage,
         ),
       ),
     );
@@ -408,8 +412,11 @@ class _DetailModalState extends State<DetailModal> {
                                   : DownloadProvider.generateId('movie', widget.item.id);
                               final offlineItem = downloadProvider.getItem(offlineId);
                               final localFile = offlineItem?.status == 'completed' ? offlineItem?.localFilePath : null;
+                              final posSec = savedProgress != null && savedProgress.positionSeconds > 0
+                                  ? savedProgress.positionSeconds.toDouble()
+                                  : null;
 
-                              _playMedia(season: s, episode: e, localFilePath: localFile);
+                              _playMedia(season: s, episode: e, localFilePath: localFile, startPositionSeconds: posSec);
                             },
                             style: ElevatedButton.styleFrom(
                               backgroundColor: Colors.white,
@@ -518,7 +525,8 @@ class _DetailModalState extends State<DetailModal> {
                               height: 44,
                               child: ElevatedButton.icon(
                                 onPressed: () {
-                                  downloadProvider.startDownload(
+                                  DownloadQualityPicker.show(
+                                    context,
                                     mediaId: widget.item.id,
                                     title: widget.item.title,
                                     mediaType: widget.item.mediaType,
@@ -888,7 +896,8 @@ class _DetailModalState extends State<DetailModal> {
                                             icon: const Icon(Icons.file_download_outlined, color: Colors.white, size: 24),
                                             tooltip: 'Download Episode',
                                             onPressed: () {
-                                              downloadProvider.startDownload(
+                                              DownloadQualityPicker.show(
+                                                context,
                                                 mediaId: widget.item.id,
                                                 title: widget.item.title,
                                                 mediaType: 'tv',
