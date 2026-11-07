@@ -22,6 +22,7 @@ class DownloadedItem {
   final double progress; // 0.0 to 1.0
   final DateTime downloadedAt;
   final String quality;
+  final String? audioLanguage;
 
   const DownloadedItem({
     required this.id,
@@ -47,7 +48,23 @@ class DownloadedItem {
     this.progress = 0.0,
     required this.downloadedAt,
     this.quality = 'HD',
+    this.audioLanguage,
   });
+
+  String get resolvedAudioLanguage {
+    if (audioLanguage != null && audioLanguage!.trim().isNotEmpty) {
+      return audioLanguage!.trim();
+    }
+    if (quality.contains('•')) {
+      final part = quality.split('•').last.trim();
+      if (part.isNotEmpty) return part;
+    }
+    if (quality.contains('·')) {
+      final part = quality.split('·').last.trim();
+      if (part.isNotEmpty) return part;
+    }
+    return 'Original';
+  }
 
   DownloadedItem copyWith({
     String? profileId,
@@ -61,6 +78,7 @@ class DownloadedItem {
     String? localThumbnailPath,
     String? localSubtitlePath,
     String? quality,
+    String? audioLanguage,
     String? episodeDescription,
     String? stillPath,
     int? runtime,
@@ -89,6 +107,7 @@ class DownloadedItem {
       progress: progress ?? this.progress,
       downloadedAt: downloadedAt,
       quality: quality ?? this.quality,
+      audioLanguage: audioLanguage ?? this.audioLanguage,
     );
   }
 
@@ -116,6 +135,7 @@ class DownloadedItem {
         'progress': progress,
         'downloadedAt': downloadedAt.toIso8601String(),
         'quality': quality,
+        'audioLanguage': audioLanguage,
       };
 
   factory DownloadedItem.fromJson(Map<String, dynamic> json) => DownloadedItem(
@@ -142,6 +162,7 @@ class DownloadedItem {
         progress: (json['progress'] as num?)?.toDouble() ?? 1.0,
         downloadedAt: DateTime.tryParse(json['downloadedAt'] as String? ?? '') ?? DateTime.now(),
         quality: json['quality'] as String? ?? 'HD',
+        audioLanguage: json['audioLanguage'] as String?,
       );
 
   String get formattedSize {

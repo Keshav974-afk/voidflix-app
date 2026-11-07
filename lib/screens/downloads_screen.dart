@@ -199,6 +199,7 @@ class _DownloadsScreenState extends State<DownloadsScreen> {
           backdropPath: item.backdropPath,
           localFilePath: item.localFilePath,
           localSubtitlePath: item.localSubtitlePath,
+          initialAudioLanguage: item.resolvedAudioLanguage,
         ),
         transitionsBuilder: (context, animation, secondaryAnimation, child) {
           return FadeTransition(opacity: animation, child: child);

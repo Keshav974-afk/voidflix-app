@@ -111,6 +111,7 @@ class DownloadProvider extends ChangeNotifier {
     required String title,
     required int progress,
     bool isDone = false,
+    bool isStart = false,
   }) async {
     try {
       await _notifChannel.invokeMethod('updateDownloadProgress', {
@@ -118,6 +119,7 @@ class DownloadProvider extends ChangeNotifier {
         'title': title,
         'progress': progress,
         'isDone': isDone,
+        'isStart': isStart,
       });
     } catch (_) {}
   }
@@ -490,10 +492,13 @@ class DownloadProvider extends ChangeNotifier {
     String? primarySubPath;
     final downloadedTracksMeta = <Map<String, String>>[];
 
+    // Strictly deduplicate by cleaned language name first so we never download duplicate English/Indonesian tracks
+    final uniqueSubs = LanguageUtils.deduplicateSubtitles(subsToProcess);
+
     // Sort tracks prioritizing user profile language, then English, then any
-    final sortedTracks = [...subsToProcess]..sort((a, b) {
-      final aScore = _getLangScore(a.language.isNotEmpty ? a.language : a.label, preferredLangs);
-      final bScore = _getLangScore(b.language.isNotEmpty ? b.language : b.label, preferredLangs);
+    final sortedTracks = [...uniqueSubs]..sort((a, b) {
+      final aScore = _getLangScore(a.label.isNotEmpty ? a.label : a.language, preferredLangs);
+      final bScore = _getLangScore(b.label.isNotEmpty ? b.label : b.language, preferredLangs);
       return bScore.compareTo(aScore);
     });
 
@@ -501,14 +506,16 @@ class DownloadProvider extends ChangeNotifier {
 
     for (int i = 0; i < targetTracks.length; i++) {
       final track = targetTracks[i];
-      final lang = track.language.isNotEmpty
-          ? track.language.replaceAll(RegExp(r'[^a-zA-Z0-9]'), '')
-          : 'sub$i';
+      final cleanLabel = LanguageUtils.cleanLanguageName(
+        track.label.isNotEmpty ? track.label : track.language,
+      );
+      final langSlug = cleanLabel.toLowerCase().replaceAll(RegExp(r'[^a-z0-9]'), '');
+      final lang = langSlug.isNotEmpty ? langSlug : 'sub$i';
       final file = File('${downloadDir.path}/${id}_sub_$lang.vtt');
 
       if (file.existsSync() && file.lengthSync() > 50) {
         downloadedTracksMeta.add({
-          'label': track.label,
+          'label': cleanLabel,
           'language': track.language,
           'path': file.path,
         });
@@ -521,14 +528,14 @@ class DownloadProvider extends ChangeNotifier {
         if (res.statusCode == 200 && res.bodyBytes.isNotEmpty) {
           await file.writeAsBytes(res.bodyBytes, flush: true);
           downloadedTracksMeta.add({
-            'label': track.label,
+            'label': cleanLabel,
             'language': track.language,
             'path': file.path,
           });
           primarySubPath ??= file.path;
         }
       } catch (e) {
-        debugPrint('Failed to download subtitle track (${track.label}): $e');
+        debugPrint('Failed to download subtitle track ($cleanLabel): $e');
       }
     }
 
@@ -627,6 +634,7 @@ class DownloadProvider extends ChangeNotifier {
       localSubtitlePath: localSub,
       status: 'downloading',
       progress: initialProgress,
+      audioLanguage: preferredAudio ?? existingItem?.audioLanguage,
       downloadedAt: DateTime.now(),
     );
 
@@ -663,6 +671,7 @@ class DownloadProvider extends ChangeNotifier {
       title: cleanTitle,
       progress: (initialProgress * 100).toInt(),
       isDone: false,
+      isStart: true,
     );
 
     try {
@@ -1025,6 +1034,7 @@ class DownloadProvider extends ChangeNotifier {
       // 3. Attempt download across candidates with resumption
       bool downloadSuccess = false;
       String chosenQuality = 'HD';
+      String chosenAudioLang = preferredAudio ?? 'Original';
 
       for (final candidate in scoredCandidates) {
         if (!_activeClients.containsKey(id)) {
@@ -1064,10 +1074,13 @@ class DownloadProvider extends ChangeNotifier {
 
         if (downloadSuccess) {
           chosenQuality = candidate.qualityLabel;
-          if (candidate.audioLanguage.isNotEmpty &&
-              candidate.audioLanguage != 'Original' &&
-              !chosenQuality.toLowerCase().contains(candidate.audioLanguage.toLowerCase())) {
-            chosenQuality = '$chosenQuality • ${candidate.audioLanguage}';
+          if (candidate.audioLanguage.isNotEmpty) {
+            chosenAudioLang = LanguageUtils.cleanLanguageName(candidate.audioLanguage);
+          }
+          if (chosenAudioLang.isNotEmpty &&
+              chosenAudioLang != 'Original' &&
+              !chosenQuality.toLowerCase().contains(chosenAudioLang.toLowerCase())) {
+            chosenQuality = '$chosenQuality • $chosenAudioLang';
           }
           break;
         }
@@ -1122,6 +1135,7 @@ class DownloadProvider extends ChangeNotifier {
         progress: 1.0,
         fileSizeBytes: finalSizeBytes,
         quality: chosenQuality,
+        audioLanguage: chosenAudioLang,
         localSubtitlePath: finalSubPath,
       );
 
@@ -1133,12 +1147,16 @@ class DownloadProvider extends ChangeNotifier {
       await _saveDownloads();
       _activeClients.remove(id);
 
-      _updateSystemNotification(
-        id: id.hashCode.abs(),
-        title: title,
+      final notifId = id.hashCode.abs();
+      await _updateSystemNotification(
+        id: notifId,
+        title: cleanTitle,
         progress: 100,
         isDone: true,
       );
+      Future.delayed(const Duration(seconds: 3), () {
+        _cancelSystemNotification(notifId);
+      });
     } catch (e) {
       debugPrint('Download error ($id): $e');
       _activeClients.remove(id);
@@ -1381,7 +1399,7 @@ class DownloadProvider extends ChangeNotifier {
           final p = (completedSegments / segmentUris.length).clamp(0.05, 0.99);
           onProgress(p, totalDownloadedBytes);
 
-          if (++notifTick % 12 == 0) {
+          if (++notifTick % 12 == 0 && _activeClients.containsKey(downloadId)) {
             _updateSystemNotification(
               id: downloadId.hashCode.abs(),
               title: title,
@@ -1458,7 +1476,7 @@ class DownloadProvider extends ChangeNotifier {
     }
   }
 
-  /// High-speed progressive MP4 file downloader with HTTP Range resumption and stream buffers
+  /// High-speed progressive MP4 file downloader with multi-connection Range acceleration & resumption
   Future<bool> _downloadProgressiveStream({
     required String downloadUrl,
     required Map<String, String> headers,
@@ -1478,12 +1496,142 @@ class DownloadProvider extends ChangeNotifier {
         existingBytes = partFile.lengthSync();
       }
 
+      final baseHeaders = <String, String>{
+        ...headers,
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+        'Accept': '*/*',
+        'Accept-Encoding': 'identity',
+      };
+
+      // Fast multi-connection parallel HTTP Range accelerator for fresh downloads on direct CDNs
+      if (existingBytes == 0 && !downloadUrl.contains('/api/public/hls-proxy')) {
+        try {
+          final probeReq = http.Request('GET', Uri.parse(downloadUrl));
+          probeReq.headers.addAll(baseHeaders);
+          probeReq.headers['Range'] = 'bytes=0-0';
+          final probeClient = http.Client();
+          int totalSize = 0;
+          bool supportsRange = false;
+          try {
+            final probeRes = await probeClient.send(probeReq).timeout(const Duration(seconds: 5));
+            if (probeRes.statusCode == 206) {
+              final cr = probeRes.headers['content-range'] ?? '';
+              if (cr.contains('/')) {
+                totalSize = int.tryParse(cr.split('/').last.trim()) ?? 0;
+                supportsRange = totalSize >= 6 * 1024 * 1024;
+              }
+            }
+          } finally {
+            probeClient.close();
+          }
+
+          if (supportsRange && totalSize > 0) {
+            final chunksDir = Directory('$partPath.chunks');
+            if (!chunksDir.existsSync()) {
+              await chunksDir.create(recursive: true);
+            }
+            const int chunkSize = 4 * 1024 * 1024; // 4 MB chunks
+            final int totalChunks = (totalSize / chunkSize).ceil();
+            int nextChunk = 0;
+            int downloadedBytes = 0;
+            int notifTick = 0;
+            bool chunkFailed = false;
+
+            Future<void> runRangeWorker() async {
+              final workerClient = http.Client();
+              try {
+                while (!chunkFailed && _activeClients.containsKey(downloadId)) {
+                  if (nextChunk >= totalChunks) break;
+                  final idx = nextChunk++;
+                  final start = idx * chunkSize;
+                  final end = ((idx + 1) * chunkSize - 1).clamp(0, totalSize - 1);
+                  final chunkFile = File('${chunksDir.path}/c_${idx.toString().padLeft(5, '0')}.bin');
+
+                  if (chunkFile.existsSync() && chunkFile.lengthSync() == (end - start + 1)) {
+                    downloadedBytes += (end - start + 1);
+                    continue;
+                  }
+
+                  bool ok = false;
+                  for (int attempt = 0; attempt < 3; attempt++) {
+                    if (!_activeClients.containsKey(downloadId) || chunkFailed) break;
+                    try {
+                      final r = http.Request('GET', Uri.parse(downloadUrl));
+                      r.headers.addAll(baseHeaders);
+                      r.headers['Range'] = 'bytes=$start-$end';
+                      final res = await workerClient.send(r).timeout(const Duration(seconds: 20));
+                      if (res.statusCode == 206) {
+                        final sink = chunkFile.openWrite(mode: FileMode.write);
+                        await for (final data in res.stream) {
+                          if (!_activeClients.containsKey(downloadId)) {
+                            await sink.close();
+                            return;
+                          }
+                          sink.add(data);
+                          downloadedBytes += data.length;
+                          final p = (downloadedBytes / totalSize).clamp(0.05, 0.99);
+                          onProgress(p, downloadedBytes);
+                          if (++notifTick % 45 == 0 && _activeClients.containsKey(downloadId)) {
+                            _updateSystemNotification(
+                              id: downloadId.hashCode.abs(),
+                              title: title,
+                              progress: (p * 100).toInt(),
+                            );
+                          }
+                        }
+                        await sink.flush();
+                        await sink.close();
+                        if (chunkFile.lengthSync() == (end - start + 1)) {
+                          ok = true;
+                          break;
+                        }
+                      }
+                    } catch (_) {}
+                  }
+                  if (!ok) {
+                    chunkFailed = true;
+                    break;
+                  }
+                }
+              } finally {
+                workerClient.close();
+              }
+            }
+
+            final int workers = totalChunks < 6 ? totalChunks : 6;
+            await Future.wait(List.generate(workers, (_) => runRangeWorker()));
+
+            if (!chunkFailed && _activeClients.containsKey(downloadId)) {
+              final outSink = partFile.openWrite(mode: FileMode.write);
+              for (int i = 0; i < totalChunks; i++) {
+                final cf = File('${chunksDir.path}/c_${i.toString().padLeft(5, '0')}.bin');
+                await outSink.addStream(cf.openRead());
+              }
+              await outSink.flush();
+              await outSink.close();
+              try {
+                await chunksDir.delete(recursive: true);
+              } catch (_) {}
+
+              final finalLen = await partFile.length();
+              if (finalLen >= totalSize) {
+                final targetFile = File(targetPath);
+                if (targetFile.existsSync()) targetFile.deleteSync();
+                await partFile.rename(targetPath);
+                return true;
+              }
+            } else {
+              try {
+                await chunksDir.delete(recursive: true);
+              } catch (_) {}
+              if (!_activeClients.containsKey(downloadId)) return false;
+            }
+          }
+        } catch (_) {}
+      }
+
       final request = http.Request('GET', Uri.parse(downloadUrl));
-      request.headers.addAll(headers);
-      request.headers['User-Agent'] =
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36';
-      request.headers['Accept'] = '*/*';
-      request.headers['Accept-Encoding'] = 'identity';
+      request.headers.addAll(baseHeaders);
       if (existingBytes > 0) {
         request.headers['Range'] = 'bytes=$existingBytes-';
       }
@@ -1519,7 +1667,7 @@ class DownloadProvider extends ChangeNotifier {
           final p = (receivedBytes / totalExpectedBytes).clamp(0.05, 0.99);
           onProgress(p, receivedBytes);
 
-          if (++notifTick % 25 == 0) {
+          if (++notifTick % 35 == 0 && _activeClients.containsKey(downloadId)) {
             _updateSystemNotification(
               id: downloadId.hashCode.abs(),
               title: title,

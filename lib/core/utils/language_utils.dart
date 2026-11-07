@@ -84,8 +84,10 @@ class LanguageUtils {
     'türkçe': LanguageInfo(flag: '🇹🇷', code: 'TR', name: 'Turkish'),
 
     'id': LanguageInfo(flag: '🇮🇩', code: 'ID', name: 'Indonesian'),
+    'in': LanguageInfo(flag: '🇮🇩', code: 'ID', name: 'Indonesian'),
     'ind': LanguageInfo(flag: '🇮🇩', code: 'ID', name: 'Indonesian'),
     'indonesian': LanguageInfo(flag: '🇮🇩', code: 'ID', name: 'Indonesian'),
+    'bahasa indonesia': LanguageInfo(flag: '🇮🇩', code: 'ID', name: 'Indonesian'),
 
     'ms': LanguageInfo(flag: '🇲🇾', code: 'MS', name: 'Malay'),
     'may': LanguageInfo(flag: '🇲🇾', code: 'MS', name: 'Malay'),
@@ -314,25 +316,62 @@ class LanguageUtils {
   /// Returns a clean, user-friendly language name without server names, resolutions, or noise.
   static String cleanLanguageName(String raw) {
     if (raw.trim().isEmpty) return 'English';
-    // 1. Strip brackets and parentheses: [Dubbed], (1080p), (Original)
+    // 1. Strip brackets and parentheses: [Dubbed], (1080p), (Original), [SDH]
     var cleaned = raw.replaceAll(RegExp(r'\[.*?\]|\(.*?\)', caseSensitive: false), '').trim();
     // 2. Strip separator suffixes like ' - NetMirror', ' • Cinejoy'
     cleaned = cleaned.split(RegExp(r'\s*[-–—•|]\s*')).first.trim();
     // 3. Strip resolution tokens (4k, 1080p, 720p, etc.)
     cleaned = cleaned.replaceAll(RegExp(r'\b(4k|2160p|1080p|720p|480p|360p)\b', caseSensitive: false), '').trim();
-    // 4. Strip server/dub noise words
-        // Exclude subtitle releases from audio name cleanup
-    cleaned = cleaned.replaceAll(RegExp(r'\b(dub|sub|audio|server|stellarhd|quantumstream|netmirror|cinejoy|screenfetch|stream)\b', caseSensitive: false), '').trim();
+    // 4. Strip server/dub/subtitle noise words and numbering (e.g. "English 1", "Indonesian #2", "SDH", "CC")
+    cleaned = cleaned.replaceAll(
+      RegExp(
+        r'\b(dub|dubbed|sub|subs|subbed|subtitle|subtitles|audio|server|stellarhd|quantumstream|netmirror|cinejoy|screenfetch|voidflix|stream|sdh|cc|forced|vtt|srt)\b',
+        caseSensitive: false,
+      ),
+      '',
+    ).trim();
+    cleaned = cleaned.replaceAll(RegExp(r'[\s_#-]*\d+$'), '').trim();
 
     if (cleaned.isEmpty) {
       if (raw.toLowerCase().contains('original')) return 'Original';
       return 'English';
     }
     final info = getInfo(cleaned);
+    if (info.name.isNotEmpty && info.name != 'Subtitle' && info.name != 'Default' && info.flag != '🌐') {
+      return info.name;
+    }
+    // Check if cleaned is a locale code like en_US or id_ID or in_ID
+    final codePart = cleaned.split(RegExp(r'[_-]')).first.trim();
+    if (codePart.length >= 2 && codePart.length <= 3) {
+      final codeInfo = getInfo(codePart);
+      if (codeInfo.flag != '🌐') return codeInfo.name;
+    }
     if (info.name.isNotEmpty && info.name != 'Subtitle' && info.name != 'Default') {
       return info.name;
     }
     return cleaned;
+  }
+
+  /// Strictly deduplicates subtitle tracks so at most ONE track per language is returned.
+  static List<SubtitleTrack> deduplicateSubtitles(List<SubtitleTrack> tracks) {
+    final result = <SubtitleTrack>[];
+    final seenLangs = <String>{};
+    final seenUrls = <String>{};
+    for (final t in tracks) {
+      final url = t.url.trim();
+      if (url.isEmpty || seenUrls.contains(url)) continue;
+      final cleanLabel = cleanLanguageName(t.label.isNotEmpty ? t.label : t.language);
+      final langKey = cleanLabel.toLowerCase();
+      if (seenLangs.contains(langKey)) continue;
+      seenUrls.add(url);
+      seenLangs.add(langKey);
+      result.add(SubtitleTrack(
+        label: cleanLabel,
+        language: t.language.isNotEmpty ? t.language : cleanLabel.toLowerCase(),
+        url: url,
+      ));
+    }
+    return result;
   }
 
   /// Checks if candidate matches target language (handles codes, names, and native scripts)

@@ -237,7 +237,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
   List<TvEpisode> _episodes = [];
   bool _isLoadingEpisodes = false;
   String? _activeLocalFilePath;
-  String? _activeLocalSubtitlePath;
 
   // Picture-in-Picture & Desktop Windowing
   bool _isInPipMode = false;
@@ -271,6 +270,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   Color _partyHudAccent = const Color(0xFFE50914);
   Timer? _partyHudTimer;
   bool _isSyncSeeking = false;
+  VoidCallback? _activePartySheetUpdater;
 
   // Android TV / Remote Control support
   final FocusNode _playerFocusNode = FocusNode();
@@ -517,7 +517,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
     });
 
     _activeLocalFilePath = widget.localFilePath;
-    _activeLocalSubtitlePath = widget.localSubtitlePath;
 
     _loadMedia();
 
@@ -617,6 +616,16 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   Future<void> _loadLocalFile(String filePath) async {
     _disposeVideoController();
+    final dlProvider = context.read<DownloadProvider>();
+    final itemId = DownloadProvider.generateId(
+      widget.mediaType,
+      widget.mediaId,
+      season: _currentSeason,
+      episode: _currentEpisode,
+    );
+    final dlItem = dlProvider.getItem(itemId) ?? dlProvider.getItemByPath(filePath);
+    final dlAudioLang = dlItem?.resolvedAudioLanguage ?? 'Original';
+
     setState(() {
       _isExtracting = false;
       _isLoading = true;
@@ -624,6 +633,16 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _availableQualities = [
         StreamQuality(label: 'Offline (Downloaded)', height: 1080, url: filePath),
       ];
+      _directStreams = [
+        ExtractedStream(
+          url: filePath,
+          sourceName: 'Downloaded',
+          type: 'mp4',
+          language: dlAudioLang,
+          qualities: _availableQualities,
+        ),
+      ];
+      _selectedStreamIndex = 0;
       _selectedQualityIndex = (_pendingQualityIndex != null && _availableQualities.isNotEmpty)
           ? _pendingQualityIndex!.clamp(0, _availableQualities.length - 1)
           : 0;
@@ -683,36 +702,40 @@ class _PlayerScreenState extends State<PlayerScreen> {
     try {
       final subs = <SubtitleTrack>[];
       final seenUrls = <String>{};
+      final seenLangs = <String>{};
 
       void addSub(String label, String lang, String path) {
-        if (!seenUrls.contains(path) && File(path).existsSync()) {
-          seenUrls.add(path);
+        final normPath = path.replaceAll('\\', '/').toLowerCase();
+        final cleanLabel = LanguageUtils.cleanLanguageName(
+          label.isNotEmpty && label != 'Subtitles' && label != 'Offline Subtitles' && label != 'Sub'
+              ? label
+              : lang,
+        );
+        final langKey = cleanLabel.toLowerCase();
+        if (!seenUrls.contains(normPath) &&
+            !seenLangs.contains(langKey) &&
+            File(path).existsSync()) {
+          seenUrls.add(normPath);
+          seenLangs.add(langKey);
           subs.add(SubtitleTrack(
-            label: label,
+            label: cleanLabel,
             language: lang,
             url: path,
           ));
         }
       }
 
-      // 1. Direct param passed to widget
-      if (widget.localSubtitlePath != null && widget.localSubtitlePath!.isNotEmpty) {
-        addSub('English', 'en', widget.localSubtitlePath!);
-      }
-
-      // 2. Query DownloadProvider for matching DownloadedItem
       final downloadProvider = context.read<DownloadProvider>();
-      final itemId = widget.mediaType == 'tv'
-          ? 'tv_${widget.mediaId}_${_currentSeason}_$_currentEpisode'
-          : 'movie_${widget.mediaId}';
+      final itemId = DownloadProvider.generateId(
+        widget.mediaType,
+        widget.mediaId,
+        season: _currentSeason,
+        episode: _currentEpisode,
+      );
       final item = downloadProvider.getItem(itemId) ??
           downloadProvider.getItemByPath(videoFilePath);
 
-      if (item?.localSubtitlePath != null && item!.localSubtitlePath!.isNotEmpty) {
-        addSub('Subtitles', 'en', item.localSubtitlePath!);
-      }
-
-      // 3. Check for manifest file: <id>_subs.json in the same folder
+      // 1. Check manifest file FIRST (<id>_subs.json) so tracks get their exact language labels
       final videoFile = File(videoFilePath);
       final dir = videoFile.parent;
 
@@ -729,7 +752,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
             if (parsed is List) {
               for (final entry in parsed) {
                 if (entry is Map) {
-                  final label = (entry['label'] as String?) ?? 'Subtitle';
+                  final label = (entry['label'] as String?) ?? 'English';
                   final lang = (entry['language'] as String?) ?? 'en';
                   final path = entry['path'] as String?;
                   if (path != null) {
@@ -742,11 +765,15 @@ class _PlayerScreenState extends State<PlayerScreen> {
         }
       }
 
-      // 4. Scan disk directory for any matching subtitles (.vtt or .srt)
-      if (_activeLocalSubtitlePath != null && File(_activeLocalSubtitlePath!).existsSync()) {
-        addSub('Offline Subtitles', 'offline', _activeLocalSubtitlePath!);
+      // 2. Direct param or item localSubtitlePath fallback
+      if (widget.localSubtitlePath != null && widget.localSubtitlePath!.isNotEmpty) {
+        addSub('English', 'en', widget.localSubtitlePath!);
+      }
+      if (item?.localSubtitlePath != null && item!.localSubtitlePath!.isNotEmpty) {
+        addSub('English', 'en', item.localSubtitlePath!);
       }
 
+      // 3. Scan disk directory for any remaining matching subtitles (.vtt or .srt)
       if (dir.existsSync()) {
         try {
           final entries = dir.listSync();
@@ -757,7 +784,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 final base = path.split(Platform.pathSeparator).last;
                 if (base.contains(itemId) || base.contains(widget.mediaId.toString())) {
                   final parts = base.replaceAll(RegExp(r'\.(vtt|srt)$'), '').split('_sub_');
-                  final langLabel = parts.length > 1 ? parts.last : 'Sub';
+                  final langLabel = parts.length > 1 ? parts.last : 'English';
                   addSub(langLabel, langLabel.toLowerCase(), path);
                 }
               }
@@ -1206,20 +1233,34 @@ class _PlayerScreenState extends State<PlayerScreen> {
         }
         _selectedStreamIndex = chosenAudioIdx;
 
-        // Aggregate subtitles from all sources
+        // Aggregate subtitles from all sources, strictly deduplicating by cleaned language name
         final allSubs = <SubtitleTrack>[];
         final seenSubUrls = <String>{};
+        final seenSubLangs = <String>{};
+
+        void addUniqueSub(SubtitleTrack sub) {
+          if (sub.url.isEmpty || seenSubUrls.contains(sub.url)) return;
+          final cleanLang = LanguageUtils.cleanLanguageName(
+            sub.label.isNotEmpty ? sub.label : sub.language,
+          );
+          final langKey = cleanLang.toLowerCase();
+          if (seenSubLangs.contains(langKey)) return;
+          seenSubUrls.add(sub.url);
+          seenSubLangs.add(langKey);
+          allSubs.add(SubtitleTrack(
+            url: sub.url,
+            label: cleanLang,
+            language: sub.language,
+          ));
+        }
+
         for (final s in streams) {
           for (final sub in s.subtitles) {
-            if (!seenSubUrls.contains(sub.url)) {
-              seenSubUrls.add(sub.url);
-              allSubs.add(sub);
-            }
+            addUniqueSub(sub);
           }
         }
 
-        // If the extracted stream cluster (e.g. NovaStream, AtlasStream, PulsarHD) has no embedded subtitles,
-        // borrow cached subtitles from other providers (Vidlink, Voidflix)
+        // If the extracted stream cluster has no embedded subtitles, borrow cached subtitles
         if (allSubs.isEmpty) {
           final shared = await StreamExtractor.getSharedSubtitles(
             widget.mediaType,
@@ -1228,10 +1269,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
             _currentEpisode,
           );
           for (final sub in shared) {
-            if (!seenSubUrls.contains(sub.url)) {
-              seenSubUrls.add(sub.url);
-              allSubs.add(sub);
-            }
+            addUniqueSub(sub);
           }
         }
         _subtitles = allSubs;
@@ -2332,10 +2370,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
         ).firstOrNull;
         if (dlMatch != null && File(dlMatch.localFilePath).existsSync()) {
           _activeLocalFilePath = dlMatch.localFilePath;
-          _activeLocalSubtitlePath = dlMatch.localSubtitlePath;
         } else {
           _activeLocalFilePath = null;
-          _activeLocalSubtitlePath = null;
         }
       } catch (_) {}
     }
@@ -2402,7 +2438,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
               _currentSeason = targetDl.season;
               _currentEpisode = targetDl.episode;
               _activeLocalFilePath = targetDl.localFilePath;
-              _activeLocalSubtitlePath = targetDl.localSubtitlePath;
               _showSkipIntro = false;
               _hasSkippedIntroForThisEp = false;
               _hasCancelledAutoplayForThisEp = false;
@@ -2782,11 +2817,16 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                         return offItem;
                                       }),
                                       if (_subtitles.isNotEmpty)
-                                        ..._subtitles.map((track) {
-                                          final isSelected = tempSubtitle?.url == track.url;
+                                        ...LanguageUtils.deduplicateSubtitles(_subtitles).map((track) {
                                           final label = LanguageUtils.cleanLanguageName(
                                             track.label.isNotEmpty ? track.label : track.language,
                                           );
+                                          final isSelected = tempSubtitle != null &&
+                                              (tempSubtitle!.url == track.url ||
+                                                  LanguageUtils.cleanLanguageName(
+                                                        tempSubtitle!.label.isNotEmpty ? tempSubtitle!.label : tempSubtitle!.language,
+                                                      ).toLowerCase() ==
+                                                      label.toLowerCase());
 
                                           final item = InkWell(
                                             borderRadius: BorderRadius.circular(8),
@@ -6217,7 +6257,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
         _showFloatingPartyMessage(msg);
       }
     }
-    if (mounted) setState(() {});
+    if (mounted) {
+      setState(() {});
+      _activePartySheetUpdater?.call();
+    }
   }
 
   void _showFloatingPartyMessage(WatchPartyMessage msg) {
@@ -6235,7 +6278,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     });
   }
 
-  void _showPartyHud(String message, {IconData icon = Icons.group_rounded, Color accent = const Color(0xFFE50914)}) {
+  void _showPartyHud(String message, {IconData icon = Icons.group_rounded, Color accent = const Color(0xFFB81D24)}) {
     if (!mounted) return;
     setState(() {
       _partyHudMessage = message;
@@ -6259,12 +6302,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 9),
         decoration: BoxDecoration(
-          color: const Color(0xEE0B0B10),
+          color: const Color(0xF2121212),
           borderRadius: BorderRadius.circular(30),
-          border: Border.all(color: Colors.white.withValues(alpha: 0.16), width: 0.8),
+          border: Border.all(color: Colors.white.withValues(alpha: 0.14), width: 0.8),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: 0.6),
+              color: Colors.black.withValues(alpha: 0.65),
               blurRadius: 16,
               spreadRadius: 2,
             ),
@@ -6279,13 +6322,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
               decoration: BoxDecoration(
                 color: _partyHudAccent,
                 shape: BoxShape.circle,
-                boxShadow: [
-                  BoxShadow(color: _partyHudAccent.withValues(alpha: 0.8), blurRadius: 6),
-                ],
               ),
             ),
             const SizedBox(width: 8),
-            Icon(_partyHudIcon, color: _partyHudAccent, size: 16),
+            Icon(_partyHudIcon, color: Colors.white, size: 16),
             const SizedBox(width: 8),
             Text(
               _partyHudMessage ?? '',
@@ -6293,7 +6333,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 color: Colors.white,
                 fontWeight: FontWeight.w600,
                 fontSize: 12.5,
-                letterSpacing: 0.3,
+                letterSpacing: 0.2,
               ),
             ),
           ],
@@ -6323,12 +6363,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
     return Container(
       decoration: BoxDecoration(
-        color: const Color(0xEE0B0B10),
+        color: const Color(0xF0121212),
         borderRadius: BorderRadius.circular(24),
-        border: Border.all(color: Colors.white.withValues(alpha: 0.16), width: 0.8),
+        border: Border.all(color: const Color(0xFFB81D24).withValues(alpha: 0.55), width: 1.0),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: 0.45),
+            color: Colors.black.withValues(alpha: 0.5),
             blurRadius: 10,
             offset: const Offset(0, 2),
           ),
@@ -6340,22 +6380,16 @@ class _PlayerScreenState extends State<PlayerScreen> {
           borderRadius: BorderRadius.circular(24),
           onTap: _openWatchPartySheet,
           child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 6),
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
                 Container(
                   width: 7,
                   height: 7,
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF46D369),
+                  decoration: const BoxDecoration(
+                    color: Color(0xFFE50914),
                     shape: BoxShape.circle,
-                    boxShadow: [
-                      BoxShadow(
-                        color: const Color(0xFF46D369).withValues(alpha: 0.8),
-                        blurRadius: 5,
-                      ),
-                    ],
                   ),
                 ),
                 const SizedBox(width: 7),
@@ -6364,19 +6398,19 @@ class _PlayerScreenState extends State<PlayerScreen> {
                   style: const TextStyle(
                     color: Colors.white,
                     fontSize: 11.5,
-                    fontWeight: FontWeight.bold,
-                    letterSpacing: 1.0,
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 1.1,
                   ),
                 ),
-                const SizedBox(width: 6),
+                const SizedBox(width: 7),
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1.5),
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
                   decoration: BoxDecoration(
-                    color: isHost ? const Color(0xFFE50914) : Colors.white.withValues(alpha: 0.12),
+                    color: isHost ? const Color(0xFFB81D24) : const Color(0xFF262626),
                     borderRadius: BorderRadius.circular(4),
                   ),
                   child: Text(
-                    isHost ? 'HOST' : '$count',
+                    isHost ? 'HOST • $count' : '$count ONLINE',
                     style: const TextStyle(
                       color: Colors.white,
                       fontSize: 9,
@@ -6402,12 +6436,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
           margin: const EdgeInsets.only(bottom: 6),
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
           decoration: BoxDecoration(
-            color: const Color(0xE60A0A0F),
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: Colors.white.withValues(alpha: 0.15), width: 0.8),
+            color: const Color(0xEB111111),
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(color: Colors.white.withValues(alpha: 0.14), width: 0.8),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withValues(alpha: 0.5),
+                color: Colors.black.withValues(alpha: 0.55),
                 blurRadius: 8,
               ),
             ],
@@ -6419,7 +6453,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 '${msg.sender}: ',
                 style: const TextStyle(
                   color: Color(0xFFE50914),
-                  fontWeight: FontWeight.bold,
+                  fontWeight: FontWeight.w700,
                   fontSize: 12,
                 ),
               ),
@@ -6446,6 +6480,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _startHideControlsTimer();
     final joinCodeController = TextEditingController();
     final chatController = TextEditingController();
+    final chatScrollController = ScrollController();
 
     bool copiedCode = false;
     int selectedTab = 0; // 0 = Start Party, 1 = Join Room
@@ -6454,27 +6489,449 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
     showModalBottomSheet(
       context: context,
-      backgroundColor: const Color(0xFF141414),
+      backgroundColor: Colors.transparent,
       isScrollControlled: true,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
       builder: (ctx) {
         return StatefulBuilder(
           builder: (ctx, setSheetState) {
+            _activePartySheetUpdater = () {
+              if (ctx.mounted) {
+                setSheetState(() {});
+              }
+            };
+
+            void sendPartyChat(String rawText) {
+              final text = rawText.trim();
+              if (text.isEmpty || _partyRoom == null) return;
+              final newMsg = WatchPartyMessage(
+                id: '${DateTime.now().millisecondsSinceEpoch}',
+                sender: _partyMemberName,
+                text: text,
+                timestamp: DateTime.now().millisecondsSinceEpoch,
+              );
+              _partyRoom = WatchPartyRoom(
+                roomCode: _partyRoom!.roomCode,
+                hostId: _partyRoom!.hostId,
+                mediaId: _partyRoom!.mediaId,
+                mediaTitle: _partyRoom!.mediaTitle,
+                mediaType: _partyRoom!.mediaType,
+                season: _partyRoom!.season,
+                episode: _partyRoom!.episode,
+                server: _partyRoom!.server,
+                isPlaying: _partyRoom!.isPlaying,
+                currentTime: _partyRoom!.currentTime,
+                updatedAt: _partyRoom!.updatedAt,
+                members: _partyRoom!.members,
+                messages: [..._partyRoom!.messages, newMsg],
+              );
+              setSheetState(() {});
+              _showFloatingPartyMessage(newMsg);
+              _partyService.syncPlayback(
+                roomCode: _partyRoom!.roomCode,
+                memberId: _partyMemberId,
+                isPlaying: _isPlaying,
+                currentTime: _currentPosition.inMilliseconds / 1000.0,
+                chatText: text,
+                chatSender: _partyMemberName,
+              );
+              WidgetsBinding.instance.addPostFrameCallback((_) {
+                if (chatScrollController.hasClients) {
+                  chatScrollController.animateTo(
+                    chatScrollController.position.maxScrollExtent,
+                    duration: const Duration(milliseconds: 200),
+                    curve: Curves.easeOut,
+                  );
+                }
+              });
+            }
+
+            final mq = MediaQuery.of(ctx);
+            final isWide = mq.size.width >= 540;
+
             if (_isInParty && _partyRoom != null) {
               final isHost = _partyRoom!.hostId == _partyMemberId;
+              final messages = _partyRoom!.messages;
+
+              Widget buildRoomControlColumn() {
+                return Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    // Room Code Card
+                    Container(
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF181818),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: const Color(0xFF282828), width: 1),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                'ROOM CODE • ${_partyRoom!.members.length} ONLINE',
+                                style: const TextStyle(
+                                  color: Color(0xFF8E8E8E),
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w700,
+                                  letterSpacing: 1.0,
+                                ),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                _partyRoom!.roomCode,
+                                style: const TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 21,
+                                  fontWeight: FontWeight.w900,
+                                  letterSpacing: 3.0,
+                                ),
+                              ),
+                            ],
+                          ),
+                          Material(
+                            color: Colors.transparent,
+                            child: InkWell(
+                              borderRadius: BorderRadius.circular(8),
+                              onTap: () {
+                                Clipboard.setData(ClipboardData(text: _partyRoom!.roomCode));
+                                setSheetState(() => copiedCode = true);
+                                _showPartyHud(
+                                  'Room code ${_partyRoom!.roomCode} copied',
+                                  icon: Icons.check_circle_rounded,
+                                );
+                                Future.delayed(const Duration(seconds: 2), () {
+                                  if (ctx.mounted) {
+                                    setSheetState(() => copiedCode = false);
+                                  }
+                                });
+                              },
+                              child: AnimatedContainer(
+                                duration: const Duration(milliseconds: 180),
+                                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                                decoration: BoxDecoration(
+                                  color: copiedCode ? const Color(0xFFB81D24) : const Color(0xFF242424),
+                                  borderRadius: BorderRadius.circular(8),
+                                  border: Border.all(
+                                    color: copiedCode ? const Color(0xFFE50914) : const Color(0xFF333333),
+                                    width: 1,
+                                  ),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      copiedCode ? Icons.check_rounded : Icons.copy_rounded,
+                                      color: Colors.white,
+                                      size: 14,
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      copiedCode ? 'Copied' : 'Copy',
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.w700,
+                                        fontSize: 12,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+
+                    // Participants
+                    const Text(
+                      'MEMBERS IN ROOM',
+                      style: TextStyle(
+                        color: Color(0xFF8E8E8E),
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 1.0,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Wrap(
+                      spacing: 6,
+                      runSpacing: 6,
+                      children: _partyRoom!.members.map((m) {
+                        final initial = m.name.isNotEmpty ? m.name[0].toUpperCase() : 'U';
+                        return Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF181818),
+                            borderRadius: BorderRadius.circular(8),
+                            border: Border.all(
+                              color: m.isHost ? const Color(0xFFB81D24) : const Color(0xFF282828),
+                              width: 1,
+                            ),
+                          ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Container(
+                                width: 18,
+                                height: 18,
+                                decoration: BoxDecoration(
+                                  color: m.isHost ? const Color(0xFFB81D24) : const Color(0xFF2A2A2A),
+                                  shape: BoxShape.circle,
+                                ),
+                                alignment: Alignment.center,
+                                child: Text(
+                                  initial,
+                                  style: const TextStyle(color: Colors.white, fontSize: 9.5, fontWeight: FontWeight.w700),
+                                ),
+                              ),
+                              const SizedBox(width: 6),
+                              Text(
+                                m.name,
+                                style: const TextStyle(color: Colors.white, fontSize: 11.5, fontWeight: FontWeight.w600),
+                              ),
+                              if (m.isHost) ...[
+                                const SizedBox(width: 5),
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 1),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFFB81D24).withValues(alpha: 0.25),
+                                    borderRadius: BorderRadius.circular(3),
+                                  ),
+                                  child: const Text(
+                                    'HOST',
+                                    style: TextStyle(color: Colors.white, fontSize: 8, fontWeight: FontWeight.w800),
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                    const SizedBox(height: 12),
+
+                    // Quick Reactions
+                    const Text(
+                      'REACTIONS',
+                      style: TextStyle(
+                        color: Color(0xFF8E8E8E),
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 1.0,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: ['❤️', '🔥', '😂', '🍿', '😱', '👏'].map((emoji) {
+                        return Material(
+                          color: Colors.transparent,
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(10),
+                            onTap: () => sendPartyChat(emoji),
+                            child: Container(
+                              width: 40,
+                              height: 38,
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF181818),
+                                borderRadius: BorderRadius.circular(10),
+                                border: Border.all(color: const Color(0xFF282828), width: 1),
+                              ),
+                              alignment: Alignment.center,
+                              child: Text(emoji, style: const TextStyle(fontSize: 17)),
+                            ),
+                          ),
+                        );
+                      }).toList(),
+                    ),
+                    const SizedBox(height: 12),
+
+                    // Leave Party Button
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        style: OutlinedButton.styleFrom(
+                          backgroundColor: const Color(0xFF181818),
+                          foregroundColor: Colors.white,
+                          side: const BorderSide(color: Color(0xFF333333), width: 1),
+                          padding: const EdgeInsets.symmetric(vertical: 11),
+                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+                        ),
+                        icon: const Icon(Icons.logout_rounded, size: 16, color: Color(0xFFE50914)),
+                        label: const Text('Leave Watch Party', style: TextStyle(fontWeight: FontWeight.w700, fontSize: 12.5)),
+                        onPressed: () {
+                          Navigator.pop(ctx);
+                          _leaveWatchParty();
+                        },
+                      ),
+                    ),
+                  ],
+                );
+              }
+
+              Widget buildLiveChatColumn() {
+                return Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'LIVE PARTY CHAT',
+                      style: TextStyle(
+                        color: Color(0xFF8E8E8E),
+                        fontSize: 10,
+                        fontWeight: FontWeight.w700,
+                        letterSpacing: 1.0,
+                      ),
+                    ),
+                    const SizedBox(height: 6),
+                    Container(
+                      height: isWide ? 165 : 140,
+                      width: double.infinity,
+                      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF161616),
+                        borderRadius: BorderRadius.circular(12),
+                        border: Border.all(color: const Color(0xFF262626), width: 1),
+                      ),
+                      child: messages.isEmpty
+                          ? const Center(
+                              child: Text(
+                                'No messages yet. Say hello to the room!',
+                                style: TextStyle(color: Color(0xFF6E6E6E), fontSize: 12),
+                              ),
+                            )
+                          : ListView.builder(
+                              controller: chatScrollController,
+                              physics: const BouncingScrollPhysics(),
+                              itemCount: messages.length,
+                              itemBuilder: (_, idx) {
+                                final m = messages[idx];
+                                final isMe = m.sender == _partyMemberName;
+                                final isSystem = m.sender == 'System';
+                                if (isSystem) {
+                                  return Padding(
+                                    padding: const EdgeInsets.symmetric(vertical: 3),
+                                    child: Text(
+                                      m.text,
+                                      style: const TextStyle(
+                                        color: Color(0xFF777777),
+                                        fontSize: 11,
+                                        fontStyle: FontStyle.italic,
+                                      ),
+                                    ),
+                                  );
+                                }
+                                return Padding(
+                                  padding: const EdgeInsets.symmetric(vertical: 3.5),
+                                  child: RichText(
+                                    text: TextSpan(
+                                      children: [
+                                        TextSpan(
+                                          text: '${m.sender}: ',
+                                          style: TextStyle(
+                                            color: isMe ? const Color(0xFFE50914) : Colors.white,
+                                            fontWeight: FontWeight.w700,
+                                            fontSize: 12,
+                                          ),
+                                        ),
+                                        TextSpan(
+                                          text: m.text,
+                                          style: const TextStyle(
+                                            color: Color(0xFFD8D8D8),
+                                            fontSize: 12,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                );
+                              },
+                            ),
+                    ),
+                    const SizedBox(height: 10),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: TextField(
+                            controller: chatController,
+                            style: const TextStyle(color: Colors.white, fontSize: 13),
+                            textInputAction: TextInputAction.send,
+                            onSubmitted: (val) {
+                              if (val.trim().isNotEmpty) {
+                                sendPartyChat(val);
+                                chatController.clear();
+                              }
+                            },
+                            decoration: InputDecoration(
+                              hintText: 'Message party...',
+                              hintStyle: const TextStyle(color: Color(0xFF6E6E6E), fontSize: 12.5),
+                              filled: true,
+                              fillColor: const Color(0xFF1A1A1A),
+                              isDense: true,
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 11),
+                              border: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(10),
+                                borderSide: const BorderSide(color: Color(0xFF2C2C2C)),
+                              ),
+                              enabledBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(10),
+                                borderSide: const BorderSide(color: Color(0xFF2C2C2C)),
+                              ),
+                              focusedBorder: OutlineInputBorder(
+                                borderRadius: BorderRadius.circular(10),
+                                borderSide: const BorderSide(color: Color(0xFFB81D24), width: 1.2),
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Material(
+                          color: const Color(0xFFB81D24),
+                          borderRadius: BorderRadius.circular(10),
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(10),
+                            onTap: () {
+                              final text = chatController.text.trim();
+                              if (text.isNotEmpty) {
+                                sendPartyChat(text);
+                                chatController.clear();
+                              }
+                            },
+                            child: const SizedBox(
+                              width: 40,
+                              height: 40,
+                              child: Icon(Icons.send_rounded, color: Colors.white, size: 17),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
+                );
+              }
 
               return Center(
                 child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 580),
-                  child: SingleChildScrollView(
-                    child: Padding(
+                  constraints: const BoxConstraints(maxWidth: 680),
+                  child: Container(
+                    decoration: const BoxDecoration(
+                      color: Color(0xFF111111),
+                      borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+                      border: Border(top: BorderSide(color: Color(0xFF262626), width: 1)),
+                    ),
+                    child: SingleChildScrollView(
+                      physics: const BouncingScrollPhysics(),
                       padding: EdgeInsets.only(
-                        bottom: MediaQuery.of(ctx).viewInsets.bottom + 20,
+                        bottom: mq.viewInsets.bottom + 16,
                         left: 20,
                         right: 20,
-                        top: 14,
+                        top: 12,
                       ),
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
@@ -6482,17 +6939,16 @@ class _PlayerScreenState extends State<PlayerScreen> {
                         children: [
                           Center(
                             child: Container(
-                              width: 38,
+                              width: 36,
                               height: 4,
                               decoration: BoxDecoration(
-                                color: Colors.white24,
+                                color: const Color(0xFF333333),
                                 borderRadius: BorderRadius.circular(2),
                               ),
                             ),
                           ),
-                          const SizedBox(height: 14),
-
-                          // Header Row
+                          const SizedBox(height: 10),
+                          // Header
                           Row(
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
@@ -6501,9 +6957,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                   Container(
                                     padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                                     decoration: BoxDecoration(
-                                      color: const Color(0xFF46D369).withValues(alpha: 0.15),
+                                      color: const Color(0xFF1C1C1C),
                                       borderRadius: BorderRadius.circular(6),
-                                      border: Border.all(color: const Color(0xFF46D369).withValues(alpha: 0.4), width: 0.8),
+                                      border: Border.all(color: const Color(0xFFB81D24), width: 0.9),
                                     ),
                                     child: Row(
                                       children: [
@@ -6511,18 +6967,18 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                           width: 6,
                                           height: 6,
                                           decoration: const BoxDecoration(
-                                            color: Color(0xFF46D369),
+                                            color: Color(0xFFE50914),
                                             shape: BoxShape.circle,
                                           ),
                                         ),
-                                        const SizedBox(width: 5),
+                                        const SizedBox(width: 6),
                                         const Text(
-                                          'SYNC PLAY ACTIVE',
+                                          'WATCH PARTY LIVE',
                                           style: TextStyle(
-                                            color: Color(0xFF46D369),
+                                            color: Colors.white,
                                             fontSize: 10,
-                                            fontWeight: FontWeight.bold,
-                                            letterSpacing: 0.6,
+                                            fontWeight: FontWeight.w800,
+                                            letterSpacing: 0.7,
                                           ),
                                         ),
                                       ],
@@ -6530,25 +6986,25 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                   ),
                                   const SizedBox(width: 8),
                                   Container(
-                                    padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+                                    padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 3.5),
                                     decoration: BoxDecoration(
-                                      color: isHost ? const Color(0xFFE50914) : Colors.white12,
-                                      borderRadius: BorderRadius.circular(4),
+                                      color: isHost ? const Color(0xFFB81D24) : const Color(0xFF222222),
+                                      borderRadius: BorderRadius.circular(5),
                                     ),
                                     child: Text(
                                       isHost ? 'HOST' : 'GUEST',
                                       style: const TextStyle(
                                         color: Colors.white,
                                         fontSize: 9.5,
-                                        fontWeight: FontWeight.bold,
-                                        letterSpacing: 0.4,
+                                        fontWeight: FontWeight.w800,
+                                        letterSpacing: 0.5,
                                       ),
                                     ),
                                   ),
                                 ],
                               ),
                               IconButton(
-                                icon: const Icon(Icons.close_rounded, color: Colors.white60, size: 22),
+                                icon: const Icon(Icons.close_rounded, color: Color(0xFF8E8E8E), size: 20),
                                 padding: EdgeInsets.zero,
                                 constraints: const BoxConstraints(),
                                 onPressed: () => Navigator.pop(ctx),
@@ -6556,308 +7012,20 @@ class _PlayerScreenState extends State<PlayerScreen> {
                             ],
                           ),
                           const SizedBox(height: 12),
-
-                          // Netflix Hero Room Code Card
-                          Container(
-                            width: double.infinity,
-                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                            decoration: BoxDecoration(
-                              gradient: const LinearGradient(
-                                colors: [Color(0xFF1E1E1E), Color(0xFF181818)],
-                                begin: Alignment.topLeft,
-                                end: Alignment.bottomRight,
-                              ),
-                              borderRadius: BorderRadius.circular(16),
-                              border: Border.all(color: Colors.white.withValues(alpha: 0.12), width: 0.8),
-                            ),
-                            child: Column(
+                          if (isWide)
+                            Row(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Row(
-                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    const Text(
-                                      'ROOM CODE',
-                                      style: TextStyle(
-                                        color: Colors.white54,
-                                        fontSize: 11,
-                                        fontWeight: FontWeight.bold,
-                                        letterSpacing: 1.2,
-                                      ),
-                                    ),
-                                    Text(
-                                      '${_partyRoom!.members.length} Watching Together',
-                                      style: const TextStyle(
-                                        color: Colors.white70,
-                                        fontSize: 12,
-                                        fontWeight: FontWeight.w500,
-                                      ),
-                                    ),
-                                  ],
-                                ),
-                                const SizedBox(height: 8),
-                                Row(
-                                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                  children: [
-                                    Text(
-                                      _partyRoom!.roomCode,
-                                      style: const TextStyle(
-                                        color: Colors.white,
-                                        fontSize: 24,
-                                        fontWeight: FontWeight.w900,
-                                        letterSpacing: 3.5,
-                                      ),
-                                    ),
-                                    Material(
-                                      color: Colors.transparent,
-                                      child: InkWell(
-                                        borderRadius: BorderRadius.circular(8),
-                                        onTap: () {
-                                          Clipboard.setData(ClipboardData(text: _partyRoom!.roomCode));
-                                          setSheetState(() => copiedCode = true);
-                                          _showPartyHud(
-                                            'Room code ${_partyRoom!.roomCode} copied',
-                                            icon: Icons.check_circle_rounded,
-                                            accent: const Color(0xFF46D369),
-                                          );
-                                          Future.delayed(const Duration(seconds: 2), () {
-                                            if (ctx.mounted) {
-                                              setSheetState(() => copiedCode = false);
-                                            }
-                                          });
-                                        },
-                                        child: AnimatedContainer(
-                                          duration: const Duration(milliseconds: 200),
-                                          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                                          decoration: BoxDecoration(
-                                            color: copiedCode
-                                                ? const Color(0xFF46D369).withValues(alpha: 0.2)
-                                                : Colors.white.withValues(alpha: 0.1),
-                                            borderRadius: BorderRadius.circular(8),
-                                            border: Border.all(
-                                              color: copiedCode ? const Color(0xFF46D369) : Colors.white24,
-                                              width: 0.8,
-                                            ),
-                                          ),
-                                          child: Row(
-                                            mainAxisSize: MainAxisSize.min,
-                                            children: [
-                                              Icon(
-                                                copiedCode ? Icons.check_circle_rounded : Icons.copy_rounded,
-                                                color: copiedCode ? const Color(0xFF46D369) : Colors.white,
-                                                size: 15,
-                                              ),
-                                              const SizedBox(width: 6),
-                                              Text(
-                                                copiedCode ? 'Copied!' : 'Copy Code',
-                                                style: TextStyle(
-                                                  color: copiedCode ? const Color(0xFF46D369) : Colors.white,
-                                                  fontWeight: FontWeight.bold,
-                                                  fontSize: 12,
-                                                ),
-                                              ),
-                                            ],
-                                          ),
-                                        ),
-                                      ),
-                                    ),
-                                  ],
-                                ),
+                                Expanded(flex: 11, child: buildRoomControlColumn()),
+                                const SizedBox(width: 16),
+                                Expanded(flex: 12, child: buildLiveChatColumn()),
                               ],
-                            ),
-                          ),
-                          const SizedBox(height: 16),
-
-                          // Netflix Quick Reaction Bar
-                          const Text(
-                            'QUICK REACTIONS',
-                            style: TextStyle(
-                              color: Colors.white54,
-                              fontSize: 10.5,
-                              fontWeight: FontWeight.bold,
-                              letterSpacing: 1.0,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          Row(
-                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                            children: ['❤️', '🔥', '😂', '🍿', '😱', '👏'].map((emoji) {
-                              return Material(
-                                color: Colors.transparent,
-                                child: InkWell(
-                                  borderRadius: BorderRadius.circular(24),
-                                  onTap: () {
-                                    _partyService.syncPlayback(
-                                      roomCode: _partyRoom!.roomCode,
-                                      memberId: _partyMemberId,
-                                      isPlaying: _isPlaying,
-                                      currentTime: _currentPosition.inMilliseconds / 1000.0,
-                                      chatText: emoji,
-                                      chatSender: _partyMemberName,
-                                    );
-                                    _showFloatingPartyMessage(
-                                      WatchPartyMessage(
-                                        id: '${DateTime.now().millisecondsSinceEpoch}',
-                                        sender: _partyMemberName,
-                                        text: emoji,
-                                        timestamp: DateTime.now().millisecondsSinceEpoch,
-                                      ),
-                                    );
-                                    _showPartyHud('Sent $emoji', icon: Icons.sentiment_satisfied_alt_rounded);
-                                  },
-                                  child: Container(
-                                    width: 44,
-                                    height: 44,
-                                    decoration: BoxDecoration(
-                                      color: const Color(0xFF1E1E1E),
-                                      shape: BoxShape.circle,
-                                      border: Border.all(color: Colors.white.withValues(alpha: 0.12), width: 0.8),
-                                    ),
-                                    alignment: Alignment.center,
-                                    child: Text(emoji, style: const TextStyle(fontSize: 20)),
-                                  ),
-                                ),
-                              );
-                            }).toList(),
-                          ),
-                          const SizedBox(height: 16),
-
-                          // Participants Section
-                          const Text(
-                            'PARTICIPANTS',
-                            style: TextStyle(
-                              color: Colors.white54,
-                              fontSize: 10.5,
-                              fontWeight: FontWeight.bold,
-                              letterSpacing: 1.0,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
-                          Wrap(
-                            spacing: 8,
-                            runSpacing: 8,
-                            children: _partyRoom!.members.map((m) {
-                              final initial = m.name.isNotEmpty ? m.name[0].toUpperCase() : 'U';
-                              return Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFF1E1E1E),
-                                  borderRadius: BorderRadius.circular(16),
-                                  border: Border.all(
-                                    color: m.isHost ? const Color(0xFFE50914).withValues(alpha: 0.5) : Colors.white12,
-                                    width: 0.8,
-                                  ),
-                                ),
-                                child: Row(
-                                  mainAxisSize: MainAxisSize.min,
-                                  children: [
-                                    CircleAvatar(
-                                      radius: 10,
-                                      backgroundColor: m.isHost ? const Color(0xFFE50914) : const Color(0xFF333344),
-                                      child: Text(
-                                        initial,
-                                        style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
-                                      ),
-                                    ),
-                                    const SizedBox(width: 7),
-                                    Text(
-                                      m.name,
-                                      style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600),
-                                    ),
-                                    if (m.isHost) ...[
-                                      const SizedBox(width: 4),
-                                      const Text('👑', style: TextStyle(fontSize: 10)),
-                                    ],
-                                  ],
-                                ),
-                              );
-                            }).toList(),
-                          ),
-                          const SizedBox(height: 16),
-
-                          // Chat message row
-                          Row(
-                            children: [
-                              Expanded(
-                                child: TextField(
-                                  controller: chatController,
-                                  style: const TextStyle(color: Colors.white, fontSize: 13),
-                                  decoration: InputDecoration(
-                                    hintText: 'Type message to party...',
-                                    hintStyle: const TextStyle(color: Colors.white38, fontSize: 13),
-                                    filled: true,
-                                    fillColor: const Color(0xFF242424),
-                                    contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
-                                    border: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(24),
-                                      borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.1)),
-                                    ),
-                                    enabledBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(24),
-                                      borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.1)),
-                                    ),
-                                    focusedBorder: OutlineInputBorder(
-                                      borderRadius: BorderRadius.circular(24),
-                                      borderSide: const BorderSide(color: Color(0xFFE50914), width: 1.2),
-                                    ),
-                                  ),
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              Container(
-                                decoration: const BoxDecoration(
-                                  color: Color(0xFFE50914),
-                                  shape: BoxShape.circle,
-                                ),
-                                child: IconButton(
-                                  icon: const Icon(Icons.send_rounded, color: Colors.white, size: 18),
-                                  onPressed: () {
-                                    final text = chatController.text.trim();
-                                    if (text.isNotEmpty) {
-                                      _partyService.syncPlayback(
-                                        roomCode: _partyRoom!.roomCode,
-                                        memberId: _partyMemberId,
-                                        isPlaying: _isPlaying,
-                                        currentTime: _currentPosition.inMilliseconds / 1000.0,
-                                        chatText: text,
-                                        chatSender: _partyMemberName,
-                                      );
-                                      _showFloatingPartyMessage(
-                                        WatchPartyMessage(
-                                          id: '${DateTime.now().millisecondsSinceEpoch}',
-                                          sender: _partyMemberName,
-                                          text: text,
-                                          timestamp: DateTime.now().millisecondsSinceEpoch,
-                                        ),
-                                      );
-                                      chatController.clear();
-                                      Navigator.pop(ctx);
-                                    }
-                                  },
-                                ),
-                              ),
-                            ],
-                          ),
-                          const SizedBox(height: 14),
-
-                          // Leave Party Button
-                          SizedBox(
-                            width: double.infinity,
-                            child: OutlinedButton.icon(
-                              style: OutlinedButton.styleFrom(
-                                foregroundColor: Colors.white70,
-                                side: BorderSide(color: Colors.white.withValues(alpha: 0.2), width: 0.9),
-                                padding: const EdgeInsets.symmetric(vertical: 12),
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                              ),
-                              icon: const Icon(Icons.exit_to_app_rounded, size: 17, color: Color(0xFFE50914)),
-                              label: const Text('Leave Watch Party', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                              onPressed: () {
-                                Navigator.pop(ctx);
-                                _leaveWatchParty();
-                              },
-                            ),
-                          ),
+                            )
+                          else ...[
+                            buildRoomControlColumn(),
+                            const SizedBox(height: 14),
+                            buildLiveChatColumn(),
+                          ],
                         ],
                       ),
                     ),
@@ -6866,17 +7034,23 @@ class _PlayerScreenState extends State<PlayerScreen> {
               );
             }
 
-            // Not currently in party: Netflix segmented UI
+            // Not currently in party: sleek matte carbon-grey & crimson segmented UI
             return Center(
               child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 580),
-                child: SingleChildScrollView(
-                  child: Padding(
+                constraints: const BoxConstraints(maxWidth: 520),
+                child: Container(
+                  decoration: const BoxDecoration(
+                    color: Color(0xFF111111),
+                    borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+                    border: Border(top: BorderSide(color: Color(0xFF262626), width: 1)),
+                  ),
+                  child: SingleChildScrollView(
+                    physics: const BouncingScrollPhysics(),
                     padding: EdgeInsets.only(
-                      bottom: MediaQuery.of(ctx).viewInsets.bottom + 20,
+                      bottom: mq.viewInsets.bottom + 20,
                       left: 20,
                       right: 20,
-                      top: 14,
+                      top: 12,
                     ),
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
@@ -6884,63 +7058,80 @@ class _PlayerScreenState extends State<PlayerScreen> {
                       children: [
                         Center(
                           child: Container(
-                            width: 38,
+                            width: 36,
                             height: 4,
                             decoration: BoxDecoration(
-                              color: Colors.white24,
+                              color: const Color(0xFF333333),
                               borderRadius: BorderRadius.circular(2),
                             ),
                           ),
                         ),
-                        const SizedBox(height: 14),
+                        const SizedBox(height: 12),
 
                         // Title & Close Row
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            const Row(
+                            Row(
                               children: [
-                                Icon(Icons.group_work_rounded, color: Color(0xFFE50914), size: 22),
-                                SizedBox(width: 8),
-                                Text(
-                                  'Watch Together',
-                                  style: TextStyle(
-                                    color: Colors.white,
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 18,
-                                    letterSpacing: -0.2,
+                                Container(
+                                  width: 32,
+                                  height: 32,
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF1C1C1C),
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(color: const Color(0xFF2C2C2C)),
                                   ),
+                                  child: const Icon(Icons.groups_rounded, color: Color(0xFFE50914), size: 18),
+                                ),
+                                const SizedBox(width: 10),
+                                Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  children: [
+                                    const Text(
+                                      'Watch Party',
+                                      style: TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.w700,
+                                        fontSize: 16,
+                                        letterSpacing: -0.2,
+                                      ),
+                                    ),
+                                    Text(
+                                      widget.mediaType == 'tv'
+                                          ? '${widget.mediaTitle} • S$_currentSeason:E$_currentEpisode'
+                                          : widget.mediaTitle,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: const TextStyle(color: Color(0xFF8E8E8E), fontSize: 11.5),
+                                    ),
+                                  ],
                                 ),
                               ],
                             ),
                             IconButton(
-                              icon: const Icon(Icons.close_rounded, color: Colors.white60, size: 22),
+                              icon: const Icon(Icons.close_rounded, color: Color(0xFF8E8E8E), size: 20),
                               padding: EdgeInsets.zero,
                               constraints: const BoxConstraints(),
                               onPressed: () => Navigator.pop(ctx),
                             ),
                           ],
                         ),
-                        const SizedBox(height: 4),
-                        const Text(
-                          'Stream together in real-time sync with friends directly in the Native Player.',
-                          style: TextStyle(color: Colors.white60, fontSize: 12),
-                        ),
-                        const SizedBox(height: 16),
+                        const SizedBox(height: 14),
 
-                        // Netflix Segmented Pill Switcher
+                        // Segmented Pill Switcher
                         Container(
-                          padding: const EdgeInsets.all(4),
+                          padding: const EdgeInsets.all(3.5),
                           decoration: BoxDecoration(
-                            color: const Color(0xFF1E1E1E),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: Colors.white.withValues(alpha: 0.1), width: 0.8),
+                            color: const Color(0xFF181818),
+                            borderRadius: BorderRadius.circular(10),
+                            border: Border.all(color: const Color(0xFF282828), width: 1),
                           ),
                           child: Row(
                             children: [
                               Expanded(
                                 child: InkWell(
-                                  borderRadius: BorderRadius.circular(9),
+                                  borderRadius: BorderRadius.circular(7),
                                   onTap: () {
                                     setSheetState(() {
                                       selectedTab = 0;
@@ -6948,38 +7139,27 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                     });
                                   },
                                   child: AnimatedContainer(
-                                    duration: const Duration(milliseconds: 180),
-                                    padding: const EdgeInsets.symmetric(vertical: 9),
+                                    duration: const Duration(milliseconds: 160),
+                                    padding: const EdgeInsets.symmetric(vertical: 8.5),
                                     decoration: BoxDecoration(
-                                      color: selectedTab == 0 ? const Color(0xFFE50914) : Colors.transparent,
-                                      borderRadius: BorderRadius.circular(9),
+                                      color: selectedTab == 0 ? const Color(0xFFB81D24) : Colors.transparent,
+                                      borderRadius: BorderRadius.circular(7),
                                     ),
                                     alignment: Alignment.center,
-                                    child: Row(
-                                      mainAxisAlignment: MainAxisAlignment.center,
-                                      children: [
-                                        Icon(
-                                          Icons.add_circle_outline_rounded,
-                                          size: 15,
-                                          color: selectedTab == 0 ? Colors.white : Colors.white60,
-                                        ),
-                                        const SizedBox(width: 6),
-                                        Text(
-                                          'Start Party',
-                                          style: TextStyle(
-                                            color: selectedTab == 0 ? Colors.white : Colors.white60,
-                                            fontWeight: FontWeight.bold,
-                                            fontSize: 12.5,
-                                          ),
-                                        ),
-                                      ],
+                                    child: Text(
+                                      'Host New Party',
+                                      style: TextStyle(
+                                        color: selectedTab == 0 ? Colors.white : const Color(0xFF8E8E8E),
+                                        fontWeight: FontWeight.w700,
+                                        fontSize: 12.5,
+                                      ),
                                     ),
                                   ),
                                 ),
                               ),
                               Expanded(
                                 child: InkWell(
-                                  borderRadius: BorderRadius.circular(9),
+                                  borderRadius: BorderRadius.circular(7),
                                   onTap: () {
                                     setSheetState(() {
                                       selectedTab = 1;
@@ -6987,31 +7167,20 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                     });
                                   },
                                   child: AnimatedContainer(
-                                    duration: const Duration(milliseconds: 180),
-                                    padding: const EdgeInsets.symmetric(vertical: 9),
+                                    duration: const Duration(milliseconds: 160),
+                                    padding: const EdgeInsets.symmetric(vertical: 8.5),
                                     decoration: BoxDecoration(
-                                      color: selectedTab == 1 ? const Color(0xFFE50914) : Colors.transparent,
-                                      borderRadius: BorderRadius.circular(9),
+                                      color: selectedTab == 1 ? const Color(0xFFB81D24) : Colors.transparent,
+                                      borderRadius: BorderRadius.circular(7),
                                     ),
                                     alignment: Alignment.center,
-                                    child: Row(
-                                      mainAxisAlignment: MainAxisAlignment.center,
-                                      children: [
-                                        Icon(
-                                          Icons.login_rounded,
-                                          size: 15,
-                                          color: selectedTab == 1 ? Colors.white : Colors.white60,
-                                        ),
-                                        const SizedBox(width: 6),
-                                        Text(
-                                          'Join with Code',
-                                          style: TextStyle(
-                                            color: selectedTab == 1 ? Colors.white : Colors.white60,
-                                            fontWeight: FontWeight.bold,
-                                            fontSize: 12.5,
-                                          ),
-                                        ),
-                                      ],
+                                    child: Text(
+                                      'Join with Code',
+                                      style: TextStyle(
+                                        color: selectedTab == 1 ? Colors.white : const Color(0xFF8E8E8E),
+                                        fontWeight: FontWeight.w700,
+                                        fontSize: 12.5,
+                                      ),
                                     ),
                                   ),
                                 ),
@@ -7019,22 +7188,21 @@ class _PlayerScreenState extends State<PlayerScreen> {
                             ],
                           ),
                         ),
-                        const SizedBox(height: 16),
+                        const SizedBox(height: 14),
 
-                        // Error Banner (In-sheet feedback, zero SnackBars)
                         if (sheetError != null) ...[
                           Container(
                             width: double.infinity,
-                            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 9),
                             decoration: BoxDecoration(
-                              color: const Color(0xFF2A1418),
-                              borderRadius: BorderRadius.circular(10),
-                              border: Border.all(color: const Color(0xFFE50914).withValues(alpha: 0.5), width: 0.8),
+                              color: const Color(0xFF1F1214),
+                              borderRadius: BorderRadius.circular(8),
+                              border: Border.all(color: const Color(0xFFB81D24), width: 0.9),
                             ),
                             child: Row(
                               children: [
-                                const Icon(Icons.error_outline_rounded, color: Color(0xFFE50914), size: 18),
-                                const SizedBox(width: 10),
+                                const Icon(Icons.error_outline_rounded, color: Color(0xFFE50914), size: 16),
+                                const SizedBox(width: 8),
                                 Expanded(
                                   child: Text(
                                     sheetError!,
@@ -7044,50 +7212,46 @@ class _PlayerScreenState extends State<PlayerScreen> {
                               ],
                             ),
                           ),
-                          const SizedBox(height: 14),
+                          const SizedBox(height: 12),
                         ],
 
-                        // TAB 0: START PARTY
                         if (selectedTab == 0) ...[
                           Container(
                             width: double.infinity,
-                            padding: const EdgeInsets.all(14),
+                            padding: const EdgeInsets.all(13),
                             decoration: BoxDecoration(
-                              color: const Color(0xFF1A1A1A),
-                              borderRadius: BorderRadius.circular(14),
-                              border: Border.all(color: Colors.white.withValues(alpha: 0.08), width: 0.8),
+                              color: const Color(0xFF171717),
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(color: const Color(0xFF262626), width: 1),
                             ),
-                            child: Column(
+                            child: const Column(
                               crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
                                 Text(
-                                  widget.mediaType == 'tv'
-                                      ? '${widget.mediaTitle} • S$_currentSeason E$_currentEpisode'
-                                      : widget.mediaTitle,
-                                  style: const TextStyle(
+                                  'Real-Time Synchronized Playback',
+                                  style: TextStyle(
                                     color: Colors.white,
-                                    fontWeight: FontWeight.bold,
-                                    fontSize: 14,
+                                    fontWeight: FontWeight.w700,
+                                    fontSize: 13,
                                   ),
                                 ),
-                                const SizedBox(height: 8),
-                                const Text(
-                                  '• Synchronize play, pause, and seek for everyone\n'
-                                  '• Microsecond drift compensation\n'
-                                  '• Real-time floating chat and reaction emojis',
-                                  style: TextStyle(color: Colors.white60, fontSize: 12, height: 1.5),
+                                SizedBox(height: 6),
+                                Text(
+                                  'Play, pause, and seek stay locked in sync for everyone in the room with live overlay chat and instant reactions.',
+                                  style: TextStyle(color: Color(0xFF9E9E9E), fontSize: 12, height: 1.45),
                                 ),
                               ],
                             ),
                           ),
-                          const SizedBox(height: 16),
+                          const SizedBox(height: 14),
                           SizedBox(
                             width: double.infinity,
                             child: ElevatedButton(
                               style: ElevatedButton.styleFrom(
-                                backgroundColor: const Color(0xFFE50914),
+                                backgroundColor: const Color(0xFFB81D24),
                                 foregroundColor: Colors.white,
-                                padding: const EdgeInsets.symmetric(vertical: 14),
+                                elevation: 0,
+                                padding: const EdgeInsets.symmetric(vertical: 13),
                                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                               ),
                               onPressed: isLoading
@@ -7111,16 +7275,17 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                       );
 
                                       if (room != null && mounted && ctx.mounted) {
-                                        Navigator.pop(ctx);
                                         setState(() {
                                           _isInParty = true;
                                           _partyRoom = room;
                                         });
+                                        setSheetState(() {
+                                          isLoading = false;
+                                        });
                                         _startPartySyncLoop();
                                         _showPartyHud(
                                           'Party Created • Code: ${room.roomCode}',
-                                          icon: Icons.celebration_rounded,
-                                          accent: const Color(0xFF46D369),
+                                          icon: Icons.groups_rounded,
                                         );
                                       } else if (mounted && ctx.mounted) {
                                         setSheetState(() {
@@ -7131,33 +7296,19 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                     },
                               child: isLoading
                                   ? const SizedBox(
-                                      width: 20,
-                                      height: 20,
+                                      width: 18,
+                                      height: 18,
                                       child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                                     )
-                                  : const Row(
-                                      mainAxisAlignment: MainAxisAlignment.center,
-                                      children: [
-                                        Icon(Icons.play_circle_fill_rounded, size: 18),
-                                        SizedBox(width: 8),
-                                        Text('Create Watch Party', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                                      ],
+                                  : const Text(
+                                      'Create Room Code',
+                                      style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5),
                                     ),
                             ),
                           ),
                         ],
 
-                        // TAB 1: JOIN WITH CODE
                         if (selectedTab == 1) ...[
-                          const Text(
-                            'Enter Room Code',
-                            style: TextStyle(
-                              color: Colors.white70,
-                              fontWeight: FontWeight.w600,
-                              fontSize: 12.5,
-                            ),
-                          ),
-                          const SizedBox(height: 8),
                           TextField(
                             controller: joinCodeController,
                             textCapitalization: TextCapitalization.characters,
@@ -7165,37 +7316,38 @@ class _PlayerScreenState extends State<PlayerScreen> {
                               color: Colors.white,
                               fontWeight: FontWeight.w900,
                               letterSpacing: 3.0,
-                              fontSize: 18,
+                              fontSize: 17,
                             ),
                             textAlign: TextAlign.center,
                             decoration: InputDecoration(
-                              hintText: 'e.g. V-7X9K',
-                              hintStyle: const TextStyle(color: Colors.white24, letterSpacing: 2.0, fontSize: 16),
+                              hintText: 'ENTER 6-CHAR CODE',
+                              hintStyle: const TextStyle(color: Color(0xFF555555), letterSpacing: 1.8, fontSize: 13.5),
                               filled: true,
-                              fillColor: const Color(0xFF242424),
-                              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+                              fillColor: const Color(0xFF181818),
+                              contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
                               border: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(10),
-                                borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.12)),
+                                borderSide: const BorderSide(color: Color(0xFF2C2C2C)),
                               ),
                               enabledBorder: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(10),
-                                borderSide: BorderSide(color: Colors.white.withValues(alpha: 0.12)),
+                                borderSide: const BorderSide(color: Color(0xFF2C2C2C)),
                               ),
                               focusedBorder: OutlineInputBorder(
                                 borderRadius: BorderRadius.circular(10),
-                                borderSide: const BorderSide(color: Color(0xFFE50914), width: 1.4),
+                                borderSide: const BorderSide(color: Color(0xFFB81D24), width: 1.2),
                               ),
                             ),
                           ),
-                          const SizedBox(height: 16),
+                          const SizedBox(height: 14),
                           SizedBox(
                             width: double.infinity,
                             child: ElevatedButton(
                               style: ElevatedButton.styleFrom(
-                                backgroundColor: const Color(0xFFE50914),
+                                backgroundColor: const Color(0xFFB81D24),
                                 foregroundColor: Colors.white,
-                                padding: const EdgeInsets.symmetric(vertical: 14),
+                                elevation: 0,
+                                padding: const EdgeInsets.symmetric(vertical: 13),
                                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
                               ),
                               onPressed: isLoading
@@ -7240,9 +7392,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                         }
                                         _startPartySyncLoop();
                                         _showPartyHud(
-                                          'Connected to Watch Party (${room.roomCode})',
+                                          'Joined Watch Party (${room.roomCode})',
                                           icon: Icons.check_circle_rounded,
-                                          accent: const Color(0xFF46D369),
                                         );
                                       } else if (mounted && ctx.mounted) {
                                         setSheetState(() {
@@ -7253,17 +7404,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                     },
                               child: isLoading
                                   ? const SizedBox(
-                                      width: 20,
-                                      height: 20,
+                                      width: 18,
+                                      height: 18,
                                       child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
                                     )
-                                  : const Row(
-                                      mainAxisAlignment: MainAxisAlignment.center,
-                                      children: [
-                                        Icon(Icons.login_rounded, size: 18),
-                                        SizedBox(width: 8),
-                                        Text('Join Watch Party', style: TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
-                                      ],
+                                  : const Text(
+                                      'Connect to Room',
+                                      style: TextStyle(fontWeight: FontWeight.w700, fontSize: 13.5),
                                     ),
                             ),
                           ),
@@ -7277,7 +7424,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
           },
         );
       },
-    );
+    ).whenComplete(() {
+      _activePartySheetUpdater = null;
+    });
   }
 
   void _adjustVolume(double delta) {

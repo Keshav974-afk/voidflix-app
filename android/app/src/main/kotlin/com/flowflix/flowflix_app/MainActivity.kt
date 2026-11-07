@@ -33,6 +33,7 @@ class MainActivity : FlutterActivity() {
     private var pendingSpeechResult: MethodChannel.Result? = null
     private var wakeLock: PowerManager.WakeLock? = null
     private var multicastLock: android.net.wifi.WifiManager.MulticastLock? = null
+    private val finishedDownloadIds = HashSet<Int>()
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
@@ -47,6 +48,21 @@ class MainActivity : FlutterActivity() {
                 requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
             } catch (_: Exception) {}
         }
+        // Request Android 13+ POST_NOTIFICATIONS runtime permission if not yet granted
+        if (Build.VERSION.SDK_INT >= 33) {
+            try {
+                if (checkSelfPermission("android.permission.POST_NOTIFICATIONS") != PackageManager.PERMISSION_GRANTED) {
+                    requestPermissions(arrayOf("android.permission.POST_NOTIFICATIONS"), 4211)
+                }
+            } catch (_: Exception) {}
+        }
+        // Start background notification watcher so alerts work even when app is closed
+        VoidflixNotificationChecker.startBackgroundWatcher(applicationContext)
+    }
+
+    override fun onStop() {
+        super.onStop()
+        VoidflixNotificationChecker.startBackgroundWatcher(applicationContext)
     }
 
     private fun isTelevisionDevice(): Boolean {
@@ -143,8 +159,9 @@ class MainActivity : FlutterActivity() {
                     val title = call.argument<String>("title") ?: "Voidflix Download"
                     val progress = call.argument<Int>("progress") ?: 0
                     val isDone = call.argument<Boolean>("isDone") ?: false
+                    val isStart = call.argument<Boolean>("isStart") ?: false
 
-                    updateDownloadNotification(id, title, progress, isDone)
+                    updateDownloadNotification(id, title, progress, isDone, isStart)
                     result.success(true)
                 }
                 "cancelDownloadNotification" -> {
@@ -660,33 +677,18 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun showSystemNotification(id: Int, title: String, body: String) {
-        val channelId = "voidflix_notifications"
-        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val channel = NotificationChannel(
-                channelId,
-                "Voidflix Notifications",
-                NotificationManager.IMPORTANCE_HIGH
-            ).apply {
-                description = "Updates and trending picks from Voidflix"
-            }
-            notificationManager.createNotificationChannel(channel)
-        }
-
-        val builder = NotificationCompat.Builder(this, channelId)
-            .setSmallIcon(R.mipmap.ic_launcher)
-            .setContentTitle(title)
-            .setContentText(body)
-            .setPriority(NotificationCompat.PRIORITY_HIGH)
-            .setAutoCancel(true)
-
-        notificationManager.notify(id, builder.build())
+        VoidflixNotificationChecker.postSystemNotification(applicationContext, id, title, body)
     }
 
-    private fun updateDownloadNotification(id: Int, title: String, progress: Int, isDone: Boolean) {
+    private fun updateDownloadNotification(id: Int, title: String, progress: Int, isDone: Boolean, isStart: Boolean = false) {
         val channelId = "voidflix_downloads"
         val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+
+        if (isStart) {
+            synchronized(finishedDownloadIds) {
+                finishedDownloadIds.remove(id)
+            }
+        }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = NotificationChannel(
@@ -701,17 +703,50 @@ class MainActivity : FlutterActivity() {
         }
 
         if (isDone) {
+            synchronized(finishedDownloadIds) {
+                finishedDownloadIds.add(id)
+            }
             releaseWakeLock()
+            // Immediately remove the ongoing progress bar notification!
+            notificationManager.cancel(id)
+
+            // Post a brief completion toast notification that auto-removes after 3 seconds
+            val doneId = (id and 0x0FFFFFFF) + 50000
+            val launchIntent = Intent(this, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
+            }
+            val pendingFlags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                android.app.PendingIntent.FLAG_UPDATE_CURRENT or android.app.PendingIntent.FLAG_IMMUTABLE
+            } else {
+                android.app.PendingIntent.FLAG_UPDATE_CURRENT
+            }
+            val pendingIntent = android.app.PendingIntent.getActivity(this, doneId, launchIntent, pendingFlags)
+
             val builder = NotificationCompat.Builder(this, channelId)
                 .setSmallIcon(R.mipmap.ic_launcher)
                 .setContentTitle(title)
-                .setContentText("Download complete — ready to play offline.")
+                .setContentText("Download complete")
+                .setProgress(0, 0, false)
                 .setPriority(NotificationCompat.PRIORITY_LOW)
+                .setContentIntent(pendingIntent)
                 .setAutoCancel(true)
                 .setOngoing(false)
+                .setTimeoutAfter(3000L)
 
-            notificationManager.notify(id, builder.build())
+            notificationManager.notify(doneId, builder.build())
+            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                try {
+                    notificationManager.cancel(id)
+                    notificationManager.cancel(doneId)
+                } catch (_: Exception) {}
+            }, 3000L)
         } else {
+            synchronized(finishedDownloadIds) {
+                if (!isStart && finishedDownloadIds.contains(id)) {
+                    notificationManager.cancel(id)
+                    return
+                }
+            }
             acquireWakeLock()
             val builder = NotificationCompat.Builder(this, channelId)
                 .setSmallIcon(R.mipmap.ic_launcher)
@@ -727,9 +762,13 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun cancelDownloadNotification(id: Int) {
+        synchronized(finishedDownloadIds) {
+            finishedDownloadIds.add(id)
+        }
         releaseWakeLock()
         val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
         notificationManager.cancel(id)
+        notificationManager.cancel((id and 0x0FFFFFFF) + 50000)
     }
 
     private fun acquireWakeLock() {

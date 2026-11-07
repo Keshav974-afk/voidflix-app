@@ -36,7 +36,7 @@ class NotificationsSheet extends StatelessWidget {
 
         return Container(
           decoration: const BoxDecoration(
-            color: Color(0xFF0F0F14),
+            color: Color(0xFF111111),
             borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
           ),
           child: SafeArea(
@@ -174,6 +174,7 @@ class NotificationsSheet extends StatelessWidget {
                 else
                   Flexible(
                     child: ListView.separated(
+                      physics: const BouncingScrollPhysics(),
                       shrinkWrap: true,
                       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                       itemCount: notifications.length,
@@ -225,11 +226,11 @@ class NotificationsSheet extends StatelessWidget {
                                       width: 48,
                                       height: 70,
                                       fit: BoxFit.cover,
-                                      placeholder: (c, u) => Container(color: const Color(0xFF1E1E28)),
+                                      placeholder: (c, u) => Container(color: const Color(0xFF1C1C1C)),
                                       errorWidget: (c, u, e) => Container(
                                         width: 48,
                                         height: 70,
-                                        color: const Color(0xFF1E1E28),
+                                        color: const Color(0xFF1C1C1C),
                                         child: const Icon(Icons.movie_rounded, color: AppTheme.primaryRed, size: 22),
                                       ),
                                     ),

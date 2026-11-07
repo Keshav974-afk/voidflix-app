@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../core/services/stream_extractor.dart';
 import '../core/services/subtitle_service.dart';
 import '../core/utils/language_utils.dart';
+import '../core/services/tv_mode_service.dart';
 import '../providers/download_provider.dart';
 import 'tv_focusable.dart';
 
@@ -37,8 +38,8 @@ class _ExtractedQualityItem {
       }
       return '${mb.toStringAsFixed(0)} MB';
     }
-    if (isProbingSize) return 'Calculating…';
-    return isHls ? 'HLS' : 'MP4';
+    if (isProbingSize) return 'Checking size…';
+    return isHls ? 'HLS Stream' : 'Direct MP4';
   }
 }
 
@@ -74,9 +75,9 @@ class DownloadQualityPicker {
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
-      backgroundColor: const Color(0xFF121212),
+      backgroundColor: const Color(0xFF111111),
       shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+        borderRadius: BorderRadius.vertical(top: Radius.circular(18)),
       ),
       builder: (sheetCtx) {
         return _DownloadOptionsSheetContent(
@@ -134,202 +135,339 @@ class _DownloadOptionsSheetContent extends StatefulWidget {
 
 class _DownloadOptionsSheetContentState
     extends State<_DownloadOptionsSheetContent> {
-  static const Color _darkRed = Color(0xFFB81D24);
-  static const Color _darkRedBorder = Color(0xFFE50914);
-  static const Color _cardBg = Color(0xFF1A1A1A);
-  static const Color _selectedBg = Color(0xFF221113);
-
   bool _isExtracting = true;
+  String _statusMessage = 'Scanning high-speed servers…';
+  String? _errorMessage;
+
   final List<_ExtractedAudioGroup> _audioGroups = [];
-  final List<SubtitleTrack> _extractedSubtitles = [];
+  final List<SubtitleTrack> _subtitles = [];
 
   int _selectedAudioIndex = 0;
   int _selectedQualityIndex = 0;
-  int _selectedSubtitleIndex = -1; // -1 = Off
-
-  String? _savedPreferredQuality;
-  String? _savedPreferredAudio;
-  String? _savedPreferredSub;
+  String _selectedSubLanguage = 'Off';
 
   @override
   void initState() {
     super.initState();
-    _initAndExtract();
+    _extractRealStreams();
   }
 
-  Future<void> _initAndExtract() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      _savedPreferredQuality = prefs.getString('voidflix_preferred_dl_quality');
-      _savedPreferredAudio = prefs.getString('voidflix_preferred_audio_lang');
-      _savedPreferredSub = prefs.getString('voidflix_preferred_subtitle_lang');
-    } catch (_) {}
+  Future<void> _extractRealStreams() async {
+    setState(() {
+      _isExtracting = true;
+      _errorMessage = null;
+      _statusMessage = 'Extracting available audio, quality & subtitles…';
+      _audioGroups.clear();
+      _subtitles.clear();
+    });
 
-    await _extractRealStreams();
-  }
+    final seenSubLangs = <String>{};
+    final seenSubUrls = <String>{};
 
-  void _ingestStreams(List<ExtractedStream> streams) {
-    if (!mounted || streams.isEmpty) return;
-
-    for (final s in streams) {
-      if (s.url.isEmpty && s.qualities.isEmpty) continue;
-
-      for (final sub in s.subtitles) {
-        if (sub.url.isEmpty) continue;
-        final cleanLabel = LanguageUtils.cleanLanguageName(sub.label);
-        final exists = _extractedSubtitles.any(
-          (existing) =>
-              LanguageUtils.cleanLanguageName(existing.label).toLowerCase() ==
-              cleanLabel.toLowerCase(),
+    void addSubtitles(List<SubtitleTrack> tracks) {
+      for (final s in tracks) {
+        final url = s.url.trim();
+        if (url.isEmpty || seenSubUrls.contains(url)) continue;
+        final cleanLang = LanguageUtils.cleanLanguageName(
+          s.label.isNotEmpty ? s.label : s.language,
         );
-        if (!exists) {
-          _extractedSubtitles.add(
-            SubtitleTrack(
-              url: sub.url,
-              label: cleanLabel,
-              language: sub.language,
-            ),
-          );
-        }
+        final langKey = cleanLang.toLowerCase();
+        if (seenSubLangs.contains(langKey)) continue;
+        seenSubUrls.add(url);
+        seenSubLangs.add(langKey);
+        _subtitles.add(SubtitleTrack(
+          label: cleanLang,
+          language: s.language,
+          url: url,
+        ));
+      }
+    }
+
+    int serverPriority(String sName, bool isHls) {
+      if (sName == 'StellarHD') return 100; // Direct unproxied high-speed CDN MP4
+      if (sName == 'Vidlink' && !isHls) return 85;
+      if (!isHls) return 75;
+      return 40;
+    }
+
+    void addStreamGroup(ExtractedStream s, String serverLabel) {
+      final rawLang = s.language.trim().isNotEmpty ? s.language.trim() : 'Original';
+      if (LanguageUtils.isSubtitleOnly(rawLang) ||
+          LanguageUtils.isSubtitleOnly(s.sourceName)) {
+        return;
       }
 
-      final langLabel = s.language.trim().isNotEmpty
-          ? s.language.trim()
-          : 'Original';
-      final serverName = s.sourceName.trim().isNotEmpty
-          ? s.sourceName.trim()
-          : 'Direct';
-      final groupKey = '${langLabel.toLowerCase()}_${serverName.toLowerCase()}';
+      String cleanLang = LanguageUtils.cleanLanguageName(rawLang);
+      if (rawLang.toLowerCase().contains('original') &&
+          !cleanLang.toLowerCase().contains('original')) {
+        cleanLang = '$cleanLang (Original)';
+      }
 
-      final isHlsStream = s.type == 'hls' || s.url.contains('.m3u8');
-      final List<_ExtractedQualityItem> qItems = [];
+      final groupKey = cleanLang.toLowerCase();
 
+      final items = <_ExtractedQualityItem>[];
       if (s.qualities.isNotEmpty) {
         for (final q in s.qualities) {
           if (q.url.isEmpty) continue;
-          final qIsHls = isHlsStream || q.url.contains('.m3u8');
-          final height = q.height > 0
-              ? q.height
-              : (int.tryParse(q.label.replaceAll(RegExp(r'\D'), '')) ?? 1080);
-          final label = q.label.isNotEmpty ? q.label : '${height}p';
-          qItems.add(
-            _ExtractedQualityItem(
-              label: label,
-              height: height,
-              url: q.url,
-              headers: s.headers,
-              isHls: qIsHls,
-              serverName: serverName,
-              isProbingSize: !qIsHls,
-            ),
-          );
+          final isHls = q.url.contains('.m3u8') || s.type == 'hls';
+          final h = q.height > 0 ? q.height : _inferHeight(q.label);
+          items.add(_ExtractedQualityItem(
+            label: h > 0 ? '${h}p' : q.label,
+            height: h,
+            url: q.url,
+            headers: s.headers,
+            isHls: isHls,
+            serverName: serverLabel,
+            isProbingSize: !isHls,
+          ));
         }
       } else if (s.url.isNotEmpty) {
-        final height = int.tryParse(
-                (s.qualityLabel ?? '1080').replaceAll(RegExp(r'\D'), '')) ??
-            1080;
-        qItems.add(
-          _ExtractedQualityItem(
-            label: s.qualityLabel ?? '${height}p',
-            height: height,
-            url: s.url,
-            headers: s.headers,
-            isHls: isHlsStream,
-            serverName: serverName,
-            isProbingSize: !isHlsStream,
-          ),
-        );
+        final isHls = s.url.contains('.m3u8') || s.type == 'hls';
+        final label = s.qualityLabel ?? '1080p';
+        final h = _inferHeight(label);
+        items.add(_ExtractedQualityItem(
+          label: h > 0 ? '${h}p' : label,
+          height: h,
+          url: s.url,
+          headers: s.headers,
+          isHls: isHls,
+          serverName: serverLabel,
+          isProbingSize: !isHls,
+        ));
       }
 
-      if (qItems.isEmpty) continue;
-      qItems.sort((a, b) => b.height.compareTo(a.height));
+      if (items.isEmpty) return;
 
-      final existingGroupIdx =
-          _audioGroups.indexWhere((g) => g.key == groupKey);
+      final existingGroupIdx = _audioGroups.indexWhere((g) => g.key == groupKey);
       if (existingGroupIdx != -1) {
-        final existing = _audioGroups[existingGroupIdx];
-        for (final qi in qItems) {
-          if (!existing.qualities.any((eq) => eq.height == qi.height)) {
-            existing.qualities.add(qi);
-            if (!qi.isHls) _probeFileSize(qi);
+        final group = _audioGroups[existingGroupIdx];
+        for (final item in items) {
+          final existingQIdx = group.qualities.indexWhere((q) => q.height == item.height);
+          if (existingQIdx == -1) {
+            group.qualities.add(item);
+          } else {
+            final current = group.qualities[existingQIdx];
+            if (serverPriority(item.serverName, item.isHls) >
+                serverPriority(current.serverName, current.isHls)) {
+              group.qualities[existingQIdx] = item;
+            }
           }
         }
-        existing.qualities.sort((a, b) => b.height.compareTo(a.height));
+        group.qualities.sort((a, b) => b.height.compareTo(a.height));
       } else {
-        final newGroup = _ExtractedAudioGroup(
-          key: groupKey,
-          languageLabel: langLabel,
-          serverName: serverName,
-          qualities: qItems,
-        );
-        _audioGroups.add(newGroup);
-        for (final qi in qItems) {
-          if (!qi.isHls) _probeFileSize(qi);
+        final deduped = <_ExtractedQualityItem>[];
+        final seenHeights = <int>{};
+        for (final item in items) {
+          if (!seenHeights.contains(item.height)) {
+            seenHeights.add(item.height);
+            deduped.add(item);
+          }
         }
+        deduped.sort((a, b) => b.height.compareTo(a.height));
+        _audioGroups.add(_ExtractedAudioGroup(
+          key: groupKey,
+          languageLabel: cleanLang,
+          serverName: serverLabel,
+          qualities: deduped,
+        ));
       }
     }
 
-    _applySavedSelections();
-    if (mounted) setState(() {});
+    try {
+      await Future.wait([
+        // 1. NetMirror / StellarHD (Multi-Dub + Direct High-Speed CDN MP4s)
+        () async {
+          try {
+            final streams = await StreamExtractor.extractNetMirror(
+              type: widget.mediaType,
+              tmdbId: widget.mediaId,
+              season: widget.season,
+              episode: widget.episode,
+            ).timeout(const Duration(seconds: 9));
+            if (!mounted) return;
+            for (final s in streams) {
+              addSubtitles(s.subtitles);
+              addStreamGroup(s, 'StellarHD');
+            }
+            if (_audioGroups.isNotEmpty && mounted) {
+              setState(() => _isExtracting = false);
+            }
+          } catch (_) {}
+        }(),
+
+        // 2. Vidlink Direct
+        () async {
+          try {
+            final s = await StreamExtractor.extractVidlink(
+              type: widget.mediaType,
+              tmdbId: widget.mediaId,
+              season: widget.season,
+              episode: widget.episode,
+            ).timeout(const Duration(seconds: 9));
+            if (!mounted || s == null) return;
+            addSubtitles(s.subtitles);
+            addStreamGroup(s, 'Vidlink');
+            if (_audioGroups.isNotEmpty && mounted) {
+              setState(() => _isExtracting = false);
+            }
+          } catch (_) {}
+        }(),
+
+        // 3. Voidflix Backend
+        () async {
+          try {
+            final s = await StreamExtractor.extractVoidflixBackend(
+              type: widget.mediaType,
+              tmdbId: widget.mediaId,
+              season: widget.season,
+              episode: widget.episode,
+            ).timeout(const Duration(seconds: 9));
+            if (!mounted || s == null) return;
+            addSubtitles(s.subtitles);
+            addStreamGroup(s, 'Voidflix');
+            if (_audioGroups.isNotEmpty && mounted) {
+              setState(() => _isExtracting = false);
+            }
+          } catch (_) {}
+        }(),
+
+        // 4. Cinejoy / NebulaHD
+        () async {
+          try {
+            final streams = await StreamExtractor.extractCinejoy(
+              type: widget.mediaType,
+              tmdbId: widget.mediaId,
+              season: widget.season,
+              episode: widget.episode,
+              title: widget.title,
+            ).timeout(const Duration(seconds: 9));
+            if (!mounted) return;
+            for (final s in streams) {
+              addSubtitles(s.subtitles);
+              addStreamGroup(s, 'NebulaHD');
+            }
+            if (_audioGroups.isNotEmpty && mounted) {
+              setState(() => _isExtracting = false);
+            }
+          } catch (_) {}
+        }(),
+
+        // 5. Shared cached subtitles
+        () async {
+          try {
+            final extSubs = await StreamExtractor.getSharedSubtitles(
+              widget.mediaType,
+              widget.mediaId,
+              widget.season,
+              widget.episode,
+            ).timeout(const Duration(seconds: 5));
+            if (!mounted) return;
+            addSubtitles(extSubs);
+          } catch (_) {}
+        }(),
+      ]);
+    } catch (_) {}
+
+    if (!mounted) return;
+
+    if (_audioGroups.isEmpty) {
+      setState(() {
+        _isExtracting = false;
+        _errorMessage =
+            'No downloadable streams could be extracted right now. Please try again.';
+      });
+      return;
+    }
+
+    await _applySavedPreferences();
+
+    setState(() {
+      _isExtracting = false;
+    });
+
+    _probeCurrentGroupSizes();
   }
 
-  void _applySavedSelections() {
-    if (_audioGroups.isEmpty) return;
+  int _inferHeight(String label) {
+    final l = label.toLowerCase();
+    if (l.contains('2160') || l.contains('4k')) return 2160;
+    if (l.contains('1080') || l.contains('fhd') || l.contains('full')) return 1080;
+    if (l.contains('720') || l == 'hd') return 720;
+    if (l.contains('480')) return 480;
+    if (l.contains('360')) return 360;
+    return 1080;
+  }
 
-    if (_savedPreferredAudio != null && _savedPreferredAudio!.isNotEmpty) {
-      final idx = _audioGroups.indexWhere(
-        (g) => LanguageUtils.matches(g.languageLabel, _savedPreferredAudio!),
-      );
-      if (idx != -1) {
-        _selectedAudioIndex = idx;
-      }
-    }
+  Future<void> _applySavedPreferences() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final savedAudio = prefs.getString('voidflix_preferred_audio_lang');
+      final savedSub = prefs.getString('voidflix_preferred_sub_lang');
+      final savedQ = prefs.getString('voidflix_download_quality');
 
-    if (_selectedAudioIndex >= _audioGroups.length) {
-      _selectedAudioIndex = 0;
-    }
-
-    final currentQualities = _audioGroups[_selectedAudioIndex].qualities;
-    if (_savedPreferredQuality != null && currentQualities.isNotEmpty) {
-      final prefH =
-          int.tryParse(_savedPreferredQuality!.replaceAll(RegExp(r'\D'), '')) ??
-              1080;
-      final qIdx = currentQualities.indexWhere((q) => q.height == prefH);
-      if (qIdx != -1) {
-        _selectedQualityIndex = qIdx;
-      } else {
-        _selectedQualityIndex = 0;
-      }
-    } else {
-      _selectedQualityIndex = 0;
-    }
-
-    if (_extractedSubtitles.isNotEmpty && _selectedSubtitleIndex == -1) {
-      if (_savedPreferredSub != null &&
-          _savedPreferredSub != 'Off / None' &&
-          _savedPreferredSub!.isNotEmpty) {
-        final sIdx = _extractedSubtitles.indexWhere(
-          (s) => LanguageUtils.matches(s.label, _savedPreferredSub!),
+      if (savedAudio != null && savedAudio.isNotEmpty) {
+        final idx = _audioGroups.indexWhere(
+          (g) => LanguageUtils.matches(g.languageLabel, savedAudio),
         );
-        if (sIdx != -1) {
-          _selectedSubtitleIndex = sIdx;
+        if (idx != -1) _selectedAudioIndex = idx;
+      }
+
+      if (_selectedAudioIndex < _audioGroups.length && savedQ != null) {
+        final targetH = _inferHeight(savedQ);
+        final qList = _audioGroups[_selectedAudioIndex].qualities;
+        final qIdx = qList.indexWhere((q) => q.height == targetH);
+        if (qIdx != -1) _selectedQualityIndex = qIdx;
+      }
+
+      if (savedSub != null && savedSub.isNotEmpty) {
+        if (savedSub.toLowerCase().contains('off') ||
+            savedSub.toLowerCase().contains('none')) {
+          _selectedSubLanguage = 'Off';
+        } else {
+          final match = _subtitles.where(
+            (s) =>
+                LanguageUtils.matches(s.label, savedSub) ||
+                LanguageUtils.matches(s.language, savedSub),
+          );
+          if (match.isNotEmpty) {
+            _selectedSubLanguage = match.first.label;
+          }
         }
-      } else {
-        final enIdx = _extractedSubtitles.indexWhere(
-          (s) => LanguageUtils.matches(s.label, 'English'),
+      } else if (_subtitles.isNotEmpty) {
+        final en = _subtitles.where(
+          (s) =>
+              LanguageUtils.matches(s.label, 'English') ||
+              LanguageUtils.matches(s.language, 'en'),
         );
-        if (enIdx != -1) {
-          _selectedSubtitleIndex = enIdx;
+        if (en.isNotEmpty) {
+          _selectedSubLanguage = en.first.label;
         }
+      }
+    } catch (_) {}
+  }
+
+  void _probeCurrentGroupSizes() {
+    if (_selectedAudioIndex >= _audioGroups.length) return;
+    final group = _audioGroups[_selectedAudioIndex];
+    for (final q in group.qualities) {
+      if (!q.isHls && q.fileSizeBytes == null) {
+        _probeFileSize(q);
       }
     }
   }
 
   Future<void> _probeFileSize(_ExtractedQualityItem item) async {
+    final client = http.Client();
     try {
       final uri = Uri.parse(item.url);
-      final headRes = await http
-          .head(uri, headers: item.headers)
+      final reqHeaders = {
+        ...item.headers,
+        'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      };
+
+      final headRes = await client
+          .head(uri, headers: reqHeaders)
           .timeout(const Duration(seconds: 4));
       final cl = int.tryParse(headRes.headers['content-length'] ?? '');
       if (cl != null && cl > 100000) {
@@ -342,11 +480,12 @@ class _DownloadOptionsSheetContentState
         return;
       }
 
-      final rangeHeaders = Map<String, String>.from(item.headers);
-      rangeHeaders['Range'] = 'bytes=0-0';
-      final req = http.Request('GET', uri)..headers.addAll(rangeHeaders);
-      final streamed = await req.send().timeout(const Duration(seconds: 4));
-      final contentRange = streamed.headers['content-range'] ?? '';
+      final req = http.Request('GET', uri);
+      req.headers.addAll(reqHeaders);
+      req.headers['Range'] = 'bytes=0-0';
+      final streamRes =
+          await client.send(req).timeout(const Duration(seconds: 4));
+      final contentRange = streamRes.headers['content-range'] ?? '';
       if (contentRange.contains('/')) {
         final totalStr = contentRange.split('/').last.trim();
         final totalBytes = int.tryParse(totalStr);
@@ -360,237 +499,119 @@ class _DownloadOptionsSheetContentState
           return;
         }
       }
-    } catch (_) {}
-
-    if (mounted) {
-      setState(() {
-        item.isProbingSize = false;
-      });
+    } catch (_) {
+    } finally {
+      // Immediately close the probe client so no background TCP connection stays open!
+      client.close();
+      if (mounted && item.isProbingSize) {
+        setState(() {
+          item.isProbingSize = false;
+        });
+      }
     }
   }
 
-  Future<void> _extractRealStreams() async {
-    final tasks = <Future<void>>[
-      () async {
-        try {
-          final streams = await StreamExtractor.extractNetMirror(
-            type: widget.mediaType,
-            tmdbId: widget.mediaId,
-            season: widget.season,
-            episode: widget.episode,
-          ).timeout(const Duration(seconds: 8));
-          _ingestStreams(streams);
-        } catch (_) {}
-      }(),
-      () async {
-        try {
-          final stream = await StreamExtractor.extractVoidflixBackend(
-            type: widget.mediaType,
-            tmdbId: widget.mediaId,
-            season: widget.season,
-            episode: widget.episode,
-          ).timeout(const Duration(seconds: 8));
-          if (stream != null) _ingestStreams([stream]);
-        } catch (_) {}
-      }(),
-      () async {
-        try {
-          final stream = await StreamExtractor.extractVidlink(
-            type: widget.mediaType,
-            tmdbId: widget.mediaId,
-            season: widget.season,
-            episode: widget.episode,
-          ).timeout(const Duration(seconds: 8));
-          if (stream != null) _ingestStreams([stream]);
-        } catch (_) {}
-      }(),
-      () async {
-        try {
-          final streams = await StreamExtractor.extractCinejoy(
-            type: widget.mediaType,
-            tmdbId: widget.mediaId,
-            season: widget.season,
-            episode: widget.episode,
-            title: widget.title,
-          ).timeout(const Duration(seconds: 8));
-          _ingestStreams(streams);
-        } catch (_) {}
-      }(),
-      () async {
-        try {
-          final extSubs = await StreamExtractor.getSharedSubtitles(
-            widget.mediaType,
-            widget.mediaId,
-            widget.season,
-            widget.episode,
-          ).timeout(const Duration(seconds: 6));
-          if (!mounted) return;
-          for (final sub in extSubs) {
-            if (sub.url.isEmpty) continue;
-            final cleanLabel = LanguageUtils.cleanLanguageName(sub.label);
-            final exists = _extractedSubtitles.any(
-              (existing) =>
-                  LanguageUtils.cleanLanguageName(existing.label)
-                      .toLowerCase() ==
-                  cleanLabel.toLowerCase(),
-            );
-            if (!exists) {
-              _extractedSubtitles.add(
-                SubtitleTrack(
-                  url: sub.url,
-                  label: cleanLabel,
-                  language: sub.language,
-                ),
-              );
-            }
-          }
-          _applySavedSelections();
-          if (mounted) setState(() {});
-        } catch (_) {}
-      }(),
-    ];
-
-    await Future.wait(tasks);
-    if (mounted) {
-      setState(() {
-        _isExtracting = false;
-      });
-    }
-  }
-
-  Future<void> _startDownload() async {
+  Future<void> _triggerExtractedDownload() async {
+    if (_selectedAudioIndex >= _audioGroups.length) return;
+    final group = _audioGroups[_selectedAudioIndex];
+    if (group.qualities.isEmpty) return;
+    final qIdx = _selectedQualityIndex.clamp(0, group.qualities.length - 1);
+    final chosenQuality = group.qualities[qIdx];
     final downloadProvider = widget.parentContext.read<DownloadProvider>();
-    final messenger = ScaffoldMessenger.of(widget.parentContext);
-
-    final hasExtracted = _audioGroups.isNotEmpty;
-    final selectedGroup = hasExtracted
-        ? _audioGroups[_selectedAudioIndex.clamp(0, _audioGroups.length - 1)]
-        : null;
-    final selectedQuality = selectedGroup != null &&
-            selectedGroup.qualities.isNotEmpty
-        ? selectedGroup.qualities[
-            _selectedQualityIndex.clamp(0, selectedGroup.qualities.length - 1)]
-        : null;
-    final selectedSub = _selectedSubtitleIndex >= 0 &&
-            _selectedSubtitleIndex < _extractedSubtitles.length
-        ? _extractedSubtitles[_selectedSubtitleIndex]
-        : null;
 
     try {
       final prefs = await SharedPreferences.getInstance();
-      if (selectedQuality != null) {
-        await prefs.setString(
-            'voidflix_preferred_dl_quality', selectedQuality.label);
-      }
-      if (selectedGroup != null) {
-        await prefs.setString(
-            'voidflix_preferred_audio_lang', selectedGroup.languageLabel);
-      }
+      await prefs.setString('voidflix_download_quality', chosenQuality.label);
       await prefs.setString(
-        'voidflix_preferred_subtitle_lang',
-        selectedSub?.label ?? 'Off / None',
+          'voidflix_preferred_audio_lang', group.languageLabel);
+      await prefs.setString(
+        'voidflix_preferred_sub_lang',
+        _selectedSubLanguage == 'Off' ? 'Off / None' : _selectedSubLanguage,
       );
     } catch (_) {}
 
     if (!mounted) return;
     Navigator.of(context).pop();
 
-    final displayTitle =
-        widget.mediaType == 'tv' && widget.episodeTitle != null
-            ? '${widget.title} S${widget.season}:E${widget.episode}'
-            : widget.title;
-
     downloadProvider.startDownload(
-      mediaId: widget.mediaId,
-      title: widget.title,
-      mediaType: widget.mediaType,
-      season: widget.season,
-      episode: widget.episode,
-      episodeTitle: widget.episodeTitle,
-      episodeDescription: widget.episodeDescription,
-      posterPath: widget.posterPath,
-      backdropPath: widget.backdropPath,
-      stillPath: widget.stillPath,
-      runtime: widget.runtime,
-      preferredQuality: selectedQuality?.label ?? '1080p',
-      preferredAudio: selectedGroup?.languageLabel ?? 'Original',
-      preferredSubtitle: selectedSub?.label ?? 'Off / None',
-      directStreamUrl: selectedQuality?.url,
-      directHeaders: selectedQuality?.headers,
-      directIsHls: selectedQuality?.isHls,
-      directSubtitles: selectedSub != null ? [selectedSub] : _extractedSubtitles,
-    );
+          mediaId: widget.mediaId,
+          title: widget.title,
+          mediaType: widget.mediaType,
+          season: widget.season,
+          episode: widget.episode,
+          episodeTitle: widget.episodeTitle,
+          episodeDescription: widget.episodeDescription,
+          posterPath: widget.posterPath,
+          backdropPath: widget.backdropPath,
+          stillPath: widget.stillPath,
+          runtime: widget.runtime,
+          preferredQuality: chosenQuality.label,
+          preferredAudio: group.languageLabel,
+          preferredSubtitle: _selectedSubLanguage == 'Off'
+              ? 'Off / None'
+              : _selectedSubLanguage,
+          directStreamUrl: chosenQuality.url,
+          directHeaders: chosenQuality.headers,
+          directIsHls: chosenQuality.isHls,
+          directSubtitles: _subtitles,
+        );
+  }
 
-    final summary = selectedQuality != null && selectedGroup != null
-        ? '${selectedQuality.label} • ${selectedGroup.languageLabel}'
-        : 'Standard';
-
-    messenger.showSnackBar(
-      SnackBar(
-        backgroundColor: const Color(0xFF181818),
-        behavior: SnackBarBehavior.floating,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(8),
-          side: const BorderSide(color: Colors.white12),
-        ),
-        content: Row(
-          children: [
-            const Icon(Icons.downloading_rounded, color: _darkRedBorder, size: 18),
-            const SizedBox(width: 10),
-            Expanded(
-              child: Text(
-                'Downloading $displayTitle ($summary)',
-                style: const TextStyle(color: Colors.white, fontSize: 13),
-              ),
-            ),
-          ],
-        ),
-        duration: const Duration(seconds: 3),
-      ),
+  Widget _wrapTv({
+    required bool isTv,
+    required VoidCallback onTap,
+    required Widget child,
+    BorderRadius? borderRadius,
+  }) {
+    if (!isTv) return child;
+    return TvFocusable(
+      autofocus: false,
+      borderRadius: borderRadius ?? BorderRadius.circular(8),
+      onPressed: onTap,
+      child: child,
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final displaySubtitle = widget.mediaType == 'tv'
-        ? '${widget.title} · S${widget.season}:E${widget.episode}${widget.episodeTitle != null ? ' "${widget.episodeTitle}"' : ''}'
-        : widget.title;
+    final isTv = TvModeService().isTvMode || TvModeService().isHardwareTv;
+    final episodeTag =
+        widget.mediaType == 'tv' ? 'S${widget.season}:E${widget.episode}' : 'Movie';
 
-    final currentGroup = _audioGroups.isNotEmpty
-        ? _audioGroups[_selectedAudioIndex.clamp(0, _audioGroups.length - 1)]
+    final currentGroup = _audioGroups.isNotEmpty &&
+            _selectedAudioIndex < _audioGroups.length
+        ? _audioGroups[_selectedAudioIndex]
         : null;
+
     final currentQualities = currentGroup?.qualities ?? [];
-    final currentQuality = currentQualities.isNotEmpty
-        ? currentQualities[
-            _selectedQualityIndex.clamp(0, currentQualities.length - 1)]
-        : null;
+    final safeQualityIdx = currentQualities.isEmpty
+        ? 0
+        : _selectedQualityIndex.clamp(0, currentQualities.length - 1);
 
     return SafeArea(
-      child: Padding(
-        padding: EdgeInsets.only(
-          left: 20,
-          right: 20,
-          top: 12,
-          bottom: MediaQuery.of(context).viewInsets.bottom + 18,
+      child: Container(
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.of(context).size.height * 0.84,
         ),
+        padding: const EdgeInsets.fromLTRB(20, 10, 20, 18),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            // Drag indicator
+            // Drag Handle
             Center(
               child: Container(
-                width: 34,
-                height: 3.5,
-                margin: const EdgeInsets.only(bottom: 14),
+                width: 36,
+                height: 4,
                 decoration: BoxDecoration(
-                  color: Colors.white24,
+                  color: const Color(0xFF333333),
                   borderRadius: BorderRadius.circular(2),
                 ),
               ),
             ),
+            const SizedBox(height: 14),
 
-            // Minimal Header
+            // Header
             Row(
               children: [
                 Expanded(
@@ -598,7 +619,7 @@ class _DownloadOptionsSheetContentState
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       const Text(
-                        'Download',
+                        'Download Options',
                         style: TextStyle(
                           color: Colors.white,
                           fontSize: 17,
@@ -608,363 +629,383 @@ class _DownloadOptionsSheetContentState
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        displaySubtitle,
+                        '${widget.title} • $episodeTag',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
-                          color: Colors.white54,
+                          color: Color(0xFF8E8E8E),
                           fontSize: 12,
                         ),
                       ),
                     ],
                   ),
                 ),
-                if (_isExtracting && _audioGroups.isNotEmpty)
-                  const Padding(
-                    padding: EdgeInsets.only(right: 8),
-                    child: SizedBox(
-                      width: 14,
-                      height: 14,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 1.8,
-                        color: Colors.white54,
-                      ),
-                    ),
-                  ),
                 IconButton(
-                  visualDensity: VisualDensity.compact,
-                  icon: const Icon(Icons.close, color: Colors.white54, size: 20),
                   onPressed: () => Navigator.of(context).pop(),
+                  style: IconButton.styleFrom(
+                    backgroundColor: const Color(0xFF1E1E1E),
+                    minimumSize: const Size(32, 32),
+                    padding: EdgeInsets.zero,
+                  ),
+                  icon: const Icon(
+                    Icons.close_rounded,
+                    color: Color(0xFFAAAAAA),
+                    size: 18,
+                  ),
                 ),
               ],
             ),
+            const SizedBox(height: 12),
+            const Divider(color: Color(0xFF222222), height: 1),
+            const SizedBox(height: 14),
 
-            const Divider(color: Colors.white10, height: 22),
-
-            if (_audioGroups.isEmpty && _isExtracting)
+            if (_isExtracting && _audioGroups.isEmpty)
               Padding(
-                padding: const EdgeInsets.symmetric(vertical: 36),
+                padding: const EdgeInsets.symmetric(vertical: 38),
                 child: Center(
                   child: Column(
+                    mainAxisSize: MainAxisSize.min,
                     children: [
                       const SizedBox(
                         width: 24,
                         height: 24,
                         child: CircularProgressIndicator(
-                          color: _darkRedBorder,
                           strokeWidth: 2.2,
+                          color: Color(0xFFB81D24),
                         ),
                       ),
                       const SizedBox(height: 14),
-                      const Text(
-                        'Fetching available streams…',
-                        style: TextStyle(
-                          color: Colors.white70,
+                      Text(
+                        _statusMessage,
+                        style: const TextStyle(
+                          color: Color(0xFFAAAAAA),
                           fontSize: 13,
-                          fontWeight: FontWeight.w500,
                         ),
                       ),
                     ],
                   ),
                 ),
               )
-            else if (_audioGroups.isEmpty && !_isExtracting)
+            else if (_errorMessage != null && _audioGroups.isEmpty)
               Padding(
-                padding: const EdgeInsets.symmetric(vertical: 20),
+                padding: const EdgeInsets.symmetric(vertical: 28),
                 child: Column(
                   children: [
-                    const Text(
-                      'Direct streams unavailable. Use fallback downloader below.',
+                    Text(
+                      _errorMessage!,
                       textAlign: TextAlign.center,
-                      style: TextStyle(color: Colors.white60, fontSize: 13),
+                      style: const TextStyle(
+                        color: Color(0xFFAAAAAA),
+                        fontSize: 13,
+                      ),
                     ),
-                    const SizedBox(height: 16),
-                    SizedBox(
-                      width: double.infinity,
-                      height: 44,
-                      child: ElevatedButton(
-                        onPressed: _startDownload,
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: _darkRed,
-                          foregroundColor: Colors.white,
-                          elevation: 0,
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(8),
-                          ),
-                        ),
-                        child: const Text(
-                          'Download',
-                          style: TextStyle(fontWeight: FontWeight.w600),
+                    const SizedBox(height: 14),
+                    TextButton(
+                      onPressed: _extractRealStreams,
+                      style: TextButton.styleFrom(
+                        foregroundColor: Colors.white,
+                        backgroundColor: const Color(0xFF222222),
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 20, vertical: 10),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(8),
                         ),
                       ),
+                      child: const Text('Retry Scan'),
                     ),
                   ],
                 ),
               )
             else ...[
-              // 1. Audio Track (Horizontal Pill Strip)
-              const Text(
-                'AUDIO',
-                style: TextStyle(
-                  color: Colors.white38,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 0.8,
-                ),
-              ),
-              const SizedBox(height: 8),
-              SizedBox(
-                height: 36,
-                child: ListView.separated(
-                  scrollDirection: Axis.horizontal,
-                  itemCount: _audioGroups.length,
-                  separatorBuilder: (_, __) => const SizedBox(width: 8),
-                  itemBuilder: (ctx, idx) {
-                    final group = _audioGroups[idx];
-                    final isSelected = _selectedAudioIndex == idx;
-                    return TvFocusable(
-                      autofocus: idx == 0,
-                      borderRadius: BorderRadius.circular(8),
-                      onPressed: () {
-                        setState(() {
-                          _selectedAudioIndex = idx;
-                          _selectedQualityIndex = 0;
-                        });
-                      },
-                      child: GestureDetector(
-                        onTap: () {
-                          setState(() {
-                            _selectedAudioIndex = idx;
-                            _selectedQualityIndex = 0;
-                          });
-                        },
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 12),
-                          alignment: Alignment.center,
-                          decoration: BoxDecoration(
-                            color: isSelected ? _selectedBg : _cardBg,
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(
-                              color: isSelected ? _darkRedBorder : Colors.white10,
-                              width: isSelected ? 1.2 : 1.0,
-                            ),
-                          ),
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              Text(
-                                group.languageLabel,
-                                style: TextStyle(
-                                  color: isSelected ? Colors.white : Colors.white70,
-                                  fontWeight: isSelected
-                                      ? FontWeight.w600
-                                      : FontWeight.w400,
-                                  fontSize: 12.5,
-                                ),
-                              ),
-                              const SizedBox(width: 6),
-                              Text(
-                                group.serverName,
-                                style: const TextStyle(
-                                  color: Colors.white38,
-                                  fontSize: 10.5,
-                                ),
-                              ),
-                            ],
-                          ),
+              Flexible(
+                child: SingleChildScrollView(
+                  physics: const BouncingScrollPhysics(),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      // 1. AUDIO TRACKS
+                      const Text(
+                        'AUDIO TRACK',
+                        style: TextStyle(
+                          color: Color(0xFF888888),
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 0.9,
                         ),
                       ),
-                    );
-                  },
-                ),
-              ),
-              const SizedBox(height: 16),
+                      const SizedBox(height: 8),
+                      SizedBox(
+                        height: 36,
+                        child: ListView.separated(
+                          scrollDirection: Axis.horizontal,
+                          physics: const BouncingScrollPhysics(),
+                          itemCount: _audioGroups.length,
+                          separatorBuilder: (_, __) => const SizedBox(width: 8),
+                          itemBuilder: (ctx, idx) {
+                            final g = _audioGroups[idx];
+                            final selected = idx == _selectedAudioIndex;
+                            void selectAudio() {
+                              setState(() {
+                                _selectedAudioIndex = idx;
+                                _selectedQualityIndex = 0;
+                              });
+                              _probeCurrentGroupSizes();
+                            }
 
-              // 2. Video Resolution (Clean Minimal List Rows)
-              const Text(
-                'QUALITY',
-                style: TextStyle(
-                  color: Colors.white38,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 0.8,
-                ),
-              ),
-              const SizedBox(height: 8),
-              ConstrainedBox(
-                constraints: const BoxConstraints(maxHeight: 190),
-                child: ListView.separated(
-                  shrinkWrap: true,
-                  itemCount: currentQualities.length,
-                  separatorBuilder: (_, __) => const SizedBox(height: 6),
-                  itemBuilder: (ctx, qIdx) {
-                    final q = currentQualities[qIdx];
-                    final isSelected = _selectedQualityIndex == qIdx;
-                    return TvFocusable(
-                      borderRadius: BorderRadius.circular(8),
-                      onPressed: () {
-                        setState(() => _selectedQualityIndex = qIdx);
-                      },
-                      child: GestureDetector(
-                        onTap: () {
-                          setState(() => _selectedQualityIndex = qIdx);
-                        },
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(
-                              horizontal: 14, vertical: 11),
-                          decoration: BoxDecoration(
-                            color: isSelected ? _selectedBg : _cardBg,
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(
-                              color: isSelected ? _darkRedBorder : Colors.white10,
-                              width: isSelected ? 1.2 : 1.0,
-                            ),
-                          ),
-                          child: Row(
-                            children: [
-                              Icon(
-                                isSelected
-                                    ? Icons.radio_button_checked_rounded
-                                    : Icons.radio_button_off_rounded,
-                                size: 18,
-                                color: isSelected
-                                    ? _darkRedBorder
-                                    : Colors.white30,
-                              ),
-                              const SizedBox(width: 12),
-                              Expanded(
-                                child: Text(
-                                  q.label,
-                                  style: TextStyle(
-                                    color: isSelected
-                                        ? Colors.white
-                                        : Colors.white70,
-                                    fontWeight: isSelected
-                                        ? FontWeight.w600
-                                        : FontWeight.w400,
-                                    fontSize: 13.5,
+                            return _wrapTv(
+                              isTv: isTv,
+                              onTap: selectAudio,
+                              child: GestureDetector(
+                                onTap: selectAudio,
+                                child: AnimatedContainer(
+                                  duration: const Duration(milliseconds: 150),
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 14),
+                                  decoration: BoxDecoration(
+                                    color: selected
+                                        ? const Color(0xFFB81D24)
+                                        : const Color(0xFF1A1A1A),
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(
+                                      color: selected
+                                          ? const Color(0xFFE50914)
+                                          : const Color(0xFF2C2C2C),
+                                      width: 1,
+                                    ),
+                                  ),
+                                  alignment: Alignment.center,
+                                  child: Text(
+                                    g.languageLabel,
+                                    style: TextStyle(
+                                      color: selected
+                                          ? Colors.white
+                                          : const Color(0xFFB5B5B5),
+                                      fontSize: 12.5,
+                                      fontWeight: selected
+                                          ? FontWeight.w700
+                                          : FontWeight.w500,
+                                    ),
                                   ),
                                 ),
                               ),
-                              Container(
+                            );
+                          },
+                        ),
+                      ),
+
+                      const SizedBox(height: 18),
+
+                      // 2. VIDEO QUALITY
+                      const Text(
+                        'VIDEO RESOLUTION',
+                        style: TextStyle(
+                          color: Color(0xFF888888),
+                          fontSize: 11,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: 0.9,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      ...List.generate(currentQualities.length, (idx) {
+                        final q = currentQualities[idx];
+                        final selected = idx == safeQualityIdx;
+                        void selectQ() =>
+                            setState(() => _selectedQualityIndex = idx);
+
+                        return Padding(
+                          padding: const EdgeInsets.only(bottom: 7),
+                          child: _wrapTv(
+                            isTv: isTv,
+                            onTap: selectQ,
+                            child: GestureDetector(
+                              onTap: selectQ,
+                              child: AnimatedContainer(
+                                duration: const Duration(milliseconds: 150),
                                 padding: const EdgeInsets.symmetric(
-                                    horizontal: 8, vertical: 3),
+                                    horizontal: 14, vertical: 11),
                                 decoration: BoxDecoration(
-                                  color: const Color(0xFF262626),
-                                  borderRadius: BorderRadius.circular(5),
+                                  color: selected
+                                      ? const Color(0xFF1E1415)
+                                      : const Color(0xFF181818),
+                                  borderRadius: BorderRadius.circular(9),
+                                  border: Border.all(
+                                    color: selected
+                                        ? const Color(0xFFB81D24)
+                                        : const Color(0xFF282828),
+                                    width: 1,
+                                  ),
                                 ),
-                                child: Text(
-                                  q.formattedSize,
-                                  style: const TextStyle(
-                                    color: Colors.white70,
-                                    fontSize: 11,
-                                    fontWeight: FontWeight.w500,
+                                child: Row(
+                                  children: [
+                                    Container(
+                                      width: 16,
+                                      height: 16,
+                                      decoration: BoxDecoration(
+                                        shape: BoxShape.circle,
+                                        color: selected
+                                            ? const Color(0xFFB81D24)
+                                            : Colors.transparent,
+                                        border: Border.all(
+                                          color: selected
+                                              ? const Color(0xFFE50914)
+                                              : const Color(0xFF555555),
+                                          width: 1.5,
+                                        ),
+                                      ),
+                                      child: selected
+                                          ? const Icon(
+                                              Icons.check,
+                                              size: 11,
+                                              color: Colors.white,
+                                            )
+                                          : null,
+                                    ),
+                                    const SizedBox(width: 12),
+                                    Expanded(
+                                      child: Text(
+                                        q.label,
+                                        style: TextStyle(
+                                          color: selected
+                                              ? Colors.white
+                                              : const Color(0xFFD0D0D0),
+                                          fontSize: 13.5,
+                                          fontWeight: selected
+                                              ? FontWeight.w700
+                                              : FontWeight.w500,
+                                        ),
+                                      ),
+                                    ),
+                                    Text(
+                                      q.formattedSize,
+                                      style: TextStyle(
+                                        color: selected
+                                            ? Colors.white
+                                            : const Color(0xFF8E8E8E),
+                                        fontSize: 12,
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        );
+                      }),
+
+                      const SizedBox(height: 12),
+
+                      // 3. SUBTITLES
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          const Text(
+                            'SUBTITLES',
+                            style: TextStyle(
+                              color: Color(0xFF888888),
+                              fontSize: 11,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: 0.9,
+                            ),
+                          ),
+                          Text(
+                            _subtitles.isEmpty
+                                ? 'None found'
+                                : '${_subtitles.length} available',
+                            style: const TextStyle(
+                              color: Color(0xFF6E6E6E),
+                              fontSize: 11,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 8),
+                      SizedBox(
+                        height: 34,
+                        child: ListView.separated(
+                          scrollDirection: Axis.horizontal,
+                          physics: const BouncingScrollPhysics(),
+                          itemCount: _subtitles.length + 1,
+                          separatorBuilder: (_, __) => const SizedBox(width: 7),
+                          itemBuilder: (ctx, idx) {
+                            final label =
+                                idx == 0 ? 'Off' : _subtitles[idx - 1].label;
+                            final selected = _selectedSubLanguage == label;
+                            void selectSub() =>
+                                setState(() => _selectedSubLanguage = label);
+
+                            return _wrapTv(
+                              isTv: isTv,
+                              onTap: selectSub,
+                              child: GestureDetector(
+                                onTap: selectSub,
+                                child: AnimatedContainer(
+                                  duration: const Duration(milliseconds: 150),
+                                  padding: const EdgeInsets.symmetric(
+                                      horizontal: 13),
+                                  decoration: BoxDecoration(
+                                    color: selected
+                                        ? const Color(0xFFB81D24)
+                                        : const Color(0xFF1A1A1A),
+                                    borderRadius: BorderRadius.circular(8),
+                                    border: Border.all(
+                                      color: selected
+                                          ? const Color(0xFFE50914)
+                                          : const Color(0xFF2C2C2C),
+                                      width: 1,
+                                    ),
+                                  ),
+                                  alignment: Alignment.center,
+                                  child: Text(
+                                    label,
+                                    style: TextStyle(
+                                      color: selected
+                                          ? Colors.white
+                                          : const Color(0xFFB0B0B0),
+                                      fontSize: 12,
+                                      fontWeight: selected
+                                          ? FontWeight.w700
+                                          : FontWeight.w500,
+                                    ),
                                   ),
                                 ),
                               ),
-                            ],
-                          ),
+                            );
+                          },
                         ),
                       ),
-                    );
-                  },
+                    ],
+                  ),
                 ),
               ),
+
               const SizedBox(height: 16),
 
-              // 3. Subtitles (Horizontal Pill Strip)
-              const Text(
-                'SUBTITLES',
-                style: TextStyle(
-                  color: Colors.white38,
-                  fontSize: 11,
-                  fontWeight: FontWeight.w700,
-                  letterSpacing: 0.8,
-                ),
-              ),
-              const SizedBox(height: 8),
-              SizedBox(
-                height: 34,
-                child: ListView.separated(
-                  scrollDirection: Axis.horizontal,
-                  itemCount: _extractedSubtitles.length + 1,
-                  separatorBuilder: (_, __) => const SizedBox(width: 8),
-                  itemBuilder: (ctx, idx) {
-                    final isOff = idx == 0;
-                    final sIdx = idx - 1;
-                    final isSelected = isOff
-                        ? _selectedSubtitleIndex == -1
-                        : _selectedSubtitleIndex == sIdx;
-                    final label =
-                        isOff ? 'Off' : _extractedSubtitles[sIdx].label;
-
-                    return TvFocusable(
-                      borderRadius: BorderRadius.circular(8),
-                      onPressed: () {
-                        setState(() =>
-                            _selectedSubtitleIndex = isOff ? -1 : sIdx);
-                      },
-                      child: GestureDetector(
-                        onTap: () {
-                          setState(() =>
-                              _selectedSubtitleIndex = isOff ? -1 : sIdx);
-                        },
-                        child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 12),
-                          alignment: Alignment.center,
-                          decoration: BoxDecoration(
-                            color: isSelected ? _selectedBg : _cardBg,
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(
-                              color: isSelected ? _darkRedBorder : Colors.white10,
-                              width: isSelected ? 1.2 : 1.0,
-                            ),
-                          ),
-                          child: Text(
-                            label,
-                            style: TextStyle(
-                              color: isSelected ? Colors.white : Colors.white70,
-                              fontWeight: isSelected
-                                  ? FontWeight.w600
-                                  : FontWeight.w400,
-                              fontSize: 12,
-                            ),
-                          ),
-                        ),
-                      ),
-                    );
-                  },
-                ),
-              ),
-              const SizedBox(height: 20),
-
-              // 4. Primary Download Button
-              TvFocusable(
-                borderRadius: BorderRadius.circular(8),
-                onPressed: _startDownload,
+              // Action Button
+              _wrapTv(
+                isTv: isTv,
+                onTap: _triggerExtractedDownload,
                 child: SizedBox(
                   width: double.infinity,
                   height: 46,
                   child: ElevatedButton.icon(
-                    onPressed: _startDownload,
+                    onPressed: _triggerExtractedDownload,
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: _darkRed,
+                      backgroundColor: const Color(0xFFB81D24),
                       foregroundColor: Colors.white,
                       elevation: 0,
                       shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(8),
+                        borderRadius: BorderRadius.circular(10),
                       ),
                     ),
-                    icon: const Icon(Icons.file_download_outlined,
-                        color: Colors.white, size: 20),
+                    icon: const Icon(Icons.download_rounded, size: 19),
                     label: Text(
-                      'Download · ${currentQuality?.label ?? ''} · ${currentGroup?.languageLabel ?? ''}${currentQuality?.fileSizeBytes != null ? ' (${currentQuality!.formattedSize})' : ''}',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
+                      currentQualities.isNotEmpty
+                          ? 'Download ${currentQualities[safeQualityIdx].label} • ${currentGroup?.languageLabel ?? ""}'
+                          : 'Start Download',
                       style: const TextStyle(
-                        color: Colors.white,
-                        fontWeight: FontWeight.w600,
-                        fontSize: 13.5,
+                        fontSize: 14,
+                        fontWeight: FontWeight.w700,
                       ),
                     ),
                   ),

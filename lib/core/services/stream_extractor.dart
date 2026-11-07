@@ -47,16 +47,16 @@ class ExtractedStream {
   final List<StreamQuality> qualities;
   final List<SubtitleTrack> subtitles;
 
-  const ExtractedStream({
+  ExtractedStream({
     required this.url,
     required this.type,
     required this.sourceName,
     this.language = 'English',
-    required this.headers,
+    this.headers = const {},
     this.qualityLabel,
     this.qualities = const [],
-    this.subtitles = const [],
-  });
+    List<SubtitleTrack> subtitles = const [],
+  }) : subtitles = LanguageUtils.deduplicateSubtitles(subtitles);
 
   Map<String, dynamic> toJson() => {
         'url': url,

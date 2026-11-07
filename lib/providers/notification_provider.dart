@@ -1,4 +1,4 @@
-import 'package:flutter/foundation.dart';
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -30,7 +30,7 @@ class AppNotification {
   });
 }
 
-class NotificationProvider extends ChangeNotifier {
+class NotificationProvider extends ChangeNotifier with WidgetsBindingObserver {
   static const String _keySeenTimestamp = 'voidflix_last_seen_notif';
   static const String _keyPushEnabled = 'voidflix_notifications_enabled';
   static const String _keyWelcomeSent = 'voidflix_welcome_notif_sent';
@@ -54,8 +54,28 @@ class NotificationProvider extends ChangeNotifier {
     return _notifications.where((n) => !n.isRead).length;
   }
 
+  Timer? _pollTimer;
+
   NotificationProvider() {
+    WidgetsBinding.instance.addObserver(this);
     _init();
+    _pollTimer = Timer.periodic(const Duration(seconds: 25), (_) {
+      fetchUpdates(silent: true);
+    });
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    _pollTimer?.cancel();
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      fetchUpdates(silent: true);
+    }
   }
 
   Future<void> _init() async {
@@ -102,9 +122,11 @@ class NotificationProvider extends ChangeNotifier {
     }
   }
 
-  Future<void> fetchUpdates() async {
-    _isLoading = true;
-    notifyListeners();
+  Future<void> fetchUpdates({bool silent = false}) async {
+    if (!silent) {
+      _isLoading = true;
+      notifyListeners();
+    }
 
     final prefs = await SharedPreferences.getInstance();
     final now = DateTime.now();

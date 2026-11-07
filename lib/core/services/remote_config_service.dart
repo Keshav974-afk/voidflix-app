@@ -154,8 +154,8 @@ class RemoteNotificationItem {
 
 class RemoteConfigService {
   static const String configEndpoint = 'https://voidflix.org/api/public/config';
-  static const String currentAppVersion = '0.4.2';
-  static const int currentBuildNumber = 8;
+  static const String currentAppVersion = '0.4.3';
+  static const int currentBuildNumber = 9;
 
   static RemoteAppUpdate? cachedUpdate;
   static List<RemotePromoBanner> cachedBanners = [];
@@ -247,7 +247,7 @@ class RemoteConfigService {
 
     // 1. Windows Desktop (.exe)
     if (Platform.isWindows) {
-      final raw = update?.windowsUrl ?? '/Voidflix-Setup-v0.4.2.exe';
+      final raw = update?.windowsUrl ?? '/Voidflix-Setup-v0.4.3.exe';
       return _toAbsoluteUrl(raw);
     }
 
@@ -264,12 +264,12 @@ class RemoteConfigService {
 
     // 4. Android Mobile / Tablet (Touch UI)
     if (Platform.isAndroid) {
-      final raw = update?.arm64Url ?? update?.downloadUrl ?? '/Voidflix-arm64-v0.4.2.apk';
+      final raw = update?.arm64Url ?? update?.downloadUrl ?? '/Voidflix-arm64-v0.4.3.apk';
       return _toAbsoluteUrl(raw);
     }
 
     // Fallback
-    final raw = update?.downloadUrl ?? '/Voidflix-arm64-v0.4.2.apk';
+    final raw = update?.downloadUrl ?? '/Voidflix-arm64-v0.4.3.apk';
     return _toAbsoluteUrl(raw);
   }
 
