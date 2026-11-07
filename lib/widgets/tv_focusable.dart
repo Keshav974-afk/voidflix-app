@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import '../core/services/tv_mode_service.dart';
 
 class TvFocusable extends StatefulWidget {
   final Widget child;
@@ -20,7 +21,7 @@ class TvFocusable extends StatefulWidget {
     this.onFocusChange,
     this.focusNode,
     this.autofocus = false,
-    this.scaleFactor = 1.08,
+    this.scaleFactor = 1.06,
     this.borderRadius,
     this.glowColor = Colors.white,
     this.showGlow = true,
@@ -34,6 +35,9 @@ class TvFocusable extends StatefulWidget {
 class _TvFocusableState extends State<TvFocusable> {
   late FocusNode _node;
   bool _isFocused = false;
+
+  bool get _isTvActive =>
+      TvModeService().isTvMode || TvModeService().isHardwareTv;
 
   @override
   void initState() {
@@ -63,11 +67,16 @@ class _TvFocusableState extends State<TvFocusable> {
   }
 
   void _handleFocusChange() {
+    if (!_isTvActive) {
+      if (_isFocused) {
+        setState(() => _isFocused = false);
+      }
+      return;
+    }
     if (_isFocused != _node.hasFocus) {
       setState(() => _isFocused = _node.hasFocus);
       widget.onFocusChange?.call(_node.hasFocus);
       if (_node.hasFocus) {
-        // Subtle haptic tick for TV remote navigation
         HapticFeedback.selectionClick();
         if (mounted) {
           Scrollable.ensureVisible(
@@ -82,6 +91,7 @@ class _TvFocusableState extends State<TvFocusable> {
   }
 
   KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
+    if (!_isTvActive) return KeyEventResult.ignored;
     if (event is KeyDownEvent) {
       final key = event.logicalKey;
       if (key == LogicalKeyboardKey.select ||
@@ -101,6 +111,25 @@ class _TvFocusableState extends State<TvFocusable> {
 
   @override
   Widget build(BuildContext context) {
+    // On mobile/touch devices when TV mode is not enabled, do NOT attach D-pad
+    // autofocus, white borders, or focus glow outlines.
+    if (!_isTvActive) {
+      if (widget.onPressed == null) {
+        return Padding(
+          padding: widget.padding,
+          child: widget.child,
+        );
+      }
+      return GestureDetector(
+        behavior: HitTestBehavior.opaque,
+        onTap: widget.onPressed,
+        child: Padding(
+          padding: widget.padding,
+          child: widget.child,
+        ),
+      );
+    }
+
     final radius = widget.borderRadius ?? BorderRadius.circular(8);
 
     return Focus(
@@ -123,9 +152,9 @@ class _TvFocusableState extends State<TvFocusable> {
                 boxShadow: _isFocused && widget.showGlow
                     ? [
                         BoxShadow(
-                          color: widget.glowColor.withValues(alpha: 0.55),
-                          blurRadius: 18,
-                          spreadRadius: 2.5,
+                          color: widget.glowColor.withValues(alpha: 0.45),
+                          blurRadius: 16,
+                          spreadRadius: 1.5,
                         ),
                         BoxShadow(
                           color: Colors.black.withValues(alpha: 0.8),
@@ -137,9 +166,9 @@ class _TvFocusableState extends State<TvFocusable> {
                 border: _isFocused
                     ? Border.all(
                         color: widget.glowColor,
-                        width: 2.5,
+                        width: 2.0,
                       )
-                    : Border.all(color: Colors.transparent, width: 2.5),
+                    : Border.all(color: Colors.transparent, width: 2.0),
               ),
               child: ClipRRect(
                 borderRadius: radius,

@@ -35,12 +35,30 @@ class MainActivity : FlutterActivity() {
     private var multicastLock: android.net.wifi.WifiManager.MulticastLock? = null
     private val finishedDownloadIds = HashSet<Int>()
 
+    private fun applyEdgeToEdgeCutout() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            try {
+                val lp = window.attributes
+                lp.layoutInDisplayCutoutMode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_ALWAYS
+                } else {
+                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+                }
+                window.attributes = lp
+            } catch (_: Exception) {}
+        }
+        try {
+            androidx.core.view.WindowCompat.setDecorFitsSystemWindows(window, false)
+        } catch (_: Exception) {}
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
+        applyEdgeToEdgeCutout()
         super.onCreate(savedInstanceState)
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             try {
-                window.attributes.layoutInDisplayCutoutMode =
-                    WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES
+                applyEdgeToEdgeCutout()
+                applyEdgeToEdgeCutout()
             } catch (_: Exception) {}
         }
         if (isTelevisionDevice()) {
@@ -58,6 +76,23 @@ class MainActivity : FlutterActivity() {
         }
         // Start background notification watcher so alerts work even when app is closed
         VoidflixNotificationChecker.startBackgroundWatcher(applicationContext)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        applyEdgeToEdgeCutout()
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) {
+            applyEdgeToEdgeCutout()
+        }
+    }
+
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        applyEdgeToEdgeCutout()
     }
 
     override fun onStop() {
@@ -288,6 +323,10 @@ class MainActivity : FlutterActivity() {
                     } catch (e: Exception) {
                         result.error("DEVICE_INFO_ERROR", e.message, null)
                     }
+                }
+                "setFullscreenCutout" -> {
+                    applyEdgeToEdgeCutout()
+                    result.success(true)
                 }
                 "isTelevision" -> {
                     result.success(isTelevisionDevice())

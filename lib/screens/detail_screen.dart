@@ -429,7 +429,17 @@ class _DetailScreenState extends State<DetailScreen> {
                   if (!_showTrailerVideo || _trailerWebController == null)
                     Center(
                       child: GestureDetector(
-                        onTap: () => _playMedia(season: _selectedSeason, episode: 1),
+                        onTap: () {
+                          final saved = context.read<HistoryProvider>().getProgress(detail.id);
+                          final s = saved?.season ?? _selectedSeason;
+                          final e = saved?.episode ?? 1;
+                          final posSec = (saved != null && saved.positionSeconds > 0)
+                              ? saved.positionSeconds.toDouble()
+                              : (saved != null && saved.progress > 0 && saved.durationSeconds > 0
+                                  ? (saved.progress * saved.durationSeconds).toDouble()
+                                  : null);
+                          _playMedia(season: s, episode: e, startPositionSeconds: posSec);
+                        },
                         child: Container(
                           padding: const EdgeInsets.all(14),
                           decoration: BoxDecoration(
@@ -570,21 +580,21 @@ class _DetailScreenState extends State<DetailScreen> {
                     children: [
                       if (detail.voteAverage > 0) ...[
                         Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                          padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
                           decoration: BoxDecoration(
-                            color: Colors.amber.withValues(alpha: 0.15),
-                            borderRadius: BorderRadius.circular(12),
-                            border: Border.all(color: Colors.amber.withValues(alpha: 0.3)),
+                            color: const Color(0xFF1A1A1A),
+                            borderRadius: BorderRadius.circular(6),
+                            border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
                           ),
                           child: Row(
                             mainAxisSize: MainAxisSize.min,
                             children: [
-                              const Icon(Icons.star, color: Colors.amber, size: 12),
+                              const Icon(Icons.star_rounded, color: AppTheme.primaryRed, size: 13),
                               const SizedBox(width: 3),
                               Text(
                                 detail.voteAverage.toStringAsFixed(1),
                                 style: const TextStyle(
-                                  color: Colors.amber,
+                                  color: Colors.white,
                                   fontWeight: FontWeight.bold,
                                   fontSize: 11,
                                 ),
@@ -664,7 +674,7 @@ class _DetailScreenState extends State<DetailScreen> {
                         padding: const EdgeInsets.only(bottom: 10),
                         child: TvFocusable(
                           scaleFactor: 1.02,
-                          glowColor: const Color(0xFF00B4D8),
+                          glowColor: AppTheme.primaryRed,
                           borderRadius: BorderRadius.circular(6),
                           onPressed: () {
                             final saved = context.read<HistoryProvider>().getProgress(detail.id);
@@ -679,7 +689,7 @@ class _DetailScreenState extends State<DetailScreen> {
                               poster: detail.posterPath,
                               season: s,
                               episode: e,
-                              position: 0.0,
+                              position: (saved?.positionSeconds ?? 0).toDouble(),
                               audioLanguage: activeProfile?.preferredAudioLang,
                               subtitleLanguage: activeProfile?.preferredSubtitleLang,
                               serverIndex: serverIdx,
@@ -691,16 +701,10 @@ class _DetailScreenState extends State<DetailScreen> {
                             height: 44,
                             decoration: BoxDecoration(
                               gradient: const LinearGradient(
-                                colors: [Color(0xFF00B4D8), Color(0xFF0077B6)],
+                                colors: [Color(0xFFB81D24), Color(0xFF6E0E13)],
                               ),
                               borderRadius: BorderRadius.circular(6),
-                              boxShadow: [
-                                BoxShadow(
-                                  color: const Color(0xFF00B4D8).withValues(alpha: 0.35),
-                                  blurRadius: 10,
-                                  offset: const Offset(0, 2),
-                                ),
-                              ],
+                              border: Border.all(color: Colors.white.withValues(alpha: 0.14)),
                             ),
                             child: Row(
                               mainAxisAlignment: MainAxisAlignment.center,
@@ -719,55 +723,63 @@ class _DetailScreenState extends State<DetailScreen> {
                     },
                   ),
 
-                  // Full-width White Button: ▶ Play (TvFocusable for 10-foot remote support)
-                  TvFocusable(
-                    autofocus: true,
-                    scaleFactor: 1.02,
-                    glowColor: Colors.white,
-                    borderRadius: BorderRadius.circular(6),
-                    onPressed: () {
-                      final saved = context.read<HistoryProvider>().getProgress(detail.id);
-                      final s = saved?.season ?? _selectedSeason;
-                      final e = saved?.episode ?? 1;
-                      final offlineId = isTv
-                          ? DownloadProvider.generateId('tv', detail.id, season: s, episode: e)
-                          : DownloadProvider.generateId('movie', detail.id);
-                      final downloadProvider = context.read<DownloadProvider>();
-                      final offlineItem = downloadProvider.getItem(offlineId);
-                      final localFile = offlineItem?.status == 'completed' ? offlineItem?.localFilePath : null;
+                  // Full-width White Button: ▶ Play / Resume (TvFocusable for 10-foot remote support)
+                  Builder(
+                    builder: (playCtx) {
+                      final saved = playCtx.watch<HistoryProvider>().getProgress(detail.id);
+                      final hasResume = saved != null && (saved.positionSeconds >= 5 || saved.progress > 0.01) && saved.progress < 0.96;
+                      final playLabel = hasResume
+                          ? (isTv ? 'Resume S${saved.season}:E${saved.episode}' : 'Resume')
+                          : 'Play';
+                      return TvFocusable(
+                        autofocus: true,
+                        scaleFactor: 1.02,
+                        glowColor: Colors.white,
+                        borderRadius: BorderRadius.circular(6),
+                        onPressed: () {
+                          final s = saved?.season ?? _selectedSeason;
+                          final e = saved?.episode ?? 1;
+                          final offlineId = isTv
+                              ? DownloadProvider.generateId('tv', detail.id, season: s, episode: e)
+                              : DownloadProvider.generateId('movie', detail.id);
+                          final downloadProvider = context.read<DownloadProvider>();
+                          final offlineItem = downloadProvider.getItem(offlineId);
+                          final localFile = offlineItem?.status == 'completed' ? offlineItem?.localFilePath : null;
 
-                      final posSec = (saved != null && saved.positionSeconds > 0)
-                          ? saved.positionSeconds.toDouble()
-                          : (saved != null && saved.progress > 0.02 && saved.durationSeconds > 0
-                              ? (saved.progress * saved.durationSeconds).toDouble()
-                              : null);
-                      _playMedia(
-                        season: s,
-                        episode: e,
-                        localFilePath: localFile,
-                        localSubtitlePath: offlineItem?.status == 'completed' ? offlineItem?.localSubtitlePath : null,
-                        startPositionSeconds: posSec,
+                          final posSec = (saved != null && saved.positionSeconds > 0)
+                              ? saved.positionSeconds.toDouble()
+                              : (saved != null && saved.progress > 0 && saved.durationSeconds > 0
+                                  ? (saved.progress * saved.durationSeconds).toDouble()
+                                  : null);
+                          _playMedia(
+                            season: s,
+                            episode: e,
+                            localFilePath: localFile,
+                            localSubtitlePath: offlineItem?.status == 'completed' ? offlineItem?.localSubtitlePath : null,
+                            startPositionSeconds: posSec,
+                          );
+                        },
+                        child: Container(
+                          width: double.infinity,
+                          height: 44,
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              const Icon(Icons.play_arrow_rounded, color: Colors.black, size: 26),
+                              const SizedBox(width: 8),
+                              Text(
+                                playLabel,
+                                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black),
+                              ),
+                            ],
+                          ),
+                        ),
                       );
                     },
-                    child: Container(
-                      width: double.infinity,
-                      height: 44,
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(6),
-                      ),
-                      child: const Row(
-                        mainAxisAlignment: MainAxisAlignment.center,
-                        children: [
-                          Icon(Icons.play_arrow, color: Colors.black, size: 26),
-                          SizedBox(width: 8),
-                          Text(
-                            'Play',
-                            style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.black),
-                          ),
-                        ],
-                      ),
-                    ),
                   ),
                   const SizedBox(height: 8),
 
@@ -1241,13 +1253,27 @@ class _DetailScreenState extends State<DetailScreen> {
                                     scaleFactor: 1.06,
                                     glowColor: AppTheme.primaryRed,
                                     borderRadius: BorderRadius.circular(6),
-                                    onPressed: () => _playMedia(
-                                      season: _selectedSeason,
-                                      episode: ep.episodeNumber,
-                                      episodeTitle: ep.name,
-                                      localFilePath: isEpDownloaded ? epDownloadedItem?.localFilePath : null,
-                                      localSubtitlePath: isEpDownloaded ? epDownloadedItem?.localSubtitlePath : null,
-                                    ),
+                                    onPressed: () {
+                                      final saved = context.read<HistoryProvider>().getProgress(detail.id);
+                                      final isSameEp = saved != null &&
+                                          saved.season == _selectedSeason &&
+                                          saved.episode == ep.episodeNumber;
+                                      final posSec = isSameEp
+                                          ? (saved.positionSeconds > 0
+                                              ? saved.positionSeconds.toDouble()
+                                              : (saved.progress > 0 && saved.durationSeconds > 0
+                                                  ? (saved.progress * saved.durationSeconds).toDouble()
+                                                  : null))
+                                          : null;
+                                      _playMedia(
+                                        season: _selectedSeason,
+                                        episode: ep.episodeNumber,
+                                        episodeTitle: ep.name,
+                                        localFilePath: isEpDownloaded ? epDownloadedItem?.localFilePath : null,
+                                        localSubtitlePath: isEpDownloaded ? epDownloadedItem?.localSubtitlePath : null,
+                                        startPositionSeconds: posSec,
+                                      );
+                                    },
                                     child: Container(
                                       width: 125,
                                       height: 72,

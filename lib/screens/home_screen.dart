@@ -1,5 +1,4 @@
 import 'dart:io';
-import 'dart:math' as math;
 import 'package:google_fonts/google_fonts.dart';
 import '../core/network/api_service.dart';
 import '../widgets/media_card.dart';
@@ -87,14 +86,32 @@ class _HomeScreenState extends State<HomeScreen> {
         results = await _apiService.getPopularTV(page: targetPage);
       } else if (_selectedCategoryFilter == 'Movies') {
         results = await _apiService.getPopularMovies(page: targetPage);
+      } else if (_selectedCategoryFilter == 'Anime') {
+        final animeTv = await _apiService.getAnime(page: targetPage);
+        final animeMov = await _apiService.getAnimeMovies(page: targetPage);
+        results = [...animeTv, ...animeMov];
+      } else if (_selectedCategoryFilter == 'Bollywood') {
+        final bolly = await _apiService.getBollywoodMovies(page: targetPage);
+        final indTv = await _apiService.getIndianSeries(page: targetPage);
+        results = [...bolly, ...indTv];
+      } else if (_selectedCategoryFilter == 'South Indian') {
+        results = await _apiService.getSouthIndianMovies(page: targetPage);
+      } else if (_selectedCategoryFilter == 'K-Drama') {
+        results = await _apiService.getAsianDrama(page: targetPage);
       } else {
-        final movies = await _apiService.getPopularMovies(page: targetPage);
-        final tv = await _apiService.getPopularTV(page: targetPage);
+        final batch = await Future.wait([
+          _apiService.getPopularMovies(page: targetPage).catchError((_) => <MediaItem>[]),
+          _apiService.getBollywoodMovies(page: targetPage).catchError((_) => <MediaItem>[]),
+          _apiService.getAnime(page: targetPage).catchError((_) => <MediaItem>[]),
+          _apiService.getSouthIndianMovies(page: targetPage).catchError((_) => <MediaItem>[]),
+          _apiService.getPopularTV(page: targetPage).catchError((_) => <MediaItem>[]),
+          _apiService.getAsianDrama(page: targetPage).catchError((_) => <MediaItem>[]),
+        ]);
         results = [];
-        final maxLen = math.max(movies.length, tv.length);
-        for (int i = 0; i < maxLen; i++) {
-          if (i < movies.length) results.add(movies[i]);
-          if (i < tv.length) results.add(tv[i]);
+        for (int i = 0; i < 20; i++) {
+          for (final list in batch) {
+            if (i < list.length) results.add(list[i]);
+          }
         }
       }
 
@@ -185,7 +202,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
     showModalBottomSheet(
       context: context,
-      backgroundColor: const Color(0xFF14141E),
+      backgroundColor: const Color(0xFF121212),
       shape: const RoundedRectangleBorder(
         borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
       ),
@@ -350,9 +367,17 @@ class _HomeScreenState extends State<HomeScreen> {
                       children: [
                         _buildFilterChip('All'),
                         const SizedBox(width: 8),
+                        _buildFilterChip('Movies'),
+                        const SizedBox(width: 8),
                         _buildFilterChip('TV Shows'),
                         const SizedBox(width: 8),
-                        _buildFilterChip('Movies'),
+                        _buildFilterChip('Anime'),
+                        const SizedBox(width: 8),
+                        _buildFilterChip('Bollywood'),
+                        const SizedBox(width: 8),
+                        _buildFilterChip('South Indian'),
+                        const SizedBox(width: 8),
+                        _buildFilterChip('K-Drama'),
                         const SizedBox(width: 8),
                       GestureDetector(
                         onTap: () => _showCategoriesPicker(context, mediaProvider, isKids: isKids),
@@ -488,6 +513,14 @@ class _HomeScreenState extends State<HomeScreen> {
                   // ==========================================
                   if (RemoteConfigService.activeBillboardBanner != null && _selectedCategoryFilter == 'All')
                     _buildAdminBillboardBanner(RemoteConfigService.activeBillboardBanner!)
+                  else if (_selectedCategoryFilter == 'Anime' && mediaProvider.anime.isNotEmpty)
+                    HeroBanner(items: [...mediaProvider.anime, ...mediaProvider.animeMovies])
+                  else if (_selectedCategoryFilter == 'Bollywood' && mediaProvider.bollywoodMovies.isNotEmpty)
+                    HeroBanner(items: [...mediaProvider.bollywoodMovies, ...mediaProvider.indianSeries])
+                  else if (_selectedCategoryFilter == 'South Indian' && mediaProvider.southIndianMovies.isNotEmpty)
+                    HeroBanner(items: mediaProvider.southIndianMovies)
+                  else if (_selectedCategoryFilter == 'K-Drama' && mediaProvider.asianDrama.isNotEmpty)
+                    HeroBanner(items: mediaProvider.asianDrama)
                   else if (mediaProvider.trending.isNotEmpty && _selectedCategoryFilter == 'All')
                     HeroBanner(items: mediaProvider.trending)
                   else if (mediaProvider.trendingTV.isNotEmpty && _selectedCategoryFilter == 'TV Shows')
@@ -500,8 +533,78 @@ class _HomeScreenState extends State<HomeScreen> {
                   // Continue Watching (isolated per active profile!)
                   const ContinueWatchingRow(),
 
+                  // Dedicated Category Filter Views (Anime / Bollywood / South Indian / K-Drama)
+                  if (_selectedCategoryFilter == 'Anime') ...[
+                    if (mediaProvider.anime.isNotEmpty)
+                      Top10Row(
+                        title: 'Top 10 Anime Series Today',
+                        items: mediaProvider.anime,
+                        forceType: 'tv',
+                      ),
+                    if (mediaProvider.anime.isNotEmpty)
+                      MediaRow(
+                        title: 'Japanese Anime Spotlight',
+                        items: mediaProvider.anime,
+                        forceType: 'tv',
+                      ),
+                    if (mediaProvider.animeMovies.isNotEmpty)
+                      MediaRow(
+                        title: 'Blockbuster Anime Movies & Films',
+                        items: mediaProvider.animeMovies,
+                        forceType: 'movie',
+                      ),
+                  ] else if (_selectedCategoryFilter == 'Bollywood') ...[
+                    if (mediaProvider.bollywoodMovies.isNotEmpty)
+                      Top10Row(
+                        title: 'Top 10 Bollywood Movies Today',
+                        items: mediaProvider.bollywoodMovies,
+                        forceType: 'movie',
+                      ),
+                    if (mediaProvider.bollywoodMovies.isNotEmpty)
+                      MediaRow(
+                        title: 'Bollywood & Hindi Blockbusters',
+                        items: mediaProvider.bollywoodMovies,
+                        forceType: 'movie',
+                      ),
+                    if (mediaProvider.indianSeries.isNotEmpty)
+                      MediaRow(
+                        title: 'Indian Web Series & Thrillers',
+                        items: mediaProvider.indianSeries,
+                        forceType: 'tv',
+                      ),
+                  ] else if (_selectedCategoryFilter == 'South Indian') ...[
+                    if (mediaProvider.southIndianMovies.isNotEmpty)
+                      Top10Row(
+                        title: 'Top 10 South Indian Blockbusters',
+                        items: mediaProvider.southIndianMovies,
+                        forceType: 'movie',
+                      ),
+                    if (mediaProvider.southIndianMovies.isNotEmpty)
+                      MediaRow(
+                        title: 'South Indian Action & Pan-India Hits',
+                        items: mediaProvider.southIndianMovies,
+                        forceType: 'movie',
+                      ),
+                  ] else if (_selectedCategoryFilter == 'K-Drama') ...[
+                    if (mediaProvider.asianDrama.isNotEmpty)
+                      Top10Row(
+                        title: 'Top 10 K-Dramas Today',
+                        items: mediaProvider.asianDrama,
+                        forceType: 'tv',
+                      ),
+                    if (mediaProvider.asianDrama.isNotEmpty)
+                      MediaRow(
+                        title: 'Spotlight K-Dramas & Asian Series',
+                        items: mediaProvider.asianDrama,
+                        forceType: 'tv',
+                      ),
+                  ],
+
                   // Personalized Recommendations Curated For Active Profile
-                  if (mediaProvider.personalizedSections.isNotEmpty) ...[
+                  if (mediaProvider.personalizedSections.isNotEmpty &&
+                      (_selectedCategoryFilter == 'All' ||
+                          _selectedCategoryFilter == 'TV Shows' ||
+                          _selectedCategoryFilter == 'Movies')) ...[
                     for (final sec in mediaProvider.personalizedSections)
                       if (_selectedCategoryFilter == 'All' ||
                           (_selectedCategoryFilter == 'TV Shows' && sec.forceType == 'tv') ||
@@ -520,14 +623,63 @@ class _HomeScreenState extends State<HomeScreen> {
                       items: mediaProvider.becauseYouWatched,
                     ),
 
+                  // Prominent Global & Regional Spotlight Rows on Home ('All' / 'Movies' / 'TV Shows')
+                  if (_selectedCategoryFilter == 'All')
+                    MediaRow(
+                      title: 'Trending Across All Languages',
+                      items: mediaProvider.trending.skip(1).toList(),
+                    ),
+
+                  if ((_selectedCategoryFilter == 'All' || _selectedCategoryFilter == 'Movies') &&
+                      mediaProvider.bollywoodMovies.isNotEmpty)
+                    MediaRow(
+                      title: 'Bollywood & Hindi Blockbusters',
+                      items: mediaProvider.bollywoodMovies,
+                      forceType: 'movie',
+                    ),
+
+                  if ((_selectedCategoryFilter == 'All' || _selectedCategoryFilter == 'Movies') &&
+                      mediaProvider.southIndianMovies.isNotEmpty)
+                    MediaRow(
+                      title: 'South Indian Action & Pan-India Hits',
+                      items: mediaProvider.southIndianMovies,
+                      forceType: 'movie',
+                    ),
+
+                  if ((_selectedCategoryFilter == 'All' || _selectedCategoryFilter == 'TV Shows') &&
+                      mediaProvider.anime.isNotEmpty)
+                    MediaRow(
+                      title: 'Japanese Anime Spotlight',
+                      items: mediaProvider.anime,
+                      forceType: 'tv',
+                    ),
+
+                  if ((_selectedCategoryFilter == 'All' || _selectedCategoryFilter == 'Movies') &&
+                      mediaProvider.animeMovies.isNotEmpty)
+                    MediaRow(
+                      title: 'Acclaimed Anime Movies & Films',
+                      items: mediaProvider.animeMovies,
+                      forceType: 'movie',
+                    ),
+
+                  if ((_selectedCategoryFilter == 'All' || _selectedCategoryFilter == 'TV Shows') &&
+                      mediaProvider.asianDrama.isNotEmpty)
+                    MediaRow(
+                      title: 'Spotlight K-Dramas & Korean Series',
+                      items: mediaProvider.asianDrama,
+                      forceType: 'tv',
+                    ),
+
+                  if ((_selectedCategoryFilter == 'All' || _selectedCategoryFilter == 'TV Shows') &&
+                      mediaProvider.indianSeries.isNotEmpty)
+                    MediaRow(
+                      title: 'Indian Web Series & Originals',
+                      items: mediaProvider.indianSeries,
+                      forceType: 'tv',
+                    ),
+
                   // TV Shows Category Sections
                   if (_selectedCategoryFilter == 'All' || _selectedCategoryFilter == 'TV Shows') ...[
-                    if (_selectedCategoryFilter == 'All')
-                      MediaRow(
-                        title: 'Trending Now',
-                        items: mediaProvider.trending.skip(1).toList(),
-                      ),
-
                     Top10Row(
                       title: 'Top 10 TV Shows Today',
                       items: mediaProvider.popularTV,
@@ -552,18 +704,6 @@ class _HomeScreenState extends State<HomeScreen> {
                         items: mediaProvider.crimeTV,
                         forceType: 'tv',
                       ),
-
-                    MediaRow(
-                      title: 'Japanese Anime Spotlight',
-                      items: mediaProvider.anime,
-                      forceType: 'tv',
-                    ),
-
-                    MediaRow(
-                      title: 'Spotlight K-Dramas & Asian Series',
-                      items: mediaProvider.asianDrama,
-                      forceType: 'tv',
-                    ),
 
                     MediaRow(
                       title: 'Highest Rated TV Masterpieces',

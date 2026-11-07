@@ -7,6 +7,7 @@ import '../core/constants/api_constants.dart';
 import '../core/constants/theme_constants.dart';
 import '../core/network/api_service.dart';
 import '../models/media_item.dart';
+import '../providers/history_provider.dart';
 import '../providers/watchlist_provider.dart';
 import '../screens/player_screen.dart';
 import 'detail_modal.dart';
@@ -109,14 +110,23 @@ class _HeroBannerState extends State<HeroBanner> {
   }
 
   void _playItem(MediaItem item) {
+    final saved = context.read<HistoryProvider>().getProgress(item.id);
+    final posSec = (saved != null && saved.positionSeconds > 0)
+        ? saved.positionSeconds.toDouble()
+        : (saved != null && saved.progress > 0 && saved.durationSeconds > 0
+            ? (saved.progress * saved.durationSeconds).toDouble()
+            : null);
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => PlayerScreen(
           mediaId: item.id,
           mediaTitle: item.title,
           mediaType: item.mediaType,
+          season: saved?.season ?? 1,
+          episode: saved?.episode ?? 1,
           posterPath: item.posterPath,
           backdropPath: item.backdropPath,
+          startPositionSeconds: posSec,
         ),
       ),
     );

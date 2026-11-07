@@ -14,7 +14,11 @@ class MediaProvider extends ChangeNotifier {
   List<MediaItem> _popularTV = [];
   List<MediaItem> _topRatedTV = [];
   List<MediaItem> _anime = [];
+  List<MediaItem> _animeMovies = [];
   List<MediaItem> _asianDrama = [];
+  List<MediaItem> _bollywoodMovies = [];
+  List<MediaItem> _southIndianMovies = [];
+  List<MediaItem> _indianSeries = [];
 
   // Extended Netflix & Web Categories
   List<MediaItem> _nowPlayingMovies = [];
@@ -48,7 +52,11 @@ class MediaProvider extends ChangeNotifier {
   List<MediaItem> get popularTV => _popularTV;
   List<MediaItem> get topRatedTV => _topRatedTV;
   List<MediaItem> get anime => _anime;
+  List<MediaItem> get animeMovies => _animeMovies;
   List<MediaItem> get asianDrama => _asianDrama;
+  List<MediaItem> get bollywoodMovies => _bollywoodMovies;
+  List<MediaItem> get southIndianMovies => _southIndianMovies;
+  List<MediaItem> get indianSeries => _indianSeries;
 
   List<MediaItem> get nowPlayingMovies => _nowPlayingMovies;
   List<MediaItem> get romanceMovies => _romanceMovies;
@@ -139,9 +147,13 @@ class MediaProvider extends ChangeNotifier {
           _apiService.getNowPlayingMovies().catchError((_) => <MediaItem>[]),
           _apiService.getRomanceMovies().catchError((_) => <MediaItem>[]),
           _apiService.getCrimeTV().catchError((_) => <MediaItem>[]),
+          _apiService.getBollywoodMovies().catchError((_) => <MediaItem>[]),
+          _apiService.getSouthIndianMovies().catchError((_) => <MediaItem>[]),
+          _apiService.getIndianSeries().catchError((_) => <MediaItem>[]),
+          _apiService.getAnimeMovies().catchError((_) => <MediaItem>[]),
         ]);
 
-        _trending = results[0];
+        final rawTrending = results[0];
         _trendingTV = results[1];
         _popularMovies = results[2];
         _topRatedMovies = results[3];
@@ -159,6 +171,32 @@ class MediaProvider extends ChangeNotifier {
         _nowPlayingMovies = results[15];
         _romanceMovies = results[16];
         _crimeTV = results[17];
+        _bollywoodMovies = results[18];
+        _southIndianMovies = results[19];
+        _indianSeries = results[20];
+        _animeMovies = results[21];
+
+        // Interleave Hollywood, Anime, Bollywood, South Indian, and K-Drama so the Hero Banner
+        // and Trending Now rail showcase a balanced global & regional mix instead of only Hollywood.
+        final interleavedTrending = <MediaItem>[];
+        final seenTrendKeys = <String>{};
+        void addTrend(MediaItem item) {
+          final k = '${item.mediaType}_${item.id}';
+          if (seenTrendKeys.add(k)) {
+            interleavedTrending.add(item);
+          }
+        }
+
+        final maxBucket = 20;
+        for (int i = 0; i < maxBucket; i++) {
+          if (i < rawTrending.length) addTrend(rawTrending[i]);
+          if (i < _bollywoodMovies.length) addTrend(_bollywoodMovies[i]);
+          if (i < _anime.length) addTrend(_anime[i]);
+          if (i < _southIndianMovies.length) addTrend(_southIndianMovies[i]);
+          if (i < _asianDrama.length) addTrend(_asianDrama[i]);
+          if (i < _animeMovies.length) addTrend(_animeMovies[i]);
+        }
+        _trending = interleavedTrending.isNotEmpty ? interleavedTrending : rawTrending;
 
         if (results.every((list) => list.isEmpty)) {
           _error = 'Unable to connect to media services. Please check your network connection.';
@@ -421,16 +459,20 @@ class MediaProvider extends ChangeNotifier {
         }
       }
 
-      // 5. Linear Scoring Optimization Model for Top Picks
+      // 5. Linear Scoring Optimization Model for Top Picks (Balanced across Hollywood, Bollywood, South Indian, Anime & K-Drama)
       final rawCandidates = [
-        ..._trending,
-        ..._popularMovies,
-        ..._popularTV,
-        ..._topRatedMovies,
-        ..._nowPlayingMovies,
-        ..._actionMovies,
-        ..._sciFiMovies,
-        ..._comedyMovies,
+        ..._trending.take(15),
+        ..._bollywoodMovies.take(10),
+        ..._southIndianMovies.take(10),
+        ..._anime.take(10),
+        ..._animeMovies.take(6),
+        ..._asianDrama.take(8),
+        ..._indianSeries.take(6),
+        ..._popularMovies.take(10),
+        ..._popularTV.take(10),
+        ..._topRatedMovies.take(8),
+        ..._nowPlayingMovies.take(8),
+        ..._actionMovies.take(8),
       ];
 
       // Explicitly deduplicate candidate pool by unique key

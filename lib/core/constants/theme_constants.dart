@@ -3,22 +3,22 @@ import 'package:flutter/cupertino.dart';
 import 'package:google_fonts/google_fonts.dart';
 
 class AppTheme {
-  // Exact Voidflix & Netflix palette
+  // Exact Voidflix Matte Carbon, White & Dark Red palette (Zero Bright Colors)
   static const Color primaryRed = Color(0xFFE50914);
   static const Color darkRed = Color(0xFFB81D24);
-  static const Color background = Color(0xFF111116);
+  static const Color background = Color(0xFF0A0A0A);
   static const Color backgroundBlack = Color(0xFF000000);
-  static const Color surface = Color(0xFF16161E);
-  static const Color surfaceVariant = Color(0xFF1F1F2B);
-  static const Color cardColor = Color(0xFF181818);
-  static const Color cardHover = Color(0xFF242424);
-  static const Color border = Color(0xFF282836);
-  static const Color borderSubtle = Color(0x33FFFFFF);
+  static const Color surface = Color(0xFF121212);
+  static const Color surfaceVariant = Color(0xFF1A1A1A);
+  static const Color cardColor = Color(0xFF161616);
+  static const Color cardHover = Color(0xFF222222);
+  static const Color border = Color(0xFF262626);
+  static const Color borderSubtle = Color(0x26FFFFFF);
   static const Color textPrimary = Color(0xFFFFFFFF);
   static const Color textSecondary = Color(0xFFA3A3A3);
   static const Color textMuted = Color(0xFF737373);
-  static const Color matchGreen = Color(0xFF46D369); // 98% Match
-  static const Color starGold = Color(0xFFFFB800);
+  static const Color matchGreen = Color(0xFFE5E5E5);
+  static const Color starGold = Color(0xFFE50914);
 
   // Glassmorphic chip decoration
   static BoxDecoration glassChip({double radius = 20, Color? borderColor}) {

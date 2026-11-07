@@ -301,21 +301,21 @@ class _DetailModalState extends State<DetailModal> {
                           children: [
                             if (widget.item.voteAverage > 0) ...[
                               Container(
-                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                padding: const EdgeInsets.symmetric(horizontal: 7, vertical: 2.5),
                                 decoration: BoxDecoration(
-                                  color: Colors.amber.withValues(alpha: 0.15),
-                                  borderRadius: BorderRadius.circular(12),
-                                  border: Border.all(color: Colors.amber.withValues(alpha: 0.3)),
+                                  color: const Color(0xFF1A1A1A),
+                                  borderRadius: BorderRadius.circular(6),
+                                  border: Border.all(color: Colors.white.withValues(alpha: 0.12)),
                                 ),
                                 child: Row(
                                   mainAxisSize: MainAxisSize.min,
                                   children: [
-                                    const Icon(Icons.star, color: Colors.amber, size: 12),
+                                    const Icon(Icons.star_rounded, color: AppTheme.primaryRed, size: 13),
                                     const SizedBox(width: 3),
                                     Text(
                                       widget.item.voteAverage.toStringAsFixed(1),
                                       style: const TextStyle(
-                                        color: Colors.amber,
+                                        color: Colors.white,
                                         fontWeight: FontWeight.bold,
                                         fontSize: 11,
                                       ),
@@ -328,8 +328,8 @@ class _DetailModalState extends State<DetailModal> {
                             Text(
                               '$matchPercentage% Match',
                               style: const TextStyle(
-                                color: AppTheme.matchGreen,
-                                fontWeight: FontWeight.bold,
+                                color: Colors.white70,
+                                fontWeight: FontWeight.w600,
                                 fontSize: 13,
                               ),
                             ),
@@ -414,7 +414,9 @@ class _DetailModalState extends State<DetailModal> {
                               final localFile = offlineItem?.status == 'completed' ? offlineItem?.localFilePath : null;
                               final posSec = savedProgress != null && savedProgress.positionSeconds > 0
                                   ? savedProgress.positionSeconds.toDouble()
-                                  : null;
+                                  : (savedProgress != null && savedProgress.progress > 0 && savedProgress.durationSeconds > 0
+                                      ? (savedProgress.progress * savedProgress.durationSeconds).toDouble()
+                                      : null);
 
                               _playMedia(season: s, episode: e, localFilePath: localFile, startPositionSeconds: posSec);
                             },
@@ -774,12 +776,25 @@ class _DetailModalState extends State<DetailModal> {
                             final epDlItem = downloadProvider.getItem(epDlId);
 
                             return InkWell(
-                              onTap: () => _playMedia(
-                                season: _selectedSeason,
-                                episode: ep.episodeNumber,
-                                episodeTitle: ep.name,
-                                localFilePath: isEpDl ? epDlItem?.localFilePath : null,
-                              ),
+                              onTap: () {
+                                final isSameEp = savedProgress != null &&
+                                    savedProgress.season == _selectedSeason &&
+                                    savedProgress.episode == ep.episodeNumber;
+                                final posSec = isSameEp
+                                    ? (savedProgress.positionSeconds > 0
+                                        ? savedProgress.positionSeconds.toDouble()
+                                        : (savedProgress.progress > 0 && savedProgress.durationSeconds > 0
+                                            ? (savedProgress.progress * savedProgress.durationSeconds).toDouble()
+                                            : null))
+                                    : null;
+                                _playMedia(
+                                  season: _selectedSeason,
+                                  episode: ep.episodeNumber,
+                                  episodeTitle: ep.name,
+                                  localFilePath: isEpDl ? epDlItem?.localFilePath : null,
+                                  startPositionSeconds: posSec,
+                                );
+                              },
                               child: Container(
                                 padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
                                 decoration: const BoxDecoration(

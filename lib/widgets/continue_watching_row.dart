@@ -220,7 +220,8 @@ class ContinueWatchingRow extends StatelessWidget {
                 width: 118,
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(8),
-                  color: const Color(0xFF1E1E26),
+                  color: const Color(0xFF141414),
+                  border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
                   boxShadow: [
                     BoxShadow(
                       color: Colors.black.withValues(alpha: 0.5),
@@ -236,6 +237,20 @@ class ContinueWatchingRow extends StatelessWidget {
                     Expanded(
                       child: GestureDetector(
                         onTap: () {
+                          final dlProvider = context.read<DownloadProvider>();
+                          final dlId = DownloadProvider.generateId(
+                            mediaType,
+                            id,
+                            season: season,
+                            episode: episode,
+                          );
+                          final dlItem = dlProvider.getItem(dlId);
+                          final isDownloaded = dlItem != null && dlItem.status == 'completed';
+                          final resumeSec = raw.positionSeconds > 0
+                              ? raw.positionSeconds.toDouble()
+                              : (raw.progress > 0 && raw.durationSeconds > 0
+                                  ? (raw.progress * raw.durationSeconds).toDouble()
+                                  : null);
                           Navigator.of(context).push(
                             MaterialPageRoute(
                               builder: (_) => PlayerScreen(
@@ -246,11 +261,9 @@ class ContinueWatchingRow extends StatelessWidget {
                                 episode: episode,
                                 posterPath: posterPath,
                                 backdropPath: backdropPath,
-                                startPositionSeconds: raw.positionSeconds > 0
-                                    ? raw.positionSeconds.toDouble()
-                                    : (raw.progress > 0.02 && raw.durationSeconds > 0
-                                        ? (raw.progress * raw.durationSeconds).toDouble()
-                                        : null),
+                                startPositionSeconds: resumeSec,
+                                localFilePath: isDownloaded ? dlItem.localFilePath : null,
+                                localSubtitlePath: isDownloaded ? dlItem.localSubtitlePath : null,
                               ),
                             ),
                           );

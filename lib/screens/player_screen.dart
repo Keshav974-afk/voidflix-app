@@ -226,6 +226,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   // Resume position system (Exact frame recovery from history)
   Duration? _pendingResumePosition;
+  Duration? _initialTargetResumePos;
+  int _resumeSeekAttempts = 0;
+  int _lastResumeSeekAttemptMs = 0;
 
   // Autoplay Next Episode system
   bool _showAutoplayCard = false;
@@ -402,6 +405,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
       DeviceOrientation.landscapeRight,
     ]);
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersiveSticky);
+    const MethodChannel('org.voidflix/notifications')
+        .invokeMethod('setFullscreenCutout')
+        .catchError((_) {});
 
     // Keep screen awake while watching video
     WakelockPlus.enable();
@@ -658,30 +664,40 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
       controller.addListener(_videoPlayerListener);
 
-      Duration? resumePos;
-      final saved = context.read<HistoryProvider>().getProgress(widget.mediaId);
-      if (saved != null &&
-          (widget.mediaType != 'tv' || (saved.season == _currentSeason && saved.episode == _currentEpisode)) &&
-          saved.progress > 0.02 &&
-          saved.progress < 0.95) {
-        final totalMs = controller.value.duration.inMilliseconds;
-        if (totalMs > 0) {
-          resumePos = Duration(milliseconds: (saved.progress * totalMs).round());
+      Duration? resumePos = _initialTargetResumePos;
+      if (resumePos == null || resumePos <= Duration.zero) {
+        final saved = context.read<HistoryProvider>().getProgress(widget.mediaId);
+        if (saved != null &&
+            (widget.mediaType != 'tv' || (saved.season == _currentSeason && saved.episode == _currentEpisode)) &&
+            saved.progress < 0.96) {
+          if (saved.positionSeconds >= 5) {
+            resumePos = Duration(seconds: saved.positionSeconds);
+          } else if (saved.progress > 0.005) {
+            final totalMs = controller.value.duration.inMilliseconds;
+            if (totalMs > 0) {
+              resumePos = Duration(milliseconds: (saved.progress * totalMs).round());
+            }
+          }
         }
       }
 
+      await controller.setPlaybackSpeed(_playbackSpeed);
+      if (resumePos != null && resumePos > Duration.zero) {
+        _pendingResumePosition = resumePos;
+        _resumeSeekAttempts = 0;
+        _lastResumeSeekAttemptMs = DateTime.now().millisecondsSinceEpoch;
+        await controller.seekTo(resumePos);
+      }
+      await controller.play();
       if (resumePos != null && resumePos > Duration.zero) {
         await controller.seekTo(resumePos);
       }
-
-      await controller.setPlaybackSpeed(_playbackSpeed);
-      await controller.play();
 
       setState(() {
         _isLoading = false;
         _isPlaying = true;
         _totalDuration = controller.value.duration;
-        _currentPosition = controller.value.position;
+        _currentPosition = (resumePos != null && resumePos > Duration.zero) ? resumePos : controller.value.position;
       });
 
       _startHideControlsTimer();
@@ -854,8 +870,24 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
 
     Duration? initialPos;
-    if (_pendingStartPositionSeconds != null && _pendingStartPositionSeconds! > 0) {
+    if (_pendingStartPositionSeconds != null && _pendingStartPositionSeconds! >= 3) {
       initialPos = Duration(milliseconds: (_pendingStartPositionSeconds! * 1000).round());
+    } else if (mounted) {
+      try {
+        final saved = context.read<HistoryProvider>().getProgress(widget.mediaId);
+        if (saved != null &&
+            (widget.mediaType != 'tv' || (saved.season == _currentSeason && saved.episode == _currentEpisode)) &&
+            saved.progress < 0.96) {
+          if (saved.positionSeconds >= 5) {
+            initialPos = Duration(seconds: saved.positionSeconds);
+          } else if (saved.progress > 0.005 && saved.durationSeconds > 0) {
+            initialPos = Duration(seconds: (saved.progress * saved.durationSeconds).round());
+          }
+        }
+      } catch (_) {}
+    }
+    if (initialPos != null && initialPos > Duration.zero) {
+      _initialTargetResumePos = initialPos;
     }
 
     _triedNativeServerIndices.clear();
@@ -1374,39 +1406,46 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
       controller.addListener(_videoPlayerListener);
 
-      Duration? resumePos = startPosition;
+      Duration? resumePos = (startPosition != null && startPosition > Duration.zero)
+          ? startPosition
+          : _initialTargetResumePos;
       if (resumePos == null || resumePos <= Duration.zero) {
         final saved = context.read<HistoryProvider>().getProgress(widget.mediaId);
         if (saved != null &&
             (widget.mediaType != 'tv' || (saved.season == _currentSeason && saved.episode == _currentEpisode)) &&
-            saved.progress > 0.02 &&
-            saved.progress < 0.95) {
-          if (saved.positionSeconds > 0) {
+            saved.progress < 0.96) {
+          if (saved.positionSeconds >= 5) {
             resumePos = Duration(seconds: saved.positionSeconds);
-          } else {
+          } else if (saved.progress > 0.005) {
             final totalMs = controller.value.duration.inMilliseconds;
             if (totalMs > 0) {
               resumePos = Duration(milliseconds: (saved.progress * totalMs).round());
+            } else if (saved.durationSeconds > 0) {
+              resumePos = Duration(seconds: (saved.progress * saved.durationSeconds).round());
             }
           }
         }
       }
 
+      await controller.setPlaybackSpeed(_playbackSpeed);
+
       if (resumePos != null && resumePos > Duration.zero) {
+        _pendingResumePosition = resumePos;
+        _resumeSeekAttempts = 0;
+        _lastResumeSeekAttemptMs = DateTime.now().millisecondsSinceEpoch;
         if (controller.value.duration > Duration.zero) {
           await controller.seekTo(resumePos);
-          _pendingResumePosition = null;
-        } else {
-          _pendingResumePosition = resumePos;
         }
       } else {
         _pendingResumePosition = null;
       }
 
-      await controller.setPlaybackSpeed(_playbackSpeed);
-
       if (autoPlay) {
         await controller.play();
+      }
+
+      if (resumePos != null && resumePos > Duration.zero && controller.value.duration > Duration.zero) {
+        await controller.seekTo(resumePos);
       }
 
       setState(() {
@@ -1414,7 +1453,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
         _isBuffering = false;
         _isPlaying = autoPlay;
         _totalDuration = controller.value.duration;
-        _currentPosition = controller.value.position;
+        _currentPosition = (resumePos != null && resumePos > Duration.zero)
+            ? resumePos
+            : controller.value.position;
       });
       _startHideControlsTimer();
     } catch (e, st) {
@@ -1575,14 +1616,30 @@ class _PlayerScreenState extends State<PlayerScreen> {
         }
       }
 
-      // If an asynchronous resume position is pending (waiting for HLS/MP4 timeline duration to resolve), seek now!
+      // If an asynchronous resume position is pending (waiting for HLS/MP4 timeline duration to resolve),
+      // verify that the player actually reached the target timestamp, or re-issue seekTo!
       if (_pendingResumePosition != null && _pendingResumePosition! > Duration.zero && val.duration > Duration.zero) {
         final target = _pendingResumePosition!;
-        _pendingResumePosition = null;
-        controller.seekTo(target).catchError((_) {});
+        final diffSec = (val.position - target).inSeconds.abs();
+        if (diffSec <= 6 || val.position >= target) {
+          _pendingResumePosition = null;
+          _initialTargetResumePos = null;
+        } else {
+          final nowMs = DateTime.now().millisecondsSinceEpoch;
+          if (nowMs - _lastResumeSeekAttemptMs > 900) {
+            _lastResumeSeekAttemptMs = nowMs;
+            _resumeSeekAttempts++;
+            if (_resumeSeekAttempts <= 5) {
+              controller.seekTo(target).catchError((_) {});
+            } else {
+              _pendingResumePosition = null;
+              _initialTargetResumePos = null;
+            }
+          }
+        }
       }
 
-      if (_pendingSeekTarget == null) {
+      if (_pendingSeekTarget == null && _pendingResumePosition == null) {
         _currentPosition = val.position;
       }
       _totalDuration = val.duration;
@@ -2293,20 +2350,33 @@ class _PlayerScreenState extends State<PlayerScreen> {
   double _lastSavedProgress = 0.0;
 
   void _recordWatchProgress({double? customProgress, bool force = false}) {
-    if (!mounted) return;
-    final controller = _videoPlayerController;
-    double prog = customProgress ?? 0.0;
+    // Do not overwrite saved progress while waiting for initial resume seek to complete!
+    if (_pendingResumePosition != null && customProgress == null) return;
 
-    if (customProgress == null && controller != null && controller.value.isInitialized) {
-      final totalMs = controller.value.duration.inMilliseconds;
-      final curMs = controller.value.position.inMilliseconds;
-      if (totalMs > 0) {
-        prog = (curMs / totalMs).clamp(0.0, 1.0);
+    final controller = _videoPlayerController;
+    int curSec = _currentPosition.inSeconds;
+    int totSec = _totalDuration.inSeconds;
+
+    if (controller != null && controller.value.isInitialized) {
+      if (controller.value.position.inSeconds > 0) {
+        curSec = controller.value.position.inSeconds;
+      }
+      if (controller.value.duration.inSeconds > 0) {
+        totSec = controller.value.duration.inSeconds;
       }
     }
 
-    // Do not record unplayed media (< 2%) unless forced with a positive progress
-    if (prog < 0.02 && !force) return;
+    // Never save 0:00 (or < 5s) when stream is still extracting/loading, even if force=true on exit,
+    // so we never wipe out an existing resume point!
+    if (customProgress == null && curSec < 5) return;
+
+    double prog = customProgress ?? 0.0;
+    if (customProgress == null && totSec > 0) {
+      prog = (curSec / totSec).clamp(0.0, 1.0);
+    }
+
+    // Do not record unplayed media (< 0.5%) unless forced or past 5 seconds
+    if (prog < 0.005 && curSec < 5 && !force) return;
 
     final now = DateTime.now();
     // Throttle automatic progress saves to once every 5 seconds
@@ -2320,12 +2390,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _lastSavedProgress = prog;
 
     final cleanTitle = widget.mediaTitle.replaceAll(RegExp(r':\s*S\d+.*$', caseSensitive: false), '').trim();
-    final curSec = controller != null && controller.value.isInitialized
-        ? controller.value.position.inSeconds
-        : 0;
-    final totSec = controller != null && controller.value.isInitialized
-        ? controller.value.duration.inSeconds
-        : 0;
 
     final progress = WatchProgress(
       id: widget.mediaId,
@@ -2378,6 +2442,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
     setState(() {
       _currentEpisode = episodeNum;
+      _initialTargetResumePos = null;
+      _pendingResumePosition = null;
+      _pendingStartPositionSeconds = null;
+      _currentPosition = Duration.zero;
       _showSkipIntro = false;
       _hasSkippedIntroForThisEp = false;
       _hasCancelledAutoplayForThisEp = false;
@@ -3649,7 +3717,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                   _userExplicitlySelectedServer = true;
                                   _triedNativeServerIndices.clear();
                                   context.read<ProfileProvider>().setSelectedServer(idx);
-                                  _loadServerDirect(idx);
+                                  _loadServerDirect(
+                                    idx,
+                                    startPosition: _currentPosition.inSeconds >= 5
+                                        ? _currentPosition
+                                        : _initialTargetResumePos,
+                                  );
                                 },
                         );
 
@@ -3660,7 +3733,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
                               Navigator.pop(ctx);
                               _triedNativeServerIndices.clear();
                               context.read<ProfileProvider>().setSelectedServer(idx);
-                              _loadServerDirect(idx);
+                              _loadServerDirect(
+                                idx,
+                                startPosition: _currentPosition.inSeconds >= 5
+                                    ? _currentPosition
+                                    : _initialTargetResumePos,
+                              );
                             },
                             child: tile,
                           );
@@ -5053,6 +5131,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
           onKeyEvent: _handleKeyEvent,
           child: Scaffold(
             backgroundColor: Colors.black,
+            extendBody: true,
+            extendBodyBehindAppBar: true,
+            resizeToAvoidBottomInset: false,
             body: MouseRegion(
               cursor: (_showControls || !_isPlaying) ? SystemMouseCursors.basic : SystemMouseCursors.none,
               onHover: (_) => _revealControls(),
@@ -5066,39 +5147,50 @@ class _PlayerScreenState extends State<PlayerScreen> {
                   _videoPlayerController != null &&
                   _videoPlayerController!.value.isInitialized &&
                   !_isClippingMoment)
-                AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 250),
-                  child: _isZoomedToFill
-                      ? MediaQuery.removePadding(
-                          key: const ValueKey('zoom_fill'),
-                          context: context,
-                          removeLeft: true,
-                          removeRight: true,
-                          removeTop: true,
-                          removeBottom: true,
-                          child: SizedBox.expand(
-                            child: FittedBox(
-                              fit: BoxFit.cover,
-                              clipBehavior: Clip.hardEdge,
-                              child: SizedBox(
-                                width: _videoPlayerController!.value.size.width > 0
-                                    ? _videoPlayerController!.value.size.width
-                                    : 16,
-                                height: _videoPlayerController!.value.size.height > 0
-                                    ? _videoPlayerController!.value.size.height
-                                    : 9,
-                                child: VideoPlayer(_videoPlayerController!),
-                              ),
+                Positioned.fill(
+                  child: AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 220),
+                    child: _isZoomedToFill
+                        ? LayoutBuilder(
+                            key: const ValueKey('zoom_fill'),
+                            builder: (ctx, constraints) {
+                              final mqSize = MediaQuery.sizeOf(ctx);
+                              final screenW = constraints.maxWidth > 0 ? constraints.maxWidth : mqSize.width;
+                              final screenH = constraints.maxHeight > 0 ? constraints.maxHeight : mqSize.height;
+                              final screenAspect = (screenW > 0 && screenH > 0) ? (screenW / screenH) : (16.0 / 9.0);
+                              final rawVideoAspect = _videoPlayerController!.value.aspectRatio;
+                              final videoAspect = (rawVideoAspect.isFinite && rawVideoAspect > 0.1)
+                                  ? rawVideoAspect
+                                  : (16.0 / 9.0);
+                              final coverScale = (screenAspect > videoAspect
+                                      ? (screenAspect / videoAspect)
+                                      : (videoAspect / screenAspect)) *
+                                  1.02;
+                              return ClipRect(
+                                child: Center(
+                                  child: Transform.scale(
+                                    scale: coverScale.clamp(1.0, 3.0),
+                                    alignment: Alignment.center,
+                                    child: AspectRatio(
+                                      aspectRatio: videoAspect,
+                                      child: VideoPlayer(_videoPlayerController!),
+                                    ),
+                                  ),
+                                ),
+                              );
+                            },
+                          )
+                        : Center(
+                            key: const ValueKey('zoom_fit'),
+                            child: AspectRatio(
+                              aspectRatio: (_videoPlayerController!.value.aspectRatio.isFinite &&
+                                      _videoPlayerController!.value.aspectRatio > 0.1)
+                                  ? _videoPlayerController!.value.aspectRatio
+                                  : (16.0 / 9.0),
+                              child: VideoPlayer(_videoPlayerController!),
                             ),
                           ),
-                        )
-                      : Center(
-                          key: const ValueKey('zoom_fit'),
-                          child: AspectRatio(
-                            aspectRatio: _videoPlayerController!.value.aspectRatio,
-                            child: VideoPlayer(_videoPlayerController!),
-                          ),
-                        ),
+                  ),
                 )
               else if (!_isNativeMode && _webViewController != null)
                 WebViewWidget(controller: _webViewController!)

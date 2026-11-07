@@ -151,7 +151,7 @@ class MyVoidflixScreen extends StatelessWidget {
                 child: Container(
                   padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
-                    color: const Color(0xFF16161E),
+                    color: const Color(0xFF141414),
                     borderRadius: BorderRadius.circular(12),
                     border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
                   ),
@@ -160,10 +160,10 @@ class MyVoidflixScreen extends StatelessWidget {
                       Container(
                         padding: const EdgeInsets.all(8),
                         decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.08),
+                          color: AppTheme.primaryRed.withValues(alpha: 0.14),
                           shape: BoxShape.circle,
                         ),
-                        child: const Icon(Icons.file_download_outlined, color: Colors.white, size: 22),
+                        child: const Icon(Icons.file_download_outlined, color: AppTheme.primaryRed, size: 22),
                       ),
                       const SizedBox(width: 14),
                       Expanded(
@@ -228,6 +228,19 @@ class MyVoidflixScreen extends StatelessWidget {
                         // Poster Artwork Card with Centered Play Button
                         GestureDetector(
                           onTap: () {
+                            final dlId = DownloadProvider.generateId(
+                              item.mediaType,
+                              item.id,
+                              season: item.season,
+                              episode: item.episode,
+                            );
+                            final dlItem = downloadProvider.getItem(dlId);
+                            final isDownloaded = dlItem != null && dlItem.status == 'completed';
+                            final resumeSec = item.positionSeconds > 0
+                                ? item.positionSeconds.toDouble()
+                                : (item.progress > 0 && item.durationSeconds > 0
+                                    ? (item.progress * item.durationSeconds).toDouble()
+                                    : null);
                             Navigator.of(context).push(
                               MaterialPageRoute(
                                 builder: (_) => PlayerScreen(
@@ -238,6 +251,9 @@ class MyVoidflixScreen extends StatelessWidget {
                                   episode: item.episode,
                                   posterPath: item.posterPath,
                                   backdropPath: item.backdropPath,
+                                  startPositionSeconds: resumeSec,
+                                  localFilePath: isDownloaded ? dlItem.localFilePath : null,
+                                  localSubtitlePath: isDownloaded ? dlItem.localSubtitlePath : null,
                                 ),
                               ),
                             );

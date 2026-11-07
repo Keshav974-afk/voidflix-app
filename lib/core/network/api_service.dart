@@ -131,6 +131,47 @@ class ApiService {
     return results.map((e) => MediaItem.fromJson(e as Map<String, dynamic>, defaultType: 'tv')).toList();
   }
 
+  Future<List<MediaItem>> getBollywoodMovies({int page = 1}) async {
+    final data = await _get('/discover/movie', {
+      'page': '$page',
+      'with_original_language': 'hi',
+      'sort_by': 'popularity.desc',
+    });
+    final results = data['results'] as List<dynamic>? ?? [];
+    return results.map((e) => MediaItem.fromJson(e as Map<String, dynamic>, defaultType: 'movie')).toList();
+  }
+
+  Future<List<MediaItem>> getSouthIndianMovies({int page = 1}) async {
+    final data = await _get('/discover/movie', {
+      'page': '$page',
+      'with_original_language': 'te|ta|ml|kn',
+      'sort_by': 'popularity.desc',
+    });
+    final results = data['results'] as List<dynamic>? ?? [];
+    return results.map((e) => MediaItem.fromJson(e as Map<String, dynamic>, defaultType: 'movie')).toList();
+  }
+
+  Future<List<MediaItem>> getIndianSeries({int page = 1}) async {
+    final data = await _get('/discover/tv', {
+      'page': '$page',
+      'with_original_language': 'hi',
+      'sort_by': 'popularity.desc',
+    });
+    final results = data['results'] as List<dynamic>? ?? [];
+    return results.map((e) => MediaItem.fromJson(e as Map<String, dynamic>, defaultType: 'tv')).toList();
+  }
+
+  Future<List<MediaItem>> getAnimeMovies({int page = 1}) async {
+    final data = await _get('/discover/movie', {
+      'page': '$page',
+      'with_genres': '16',
+      'with_original_language': 'ja',
+      'sort_by': 'popularity.desc',
+    });
+    final results = data['results'] as List<dynamic>? ?? [];
+    return results.map((e) => MediaItem.fromJson(e as Map<String, dynamic>, defaultType: 'movie')).toList();
+  }
+
   Future<List<MediaItem>> discoverByGenre(String type, int genreId, {int page = 1}) async {
     final data = await _get('/discover/$type', {
       'page': '$page',
