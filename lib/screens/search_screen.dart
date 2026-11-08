@@ -343,8 +343,10 @@ class _SearchScreenState extends State<SearchScreen> {
                     itemBuilder: (ctx, idx) {
                       final label = _quickFilters[idx];
                       final isSelected = _selectedQuickFilter == label;
-                      return GestureDetector(
-                        onTap: () {
+                      return TvFocusable(
+                        borderRadius: BorderRadius.circular(18),
+                        glowColor: Colors.white,
+                        onPressed: () {
                           if (_selectedQuickFilter != label) {
                             setState(() => _selectedQuickFilter = label);
                             _loadRecommendations();

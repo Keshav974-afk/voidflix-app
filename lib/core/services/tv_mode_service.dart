@@ -17,11 +17,24 @@ class TvModeService extends ChangeNotifier {
   bool _isHardwareTv = false;
   bool get isHardwareTv => _isHardwareTv;
 
+  bool _hasDpadDetected = false;
+  bool get hasDpadDetected => _hasDpadDetected;
+
   bool _initialized = false;
   bool get initialized => _initialized;
 
+  void markDpadUsed() {
+    if (!_hasDpadDetected) {
+      _hasDpadDetected = true;
+      notifyListeners();
+    }
+  }
+
   Future<void> initialize() async {
     if (_initialized) return;
+
+    // Listen globally for any remote D-pad, arrow key, or game controller input
+    HardwareKeyboard.instance.addHandler(_handleGlobalKey);
 
     try {
       if (Platform.isAndroid) {
@@ -89,5 +102,25 @@ class TvModeService extends ChangeNotifier {
 
   Future<void> toggleTvMode() async {
     await setTvMode(!_isTvMode);
+  }
+
+  bool _handleGlobalKey(KeyEvent event) {
+    if (event is KeyDownEvent) {
+      final key = event.logicalKey;
+      if (key == LogicalKeyboardKey.arrowUp ||
+          key == LogicalKeyboardKey.arrowDown ||
+          key == LogicalKeyboardKey.arrowLeft ||
+          key == LogicalKeyboardKey.arrowRight ||
+          key == LogicalKeyboardKey.select ||
+          key == LogicalKeyboardKey.enter ||
+          key == LogicalKeyboardKey.gameButtonA ||
+          key == LogicalKeyboardKey.gameButtonSelect ||
+          key == LogicalKeyboardKey.numpadEnter ||
+          key.keyId == 0x00100000017 || // KEYCODE_DPAD_CENTER
+          key.keyId == 23) {
+        markDpadUsed();
+      }
+    }
+    return false; // Let Flutter continue normal event processing
   }
 }

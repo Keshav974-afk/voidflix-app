@@ -20,6 +20,7 @@ import 'player_screen.dart';
 import 'settings_screen.dart';
 import 'watchlist_screen.dart';
 import '../widgets/tv_back_button.dart';
+import '../widgets/tv_focusable.dart';
 
 class MyVoidflixScreen extends StatelessWidget {
   const MyVoidflixScreen({super.key});
@@ -49,148 +50,160 @@ class MyVoidflixScreen extends StatelessWidget {
           elevation: 0,
           automaticallyImplyLeading: false,
           leading: canPop ? const TvBackButton() : null,
-        title: GestureDetector(
-          onTap: () => ProfileSwitcherSheet.show(context),
-          behavior: HitTestBehavior.opaque,
-          child: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              ProfileAvatarTile.fromProfile(
-                profile: activeProfile,
-                size: 26,
-              ),
-              const SizedBox(width: 8),
-              Text(
-                activeProfile.name,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontWeight: FontWeight.bold,
-                  fontSize: 18,
-                ),
-              ),
-              const SizedBox(width: 4),
-              const Icon(Icons.arrow_drop_down, color: Colors.white, size: 22),
-            ],
-          ),
-        ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.file_download_outlined, color: Colors.white, size: 24),
-            tooltip: 'Downloads',
-            onPressed: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const DownloadsScreen()),
-              );
-            },
-          ),
-          Stack(
-            alignment: Alignment.center,
-            children: [
-              IconButton(
-                icon: const Icon(Icons.notifications_outlined, color: Colors.white, size: 24),
-                tooltip: 'Notifications',
-                onPressed: () {
-                  showModalBottomSheet(
-                    context: context,
-                    isScrollControlled: true,
-                    backgroundColor: Colors.transparent,
-                    builder: (_) => const FractionallySizedBox(
-                      heightFactor: 0.75,
-                      child: NotificationsSheet(),
-                    ),
-                  );
-                },
-              ),
-              if (notifProvider.unreadCount > 0)
-                Positioned(
-                  top: 8,
-                  right: 8,
-                  child: Container(
-                    padding: const EdgeInsets.all(4),
-                    decoration: const BoxDecoration(
-                      color: AppTheme.primaryRed,
-                      shape: BoxShape.circle,
-                    ),
-                    constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
-                    child: Text(
-                      '${notifProvider.unreadCount}',
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold),
+          title: TvFocusable(
+            borderRadius: BorderRadius.circular(20),
+            glowColor: AppTheme.primaryRed,
+            onPressed: () => ProfileSwitcherSheet.show(context),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  ProfileAvatarTile.fromProfile(
+                    profile: activeProfile,
+                    size: 26,
+                  ),
+                  const SizedBox(width: 8),
+                  Text(
+                    activeProfile.name,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.bold,
+                      fontSize: 18,
                     ),
                   ),
+                  const SizedBox(width: 4),
+                  const Icon(Icons.arrow_drop_down, color: Colors.white, size: 22),
+                ],
+              ),
+            ),
+          ),
+          actions: [
+            TvFocusable(
+              borderRadius: BorderRadius.circular(20),
+              onPressed: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const DownloadsScreen()),
+                );
+              },
+              child: const Padding(
+                padding: EdgeInsets.all(8),
+                child: Icon(Icons.file_download_outlined, color: Colors.white, size: 22),
+              ),
+            ),
+            TvFocusable(
+              borderRadius: BorderRadius.circular(20),
+              onPressed: () {
+                showModalBottomSheet(
+                  context: context,
+                  isScrollControlled: true,
+                  backgroundColor: Colors.transparent,
+                  builder: (_) => const FractionallySizedBox(
+                    heightFactor: 0.75,
+                    child: NotificationsSheet(),
+                  ),
+                );
+              },
+              child: Padding(
+                padding: const EdgeInsets.all(8),
+                child: Stack(
+                  alignment: Alignment.center,
+                  clipBehavior: Clip.none,
+                  children: [
+                    const Icon(Icons.notifications_outlined, color: Colors.white, size: 22),
+                    if (notifProvider.unreadCount > 0)
+                      Positioned(
+                        top: -4,
+                        right: -4,
+                        child: Container(
+                          padding: const EdgeInsets.all(4),
+                          decoration: const BoxDecoration(
+                            color: AppTheme.primaryRed,
+                            shape: BoxShape.circle,
+                          ),
+                          constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
+                          child: Text(
+                            '${notifProvider.unreadCount}',
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(color: Colors.white, fontSize: 9, fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
-            ],
-          ),
-          IconButton(
-            icon: const Icon(Icons.settings_outlined, color: Colors.white, size: 24),
-            tooltip: 'Settings',
-            onPressed: () {
-              Navigator.of(context).push(
-                MaterialPageRoute(builder: (_) => const SettingsScreen()),
-              );
-            },
-          ),
-          const SizedBox(width: 8),
-        ],
-      ),
+              ),
+            ),
+            TvFocusable(
+              borderRadius: BorderRadius.circular(20),
+              onPressed: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const SettingsScreen()),
+                );
+              },
+              child: const Padding(
+                padding: EdgeInsets.all(8),
+                child: Icon(Icons.settings_outlined, color: Colors.white, size: 22),
+              ),
+            ),
+            const SizedBox(width: 8),
+          ],
+        ),
       body: ListView(
         padding: const EdgeInsets.only(top: 8, bottom: 90),
         children: [
           // 1. Downloads Box (Screenshot 5)
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Material(
-              color: Colors.transparent,
-              child: InkWell(
-                onTap: () {
-                  Navigator.of(context).push(
-                    MaterialPageRoute(builder: (_) => const DownloadsScreen()),
-                  );
-                },
-                borderRadius: BorderRadius.circular(12),
-                child: Container(
-                  padding: const EdgeInsets.all(16),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFF141414),
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
-                  ),
-                  child: Row(
-                    children: [
-                      Container(
-                        padding: const EdgeInsets.all(8),
-                        decoration: BoxDecoration(
-                          color: AppTheme.primaryRed.withValues(alpha: 0.14),
-                          shape: BoxShape.circle,
-                        ),
-                        child: const Icon(Icons.file_download_outlined, color: AppTheme.primaryRed, size: 22),
+            child: TvFocusable(
+              borderRadius: BorderRadius.circular(12),
+              glowColor: AppTheme.primaryRed,
+              onPressed: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(builder: (_) => const DownloadsScreen()),
+                );
+              },
+              child: Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF141414),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.white.withValues(alpha: 0.08)),
+                ),
+                child: Row(
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: AppTheme.primaryRed.withValues(alpha: 0.14),
+                        shape: BoxShape.circle,
                       ),
-                      const SizedBox(width: 14),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text(
-                              'Downloads',
-                              style: TextStyle(
-                                color: Colors.white,
-                                fontSize: 16,
-                                fontWeight: FontWeight.bold,
-                              ),
+                      child: const Icon(Icons.file_download_outlined, color: AppTheme.primaryRed, size: 22),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          const Text(
+                            'Downloads',
+                            style: TextStyle(
+                              color: Colors.white,
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
                             ),
-                            const SizedBox(height: 4),
-                            Text(
-                              downloadCount > 0
-                                  ? '$downloadCount ${downloadCount == 1 ? 'item' : 'items'} available offline'
-                                  : 'Movies and shows that you download appear here.',
-                              style: const TextStyle(color: Colors.white54, fontSize: 12),
-                            ),
-                          ],
-                        ),
+                          ),
+                          const SizedBox(height: 4),
+                          Text(
+                            downloadCount > 0
+                                ? '$downloadCount ${downloadCount == 1 ? 'item' : 'items'} available offline'
+                                : 'Movies and shows that you download appear here.',
+                            style: const TextStyle(color: Colors.white54, fontSize: 12),
+                          ),
+                        ],
                       ),
-                      const Icon(Icons.chevron_right, color: Colors.white54),
-                    ],
-                  ),
+                    ),
+                    const Icon(Icons.chevron_right, color: Colors.white54),
+                  ],
                 ),
               ),
             ),
@@ -226,8 +239,11 @@ class MyVoidflixScreen extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         // Poster Artwork Card with Centered Play Button
-                        GestureDetector(
-                          onTap: () {
+                        TvFocusable(
+                          borderRadius: BorderRadius.circular(8),
+                          scaleFactor: 1.05,
+                          glowColor: AppTheme.primaryRed,
+                          onPressed: () {
                             final dlId = DownloadProvider.generateId(
                               item.mediaType,
                               item.id,
@@ -305,10 +321,8 @@ class MyVoidflixScreen extends StatelessWidget {
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
-                            IconButton(
-                              icon: const Icon(Icons.info_outline, color: Colors.white70, size: 18),
-                              visualDensity: VisualDensity.compact,
-                              padding: EdgeInsets.zero,
+                            TvFocusable(
+                              borderRadius: BorderRadius.circular(16),
                               onPressed: () {
                                 DetailModal.show(
                                   context,
@@ -324,14 +338,20 @@ class MyVoidflixScreen extends StatelessWidget {
                                   ),
                                 );
                               },
+                              child: const Padding(
+                                padding: EdgeInsets.all(4),
+                                child: Icon(Icons.info_outline, color: Colors.white70, size: 18),
+                              ),
                             ),
-                            IconButton(
-                              icon: const Icon(Icons.more_vert, color: Colors.white70, size: 18),
-                              visualDensity: VisualDensity.compact,
-                              padding: EdgeInsets.zero,
+                            TvFocusable(
+                              borderRadius: BorderRadius.circular(16),
                               onPressed: () {
                                 historyProvider.removeProgress(item.id);
                               },
+                              child: const Padding(
+                                padding: EdgeInsets.all(4),
+                                child: Icon(Icons.more_vert, color: Colors.white70, size: 18),
+                              ),
                             ),
                           ],
                         ),
@@ -371,8 +391,11 @@ class MyVoidflixScreen extends StatelessWidget {
                     width: 120,
                     child: Column(
                       children: [
-                        GestureDetector(
-                          onTap: () => DetailModal.show(context, item),
+                        TvFocusable(
+                          borderRadius: BorderRadius.circular(8),
+                          scaleFactor: 1.05,
+                          glowColor: AppTheme.primaryRed,
+                          onPressed: () => DetailModal.show(context, item),
                           child: ClipRRect(
                             borderRadius: BorderRadius.circular(8),
                             child: AspectRatio(
@@ -387,8 +410,9 @@ class MyVoidflixScreen extends StatelessWidget {
                         ),
                         const SizedBox(height: 6),
                         // Share pill button (Screenshot 5)
-                        GestureDetector(
-                          onTap: () {
+                        TvFocusable(
+                          borderRadius: BorderRadius.circular(6),
+                          onPressed: () {
                             SharePlus.instance.share(
                               ShareParams(
                                 text: 'Check out "${item.title}" on Voidflix!\nhttps://voidflix.org/${item.mediaType}/${item.id}',
@@ -438,20 +462,24 @@ class MyVoidflixScreen extends StatelessWidget {
                     fontWeight: FontWeight.bold,
                   ),
                 ),
-                GestureDetector(
-                  onTap: () {
+                TvFocusable(
+                  borderRadius: BorderRadius.circular(4),
+                  onPressed: () {
                     Navigator.of(context).push(
                       MaterialPageRoute(builder: (_) => const WatchlistScreen()),
                     );
                   },
-                  child: const Row(
-                    children: [
-                      Text(
-                        'See All',
-                        style: TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.bold),
-                      ),
-                      Icon(Icons.chevron_right, color: Colors.white70, size: 16),
-                    ],
+                  child: const Padding(
+                    padding: EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                    child: Row(
+                      children: [
+                        Text(
+                          'See All',
+                          style: TextStyle(color: Colors.white70, fontSize: 13, fontWeight: FontWeight.bold),
+                        ),
+                        Icon(Icons.chevron_right, color: Colors.white70, size: 16),
+                      ],
+                    ),
                   ),
                 ),
               ],
@@ -485,8 +513,11 @@ class MyVoidflixScreen extends StatelessWidget {
                 separatorBuilder: (c, i) => const SizedBox(width: 12),
                 itemBuilder: (ctx, idx) {
                   final item = watchlistItems[idx];
-                  return GestureDetector(
-                    onTap: () => DetailModal.show(context, item),
+                  return TvFocusable(
+                    borderRadius: BorderRadius.circular(8),
+                    scaleFactor: 1.05,
+                    glowColor: AppTheme.primaryRed,
+                    onPressed: () => DetailModal.show(context, item),
                     child: ClipRRect(
                       borderRadius: BorderRadius.circular(8),
                       child: AspectRatio(

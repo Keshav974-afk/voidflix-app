@@ -37,13 +37,30 @@ class _TvFocusableState extends State<TvFocusable> {
   bool _isFocused = false;
 
   bool get _isTvActive =>
-      TvModeService().isTvMode || TvModeService().isHardwareTv;
+      TvModeService().isTvMode ||
+      TvModeService().isHardwareTv ||
+      TvModeService().hasDpadDetected;
+
+  bool get _shouldShowVisualFocus =>
+      _isFocused &&
+      (_isTvActive ||
+          FocusManager.instance.highlightMode == FocusHighlightMode.traditional);
+
+  bool get _effectiveAutofocus =>
+      widget.autofocus &&
+      (_isTvActive ||
+          FocusManager.instance.highlightMode == FocusHighlightMode.traditional);
 
   @override
   void initState() {
     super.initState();
     _node = widget.focusNode ?? FocusNode();
     _node.addListener(_handleFocusChange);
+    TvModeService().addListener(_onTvServiceChange);
+  }
+
+  void _onTvServiceChange() {
+    if (mounted) setState(() {});
   }
 
   @override
@@ -58,6 +75,7 @@ class _TvFocusableState extends State<TvFocusable> {
 
   @override
   void dispose() {
+    TvModeService().removeListener(_onTvServiceChange);
     if (widget.focusNode == null) {
       _node.dispose();
     } else {
@@ -67,17 +85,15 @@ class _TvFocusableState extends State<TvFocusable> {
   }
 
   void _handleFocusChange() {
-    if (!_isTvActive) {
-      if (_isFocused) {
-        setState(() => _isFocused = false);
-      }
-      return;
-    }
     if (_isFocused != _node.hasFocus) {
       setState(() => _isFocused = _node.hasFocus);
       widget.onFocusChange?.call(_node.hasFocus);
       if (_node.hasFocus) {
-        HapticFeedback.selectionClick();
+        if (_isTvActive ||
+            FocusManager.instance.highlightMode ==
+                FocusHighlightMode.traditional) {
+          HapticFeedback.selectionClick();
+        }
         if (mounted) {
           Scrollable.ensureVisible(
             context,
@@ -91,9 +107,14 @@ class _TvFocusableState extends State<TvFocusable> {
   }
 
   KeyEventResult _handleKeyEvent(FocusNode node, KeyEvent event) {
-    if (!_isTvActive) return KeyEventResult.ignored;
     if (event is KeyDownEvent) {
       final key = event.logicalKey;
+      if (key == LogicalKeyboardKey.arrowUp ||
+          key == LogicalKeyboardKey.arrowDown ||
+          key == LogicalKeyboardKey.arrowLeft ||
+          key == LogicalKeyboardKey.arrowRight) {
+        TvModeService().markDpadUsed();
+      }
       if (key == LogicalKeyboardKey.select ||
           key == LogicalKeyboardKey.enter ||
           key == LogicalKeyboardKey.space ||
@@ -102,6 +123,7 @@ class _TvFocusableState extends State<TvFocusable> {
           key == LogicalKeyboardKey.numpadEnter ||
           key.keyId == 0x00100000017 || // KEYCODE_DPAD_CENTER
           key.keyId == 23) {
+        TvModeService().markDpadUsed();
         widget.onPressed?.call();
         return KeyEventResult.handled;
       }
@@ -111,37 +133,20 @@ class _TvFocusableState extends State<TvFocusable> {
 
   @override
   Widget build(BuildContext context) {
-    // On mobile/touch devices when TV mode is not enabled, do NOT attach D-pad
-    // autofocus, white borders, or focus glow outlines.
-    if (!_isTvActive) {
-      if (widget.onPressed == null) {
-        return Padding(
-          padding: widget.padding,
-          child: widget.child,
-        );
-      }
-      return GestureDetector(
+    final radius = widget.borderRadius ?? BorderRadius.circular(8);
+    final showHighlight = _shouldShowVisualFocus;
+
+    return Focus(
+      focusNode: _node,
+      autofocus: _effectiveAutofocus,
+      onKeyEvent: _handleKeyEvent,
+      child: GestureDetector(
         behavior: HitTestBehavior.opaque,
         onTap: widget.onPressed,
         child: Padding(
           padding: widget.padding,
-          child: widget.child,
-        ),
-      );
-    }
-
-    final radius = widget.borderRadius ?? BorderRadius.circular(8);
-
-    return Focus(
-      focusNode: _node,
-      autofocus: widget.autofocus,
-      onKeyEvent: _handleKeyEvent,
-      child: GestureDetector(
-        onTap: widget.onPressed,
-        child: Padding(
-          padding: widget.padding,
           child: AnimatedScale(
-            scale: _isFocused ? widget.scaleFactor : 1.0,
+            scale: showHighlight ? widget.scaleFactor : 1.0,
             duration: const Duration(milliseconds: 200),
             curve: Curves.easeOutCubic,
             child: AnimatedContainer(
@@ -149,7 +154,7 @@ class _TvFocusableState extends State<TvFocusable> {
               curve: Curves.easeOutCubic,
               decoration: BoxDecoration(
                 borderRadius: radius,
-                boxShadow: _isFocused && widget.showGlow
+                boxShadow: showHighlight && widget.showGlow
                     ? [
                         BoxShadow(
                           color: widget.glowColor.withValues(alpha: 0.45),
@@ -163,7 +168,7 @@ class _TvFocusableState extends State<TvFocusable> {
                         ),
                       ]
                     : null,
-                border: _isFocused
+                border: showHighlight
                     ? Border.all(
                         color: widget.glowColor,
                         width: 2.0,

@@ -129,6 +129,24 @@ class TvScreenWrapper extends StatefulWidget {
 class _TvScreenWrapperState extends State<TvScreenWrapper> {
   DateTime? _lastBackTime;
 
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      final isTv = TvModeService().isTvMode ||
+          TvModeService().isHardwareTv ||
+          TvModeService().hasDpadDetected ||
+          FocusManager.instance.highlightMode == FocusHighlightMode.traditional;
+      if (isTv) {
+        final current = FocusManager.instance.primaryFocus;
+        if (current == null || current == FocusManager.instance.rootScope) {
+          FocusScope.of(context).nextFocus();
+        }
+      }
+    });
+  }
+
   void _triggerBack() {
     final now = DateTime.now();
     if (_lastBackTime != null && now.difference(_lastBackTime!) < const Duration(milliseconds: 350)) {
@@ -157,6 +175,21 @@ class _TvScreenWrapperState extends State<TvScreenWrapper> {
         onKeyEvent: (node, event) {
           if (event is KeyDownEvent) {
             final key = event.logicalKey;
+            if (key == LogicalKeyboardKey.arrowDown ||
+                key == LogicalKeyboardKey.arrowUp ||
+                key == LogicalKeyboardKey.arrowLeft ||
+                key == LogicalKeyboardKey.arrowRight ||
+                key == LogicalKeyboardKey.select ||
+                key == LogicalKeyboardKey.enter ||
+                key.keyId == 0x00100000017 ||
+                key.keyId == 23) {
+              TvModeService().markDpadUsed();
+              final current = FocusManager.instance.primaryFocus;
+              if (current == null || current == FocusManager.instance.rootScope) {
+                FocusScope.of(context).nextFocus();
+                return KeyEventResult.handled;
+              }
+            }
             // Desktop keyboard shortcut (escape). Hardware back is handled natively by PopScope.
             // Do NOT intercept backspace (breaks text fields) or duplicate hardware back.
             if (key == LogicalKeyboardKey.escape) {

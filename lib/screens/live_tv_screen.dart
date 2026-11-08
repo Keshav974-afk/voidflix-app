@@ -40,6 +40,7 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
 
   String _selectedCategory = "Cricket";
   int _focusedChannelIndex = 0;
+  bool _tvShowSports = false;
   final ScrollController _channelScrollController = ScrollController();
 
   List<SportsMatch> _matches = [];
@@ -596,34 +597,60 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
                   style: TextStyle(color: AppTheme.textMuted, fontSize: 11, fontWeight: FontWeight.bold, letterSpacing: 1.2),
                 ),
                 const SizedBox(height: 8),
-                ...match.streams.map((s) {
-                  return ListTile(
-                    contentPadding: EdgeInsets.zero,
-                    leading: Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: s.isDirect ? AppTheme.primaryRed.withValues(alpha: 0.2) : Colors.white10,
-                        borderRadius: BorderRadius.circular(8),
+                ...match.streams.asMap().entries.map((entry) {
+                  final idx = entry.key;
+                  final s = entry.value;
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 3),
+                    child: TvFocusable(
+                      autofocus: idx == 0,
+                      borderRadius: BorderRadius.circular(8),
+                      glowColor: AppTheme.primaryRed,
+                      onPressed: () {
+                        Navigator.of(ctx).pop();
+                        _watchMatchStream(match, s);
+                      },
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+                        decoration: BoxDecoration(
+                          color: const Color(0xFF1E1E28),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: s.isDirect ? AppTheme.primaryRed.withValues(alpha: 0.2) : Colors.white10,
+                                borderRadius: BorderRadius.circular(8),
+                              ),
+                              child: Icon(
+                                s.isDirect ? Icons.hd_rounded : Icons.link_rounded,
+                                color: s.isDirect ? AppTheme.primaryRed : Colors.white70,
+                                size: 20,
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    s.label,
+                                    style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600),
+                                  ),
+                                  Text(
+                                    s.isDirect ? 'Direct High-Bitrate Native Feed' : 'Mirror Feed',
+                                    style: const TextStyle(color: Colors.white54, fontSize: 11),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const Icon(Icons.play_arrow_rounded, color: Colors.white70),
+                          ],
+                        ),
                       ),
-                      child: Icon(
-                        s.isDirect ? Icons.hd_rounded : Icons.link_rounded,
-                        color: s.isDirect ? AppTheme.primaryRed : Colors.white70,
-                        size: 20,
-                      ),
                     ),
-                    title: Text(
-                      s.label,
-                      style: const TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600),
-                    ),
-                    subtitle: Text(
-                      s.isDirect ? 'Direct High-Bitrate Native Feed' : 'Mirror Feed',
-                      style: const TextStyle(color: Colors.white54, fontSize: 11),
-                    ),
-                    trailing: const Icon(Icons.play_arrow_rounded, color: Colors.white70),
-                    onTap: () {
-                      Navigator.of(ctx).pop();
-                      _watchMatchStream(match, s);
-                    },
                   );
                 }),
               ],
@@ -701,23 +728,62 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
                   ),
                 ),
                 const Spacer(),
-                const Text(
-                  'D-Pad: Navigate • OK: Watch Fullscreen',
-                  style: TextStyle(
-                    color: Colors.white54,
-                    fontSize: 12,
-                    fontWeight: FontWeight.w500,
+                TvFocusable(
+                  borderRadius: BorderRadius.circular(20),
+                  onPressed: () {
+                    setState(() => _tvShowSports = false);
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: !_tvShowSports ? AppTheme.primaryRed : Colors.white10,
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.tv_rounded, size: 14, color: Colors.white),
+                        SizedBox(width: 6),
+                        Text('CHANNELS', style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                TvFocusable(
+                  borderRadius: BorderRadius.circular(20),
+                  onPressed: () {
+                    setState(() => _tvShowSports = true);
+                    if (_matches.isEmpty) _loadMatches(_selectedCategory);
+                  },
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      color: _tvShowSports ? AppTheme.primaryRed : Colors.white10,
+                      borderRadius: BorderRadius.circular(20),
+                    ),
+                    child: const Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(Icons.sports_soccer_rounded, size: 14, color: Colors.white),
+                        SizedBox(width: 6),
+                        Text('SPORTS', style: TextStyle(color: Colors.white, fontSize: 11, fontWeight: FontWeight.bold)),
+                      ],
+                    ),
                   ),
                 ),
               ],
             ),
           ),
 
-          // Main 3-Column IPTV Layout
-          Expanded(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
-              child: Row(
+          if (_tvShowSports)
+            Expanded(child: _buildStandardLayout(canPop))
+          else
+            // Main 3-Column IPTV Layout
+            Expanded(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+                child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   // Left Column: Category Rail
@@ -1237,8 +1303,10 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
                 final cat = sportsCategories[index];
                 final isSel = cat == _selectedCategory;
 
-                return GestureDetector(
-                  onTap: () {
+                return TvFocusable(
+                  borderRadius: BorderRadius.circular(20),
+                  glowColor: Colors.white,
+                  onPressed: () {
                     setState(() => _selectedCategory = cat);
                     if (cat != "24/7 Channels") {
                       _loadMatches(cat);
@@ -1320,8 +1388,11 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
                   final count = isNarrow ? 1 : (constraints.maxWidth / 380).floor().clamp(2, 4);
 
                   Widget buildMatchCard(SportsMatch match) {
-                    return GestureDetector(
-                      onTap: () => _showStreamPickerModal(match),
+                    return TvFocusable(
+                      borderRadius: BorderRadius.circular(12),
+                      scaleFactor: 1.04,
+                      glowColor: match.isLive ? const Color(0xFFE50914) : Colors.white,
+                      onPressed: () => _showStreamPickerModal(match),
                       child: Container(
                         decoration: BoxDecoration(
                           gradient: LinearGradient(
@@ -1626,8 +1697,11 @@ class _LiveTvScreenState extends State<LiveTvScreen> {
                   itemBuilder: (context, index) {
                     final ch = _filteredChannels[index];
 
-                    return GestureDetector(
-                      onTap: () => _watchChannel(ch),
+                    return TvFocusable(
+                      borderRadius: BorderRadius.circular(10),
+                      scaleFactor: 1.05,
+                      glowColor: AppTheme.primaryRed,
+                      onPressed: () => _watchChannel(ch),
                       child: Container(
                         decoration: BoxDecoration(
                           color: const Color(0xFF1E1E1E),

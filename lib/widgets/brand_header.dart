@@ -10,6 +10,7 @@ import '../screens/downloads_screen.dart';
 import 'notifications_sheet.dart';
 import 'profile_avatar.dart';
 import 'profile_switcher_sheet.dart';
+import 'tv_focusable.dart';
 
 class BrandHeader extends StatelessWidget implements PreferredSizeWidget {
   final int activeCategoryIndex;
@@ -231,47 +232,52 @@ class BrandHeader extends StatelessWidget implements PreferredSizeWidget {
               child: Row(
                 children: [
                   // Red VOID Logo + "Home" / Active Category Title
-                  GestureDetector(
-                    onTap: () => onCategorySelected(0),
-                    child: Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        RichText(
-                          text: TextSpan(
-                            children: [
-                              TextSpan(
-                                text: 'VOID',
-                                style: GoogleFonts.bebasNeue(
-                                  fontSize: 28,
-                                  fontWeight: FontWeight.w900,
-                                  color: AppTheme.primaryRed,
-                                  letterSpacing: 1.8,
+                  TvFocusable(
+                    borderRadius: BorderRadius.circular(8),
+                    glowColor: AppTheme.primaryRed,
+                    onPressed: () => onCategorySelected(0),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          RichText(
+                            text: TextSpan(
+                              children: [
+                                TextSpan(
+                                  text: 'VOID',
+                                  style: GoogleFonts.bebasNeue(
+                                    fontSize: 28,
+                                    fontWeight: FontWeight.w900,
+                                    color: AppTheme.primaryRed,
+                                    letterSpacing: 1.8,
+                                  ),
                                 ),
-                              ),
-                              TextSpan(
-                                text: 'FLIX',
-                                style: GoogleFonts.bebasNeue(
-                                  fontSize: 28,
-                                  fontWeight: FontWeight.w900,
-                                  color: Colors.white,
-                                  letterSpacing: 1.8,
+                                TextSpan(
+                                  text: 'FLIX',
+                                  style: GoogleFonts.bebasNeue(
+                                    fontSize: 28,
+                                    fontWeight: FontWeight.w900,
+                                    color: Colors.white,
+                                    letterSpacing: 1.8,
+                                  ),
                                 ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        if (activeCategoryIndex > 0) ...[
-                          const SizedBox(width: 8),
-                          Text(
-                            categoryTitle,
-                            style: const TextStyle(
-                              color: Colors.white,
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
+                              ],
                             ),
                           ),
+                          if (activeCategoryIndex > 0) ...[
+                            const SizedBox(width: 8),
+                            Text(
+                              categoryTitle,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 18,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
                         ],
-                      ],
+                      ),
                     ),
                   ),
 
@@ -281,82 +287,92 @@ class BrandHeader extends StatelessWidget implements PreferredSizeWidget {
                   Consumer<VoidCastService>(
                     builder: (castCtx, voidCast, _) {
                       final isConnected = voidCast.isConnected;
-                      return IconButton(
-                        icon: Stack(
-                          clipBehavior: Clip.none,
-                          children: [
-                            Icon(
-                              isConnected ? Icons.cast_connected_rounded : Icons.cast_rounded,
-                              color: isConnected ? const Color(0xFF00B4D8) : Colors.white,
-                              size: 22,
-                            ),
-                            if (isConnected)
-                              Positioned(
-                                top: -1,
-                                right: -1,
-                                child: Container(
-                                  width: 7,
-                                  height: 7,
-                                  decoration: const BoxDecoration(
-                                    color: Colors.greenAccent,
-                                    shape: BoxShape.circle,
+                      return TvFocusable(
+                        borderRadius: BorderRadius.circular(20),
+                        onPressed: () => VoidCastRemoteSheet.show(context),
+                        child: Padding(
+                          padding: const EdgeInsets.all(8),
+                          child: Stack(
+                            clipBehavior: Clip.none,
+                            children: [
+                              Icon(
+                                isConnected ? Icons.cast_connected_rounded : Icons.cast_rounded,
+                                color: isConnected ? const Color(0xFF00B4D8) : Colors.white,
+                                size: 22,
+                              ),
+                              if (isConnected)
+                                Positioned(
+                                  top: -1,
+                                  right: -1,
+                                  child: Container(
+                                    width: 7,
+                                    height: 7,
+                                    decoration: const BoxDecoration(
+                                      color: Colors.greenAccent,
+                                      shape: BoxShape.circle,
+                                    ),
                                   ),
                                 ),
-                              ),
-                          ],
+                            ],
+                          ),
                         ),
-                        tooltip: isConnected
-                            ? 'Connected to ${voidCast.connectedTvName} (Tap for Remote)'
-                            : 'Connect to TV (VoidCast)',
-                        onPressed: () => VoidCastRemoteSheet.show(context),
                       );
                     },
                   ),
 
                   // Download icon (Screenshot 2)
-                  IconButton(
-                    icon: const Icon(Icons.file_download_outlined, color: Colors.white, size: 23),
-                    tooltip: 'Downloads',
+                  TvFocusable(
+                    borderRadius: BorderRadius.circular(20),
                     onPressed: () => _openDownloads(context),
+                    child: const Padding(
+                      padding: EdgeInsets.all(8),
+                      child: Icon(Icons.file_download_outlined, color: Colors.white, size: 23),
+                    ),
                   ),
 
                   // Notifications Bell with Badge (Screenshot 2)
-                  Stack(
-                    alignment: Alignment.center,
-                    children: [
-                      IconButton(
-                        icon: const Icon(Icons.notifications_outlined, color: Colors.white, size: 23),
-                        tooltip: 'Notifications',
-                        onPressed: () => _openNotifications(context),
-                      ),
-                      if (unreadCount > 0)
-                        Positioned(
-                          top: 8,
-                          right: 8,
-                          child: Container(
-                            padding: const EdgeInsets.all(4),
-                            decoration: const BoxDecoration(
-                              color: AppTheme.primaryRed,
-                              shape: BoxShape.circle,
-                            ),
-                            constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
-                            child: Text(
-                              '$unreadCount',
-                              textAlign: TextAlign.center,
-                              style: const TextStyle(
-                                color: Colors.white,
-                                fontSize: 9,
-                                fontWeight: FontWeight.bold,
+                  TvFocusable(
+                    borderRadius: BorderRadius.circular(20),
+                    onPressed: () => _openNotifications(context),
+                    child: Padding(
+                      padding: const EdgeInsets.all(8),
+                      child: Stack(
+                        alignment: Alignment.center,
+                        clipBehavior: Clip.none,
+                        children: [
+                          const Icon(Icons.notifications_outlined, color: Colors.white, size: 23),
+                          if (unreadCount > 0)
+                            Positioned(
+                              top: -4,
+                              right: -4,
+                              child: Container(
+                                padding: const EdgeInsets.all(4),
+                                decoration: const BoxDecoration(
+                                  color: AppTheme.primaryRed,
+                                  shape: BoxShape.circle,
+                                ),
+                                constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
+                                child: Text(
+                                  '$unreadCount',
+                                  textAlign: TextAlign.center,
+                                  style: const TextStyle(
+                                    color: Colors.white,
+                                    fontSize: 9,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
                               ),
                             ),
-                          ),
-                        ),
-                    ],
+                        ],
+                      ),
+                    ),
                   ),
 
                   // Profile Avatar (Screenshot 2 / Tap opens ProfileSwitcherSheet Screenshot 3)
-                  GestureDetector(
-                    onTap: () => ProfileSwitcherSheet.show(context),
+                  TvFocusable(
+                    borderRadius: BorderRadius.circular(8),
+                    glowColor: AppTheme.primaryRed,
+                    onPressed: () => ProfileSwitcherSheet.show(context),
                     child: Container(
                       margin: const EdgeInsets.only(left: 4),
                       child: ClipRRect(
@@ -389,8 +405,10 @@ class BrandHeader extends StatelessWidget implements PreferredSizeWidget {
 
                   return Padding(
                     padding: const EdgeInsets.only(right: 8),
-                    child: GestureDetector(
-                      onTap: () {
+                    child: TvFocusable(
+                      borderRadius: BorderRadius.circular(20),
+                      glowColor: Colors.white,
+                      onPressed: () {
                         if (isCategories) {
                           _showCategoriesSheet(context);
                         } else if (isGames) {

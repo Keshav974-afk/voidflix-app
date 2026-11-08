@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import '../core/constants/theme_constants.dart';
 import '../providers/profile_provider.dart';
 import 'profile_avatar.dart';
+import 'tv_focusable.dart';
 
 class FloatingBottomBar extends StatelessWidget {
   final int currentIndex;
@@ -87,9 +89,11 @@ class FloatingBottomBar extends StatelessWidget {
     required bool isSelected,
     required VoidCallback onTap,
   }) {
-    return GestureDetector(
-      onTap: onTap,
-      behavior: HitTestBehavior.opaque,
+    return TvFocusable(
+      borderRadius: BorderRadius.circular(20),
+      scaleFactor: 1.08,
+      glowColor: AppTheme.primaryRed,
+      onPressed: onTap,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
@@ -126,9 +130,11 @@ class FloatingBottomBar extends StatelessWidget {
     required bool isSelected,
     required VoidCallback onTap,
   }) {
-    return GestureDetector(
-      onTap: onTap,
-      behavior: HitTestBehavior.opaque,
+    return TvFocusable(
+      borderRadius: BorderRadius.circular(20),
+      scaleFactor: 1.08,
+      glowColor: AppTheme.primaryRed,
+      onPressed: onTap,
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 200),
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 3),

@@ -11,6 +11,7 @@ import '../providers/history_provider.dart';
 import '../providers/watchlist_provider.dart';
 import '../screens/player_screen.dart';
 import 'detail_modal.dart';
+import 'tv_focusable.dart';
 
 // Minimal TMDB genre-id to name map
 const Map<int, String> kGenreNames = {
@@ -319,38 +320,51 @@ class _HeroBannerState extends State<HeroBanner> {
 
                   Row(
                     children: [
-                      ElevatedButton.icon(
+                      TvFocusable(
+                        borderRadius: BorderRadius.circular(6),
+                        glowColor: Colors.white,
                         onPressed: () => _playItem(item),
-                        style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.white,
-                          foregroundColor: Colors.black,
+                        child: Container(
                           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
-                          shape: RoundedRectangleBorder(
+                          decoration: BoxDecoration(
+                            color: Colors.white,
                             borderRadius: BorderRadius.circular(6),
                           ),
-                        ),
-                        icon: const Icon(Icons.play_arrow, color: Colors.black, size: 24),
-                        label: const Text(
-                          'Play',
-                          style: TextStyle(fontSize: 15, fontWeight: FontWeight.bold),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.play_arrow, color: Colors.black, size: 24),
+                              SizedBox(width: 6),
+                              Text(
+                                'Play',
+                                style: TextStyle(color: Colors.black, fontSize: 15, fontWeight: FontWeight.bold),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                       const SizedBox(width: 12),
-                      OutlinedButton.icon(
+                      TvFocusable(
+                        borderRadius: BorderRadius.circular(6),
+                        glowColor: Colors.white,
                         onPressed: () => DetailModal.show(context, item),
-                        style: OutlinedButton.styleFrom(
-                          backgroundColor: Colors.white24,
-                          foregroundColor: Colors.white,
-                          side: BorderSide.none,
+                        child: Container(
                           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                          shape: RoundedRectangleBorder(
+                          decoration: BoxDecoration(
+                            color: Colors.white24,
                             borderRadius: BorderRadius.circular(6),
                           ),
-                        ),
-                        icon: const Icon(Icons.info_outline, size: 20),
-                        label: const Text(
-                          'More Info',
-                          style: TextStyle(fontSize: 14, fontWeight: FontWeight.bold),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.info_outline, color: Colors.white, size: 20),
+                              SizedBox(width: 6),
+                              Text(
+                                'More Info',
+                                style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.bold),
+                              ),
+                            ],
+                          ),
                         ),
                       ),
                     ],
@@ -558,24 +572,30 @@ class _HeroBannerState extends State<HeroBanner> {
                         children: [
                           // Play button
                           Expanded(
-                            child: ElevatedButton.icon(
+                            child: TvFocusable(
+                              borderRadius: BorderRadius.circular(6),
+                              glowColor: Colors.white,
                               onPressed: () => _playItem(item),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.white,
-                                foregroundColor: Colors.black,
-                                elevation: 0,
+                              child: Container(
                                 padding: const EdgeInsets.symmetric(vertical: 11),
-                                shape: RoundedRectangleBorder(
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
                                   borderRadius: BorderRadius.circular(6),
                                 ),
-                              ),
-                              icon: const Icon(Icons.play_arrow, color: Colors.black, size: 22),
-                              label: Text(
-                                item.mediaType == 'movie' ? 'Play Movie' : 'Play',
-                                style: const TextStyle(
-                                  color: Colors.black,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 14,
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    const Icon(Icons.play_arrow, color: Colors.black, size: 22),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      item.mediaType == 'movie' ? 'Play Movie' : 'Play',
+                                      style: const TextStyle(
+                                        color: Colors.black,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 14,
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ),
                             ),
@@ -584,28 +604,34 @@ class _HeroBannerState extends State<HeroBanner> {
 
                           // My List button (frosted glass)
                           Expanded(
-                            child: ElevatedButton.icon(
+                            child: TvFocusable(
+                              borderRadius: BorderRadius.circular(6),
+                              glowColor: Colors.white,
                               onPressed: () => watchlist.toggleWatchlist(item),
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.white.withValues(alpha: 0.25),
-                                foregroundColor: Colors.white,
-                                elevation: 0,
+                              child: Container(
                                 padding: const EdgeInsets.symmetric(vertical: 11),
-                                shape: RoundedRectangleBorder(
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withValues(alpha: 0.25),
                                   borderRadius: BorderRadius.circular(6),
                                 ),
-                              ),
-                              icon: Icon(
-                                inList ? Icons.check : Icons.add,
-                                color: inList ? AppTheme.primaryRed : Colors.white,
-                                size: 20,
-                              ),
-                              label: Text(
-                                inList ? 'Added' : 'My List',
-                                style: TextStyle(
-                                  color: inList ? AppTheme.primaryRed : Colors.white,
-                                  fontWeight: FontWeight.bold,
-                                  fontSize: 14,
+                                child: Row(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Icon(
+                                      inList ? Icons.check : Icons.add,
+                                      color: inList ? AppTheme.primaryRed : Colors.white,
+                                      size: 20,
+                                    ),
+                                    const SizedBox(width: 4),
+                                    Text(
+                                      inList ? 'Added' : 'My List',
+                                      style: TextStyle(
+                                        color: inList ? AppTheme.primaryRed : Colors.white,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 14,
+                                      ),
+                                    ),
+                                  ],
                                 ),
                               ),
                             ),
@@ -613,8 +639,10 @@ class _HeroBannerState extends State<HeroBanner> {
                           const SizedBox(width: 8),
 
                           // Info icon button
-                          GestureDetector(
-                            onTap: () => DetailModal.show(context, item),
+                          TvFocusable(
+                            borderRadius: BorderRadius.circular(6),
+                            glowColor: Colors.white,
+                            onPressed: () => DetailModal.show(context, item),
                             child: Container(
                               padding: const EdgeInsets.all(10),
                               decoration: BoxDecoration(

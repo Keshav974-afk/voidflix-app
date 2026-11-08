@@ -1125,8 +1125,11 @@ class _ProfileGateScreenState extends State<ProfileGateScreen> {
                         runSpacing: 24,
                         alignment: WrapAlignment.center,
                         children: [
-                          ...profiles.map((profile) {
+                          ...profiles.asMap().entries.map((entry) {
+                            final idx = entry.key;
+                            final profile = entry.value;
                             return TvFocusable(
+                              autofocus: idx == 0,
                               scaleFactor: 1.08,
                               glowColor: AppTheme.primaryRed,
                               borderRadius: BorderRadius.circular(12),
@@ -1296,8 +1299,11 @@ class _ProfileGateScreenState extends State<ProfileGateScreen> {
   }
 
   Widget _buildProfileTile(UserProfile profile) {
-    return GestureDetector(
-      onTap: () => _onProfileTapped(profile),
+    return TvFocusable(
+      scaleFactor: 1.08,
+      glowColor: AppTheme.primaryRed,
+      borderRadius: BorderRadius.circular(14),
+      onPressed: () => _onProfileTapped(profile),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -1358,8 +1364,11 @@ class _ProfileGateScreenState extends State<ProfileGateScreen> {
     required VoidCallback onTap,
     bool isHighlight = false,
   }) {
-    return GestureDetector(
-      onTap: onTap,
+    return TvFocusable(
+      scaleFactor: 1.08,
+      glowColor: Colors.white,
+      borderRadius: BorderRadius.circular(16),
+      onPressed: onTap,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [

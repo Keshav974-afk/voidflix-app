@@ -371,15 +371,9 @@ class _AnimeScreenState extends State<AnimeScreen> {
                         ),
                       );
 
-                      if (isTv) {
-                        return TvFocusable(
-                          onPressed: () => _onGenreSelected(g['id'] as int?),
-                          borderRadius: BorderRadius.circular(20),
-                          child: chip,
-                        );
-                      }
-                      return GestureDetector(
-                        onTap: () => _onGenreSelected(g['id'] as int?),
+                      return TvFocusable(
+                        onPressed: () => _onGenreSelected(g['id'] as int?),
+                        borderRadius: BorderRadius.circular(20),
                         child: chip,
                       );
                     },

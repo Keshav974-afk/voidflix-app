@@ -17,6 +17,7 @@ import '../widgets/continue_watching_row.dart';
 import '../widgets/hero_banner.dart';
 import '../widgets/media_row.dart';
 import '../widgets/top10_row.dart';
+import '../widgets/tv_focusable.dart';
 import 'downloads_screen.dart';
 import 'player_screen.dart';
 import 'live_tv_screen.dart';
@@ -857,8 +858,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
   Widget _buildFilterChip(String label) {
     final isSelected = _selectedCategoryFilter == label;
-    return GestureDetector(
-      onTap: () {
+    return TvFocusable(
+      borderRadius: BorderRadius.circular(20),
+      glowColor: Colors.white,
+      onPressed: () {
         setState(() => _selectedCategoryFilter = label);
         _loadInitialInfiniteItems();
       },

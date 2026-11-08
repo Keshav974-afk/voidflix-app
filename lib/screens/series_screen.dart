@@ -289,28 +289,31 @@ class _SeriesScreenState extends State<SeriesScreen> {
                         ],
                       ),
                       // Sort Dropdown Pill
-                      Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF1E1E28),
-                          borderRadius: BorderRadius.circular(20),
-                          border: Border.all(color: Colors.white24, width: 1),
-                        ),
-                        child: DropdownButtonHideUnderline(
-                          child: DropdownButton<String>(
-                            value: _selectedSort,
-                            dropdownColor: const Color(0xFF1E1E28),
-                            icon: const Icon(Icons.arrow_drop_down, color: Colors.white70, size: 20),
-                            style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600),
-                            onChanged: (val) {
-                              if (val != null) _onSortSelected(val);
-                            },
-                            items: _sortOptions.map((opt) {
-                              return DropdownMenuItem<String>(
-                                value: opt['value'],
-                                child: Text(opt['label']!),
-                              );
-                            }).toList(),
+                      TvFocusable(
+                        borderRadius: BorderRadius.circular(20),
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF1E1E28),
+                            borderRadius: BorderRadius.circular(20),
+                            border: Border.all(color: Colors.white24, width: 1),
+                          ),
+                          child: DropdownButtonHideUnderline(
+                            child: DropdownButton<String>(
+                              value: _selectedSort,
+                              dropdownColor: const Color(0xFF1E1E28),
+                              icon: const Icon(Icons.arrow_drop_down, color: Colors.white70, size: 20),
+                              style: const TextStyle(color: Colors.white, fontSize: 12, fontWeight: FontWeight.w600),
+                              onChanged: (val) {
+                                if (val != null) _onSortSelected(val);
+                              },
+                              items: _sortOptions.map((opt) {
+                                return DropdownMenuItem<String>(
+                                  value: opt['value'],
+                                  child: Text(opt['label']!),
+                                );
+                              }).toList(),
+                            ),
                           ),
                         ),
                       ),
@@ -353,15 +356,9 @@ class _SeriesScreenState extends State<SeriesScreen> {
                         ),
                       );
 
-                      if (isTv) {
-                        return TvFocusable(
-                          onPressed: () => _onGenreSelected(g['id'] as int?),
-                          borderRadius: BorderRadius.circular(20),
-                          child: chip,
-                        );
-                      }
-                      return GestureDetector(
-                        onTap: () => _onGenreSelected(g['id'] as int?),
+                      return TvFocusable(
+                        onPressed: () => _onGenreSelected(g['id'] as int?),
+                        borderRadius: BorderRadius.circular(20),
                         child: chip,
                       );
                     },
