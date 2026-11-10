@@ -20,28 +20,30 @@ class Top10Row extends StatelessWidget {
     final top = items.take(10).toList();
     if (top.isEmpty) return const SizedBox.shrink();
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          child: Text(
-            title,
-            style: const TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-              letterSpacing: 0.2,
-              color: Colors.white,
+    return RepaintBoundary(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: Text(
+              title,
+              style: const TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                letterSpacing: 0.2,
+                color: Colors.white,
+              ),
             ),
           ),
-        ),
-        SizedBox(
-          height: 185,
-          child: ListView.builder(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            itemCount: top.length,
-            itemBuilder: (context, index) {
+          SizedBox(
+            height: 185,
+            child: ListView.builder(
+              scrollDirection: Axis.horizontal,
+              physics: const BouncingScrollPhysics(),
+              padding: const EdgeInsets.symmetric(horizontal: 12),
+              itemCount: top.length,
+              itemBuilder: (context, index) {
               final rank = index + 1;
               final item = top[index];
 
@@ -89,6 +91,7 @@ class Top10Row extends StatelessWidget {
         ),
         const SizedBox(height: 14),
       ],
-    );
+    ),
+  );
   }
 }

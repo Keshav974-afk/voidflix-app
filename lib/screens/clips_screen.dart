@@ -277,7 +277,7 @@ class _ClipPlayerTileState extends State<ClipPlayerTile> {
 
     final backdropUrl = ApiService.getImageUrl(
       widget.item.backdropPath ?? widget.item.posterPath,
-      size: 'original',
+      size: 'w780',
     );
 
     return Stack(
@@ -305,6 +305,9 @@ class _ClipPlayerTileState extends State<ClipPlayerTile> {
           CachedNetworkImage(
             imageUrl: backdropUrl,
             fit: BoxFit.cover,
+            memCacheWidth: 780,
+            memCacheHeight: 440,
+            filterQuality: FilterQuality.low,
             placeholder: (c, u) => Container(color: Colors.black),
             errorWidget: (c, u, e) => Container(color: Colors.black),
           ),

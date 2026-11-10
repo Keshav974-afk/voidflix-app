@@ -18,9 +18,10 @@ class Top10BadgeCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final posterUrl = ApiConstants.getImageUrl(item.posterPath, size: 'w500');
+    final posterUrl = ApiConstants.getImageUrl(item.posterPath, size: 'w342');
 
-    return GestureDetector(
+    return RepaintBoundary(
+      child: GestureDetector(
       onTap: () {
         Navigator.of(context).push(
           MaterialPageRoute(
@@ -93,6 +94,9 @@ class Top10BadgeCard extends StatelessWidget {
                     ? CachedNetworkImage(
                         imageUrl: posterUrl,
                         fit: BoxFit.cover,
+                        memCacheWidth: 240,
+                        memCacheHeight: 360,
+                        filterQuality: FilterQuality.low,
                         placeholder: (context, url) => Container(color: AppTheme.surfaceVariant),
                         errorWidget: (context, url, error) => Container(
                           color: AppTheme.surfaceVariant,
@@ -110,6 +114,7 @@ class Top10BadgeCard extends StatelessWidget {
             ),
           ],
         ),
+      ),
       ),
     );
   }

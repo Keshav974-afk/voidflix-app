@@ -1,5 +1,6 @@
 import 'dart:io';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -30,6 +31,12 @@ class VoidflixHttpOverrides extends HttpOverrides {
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+
+  // High-performance display & input tuning (smooth 90Hz/120Hz VSYNC touch resampling)
+  GestureBinding.instance.resamplingEnabled = true;
+  PaintingBinding.instance.imageCache.maximumSize = 350;
+  PaintingBinding.instance.imageCache.maximumSizeBytes = 128 * 1024 * 1024; // 128MB cache
+
   await AppLogger.instance.init();
 
   FlutterError.onError = (details) {

@@ -746,8 +746,8 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
 
   Widget _buildDynamicHeroBackdrop(MediaItem? item) {
     final backdropUrl = item?.backdropPath != null
-        ? ApiConstants.getOriginalImageUrl(item!.backdropPath)
-        : (item?.posterPath != null ? ApiConstants.getOriginalImageUrl(item!.posterPath) : '');
+        ? ApiConstants.getImageUrl(item!.backdropPath, size: 'w1280')
+        : (item?.posterPath != null ? ApiConstants.getImageUrl(item!.posterPath, size: 'w1280') : '');
 
     return Stack(
       fit: StackFit.expand,
@@ -759,6 +759,9 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
               key: ValueKey(backdropUrl),
               imageUrl: backdropUrl,
               fit: BoxFit.cover,
+              memCacheWidth: 1280,
+              memCacheHeight: 720,
+              filterQuality: FilterQuality.low,
               width: double.infinity,
               height: double.infinity,
               placeholder: (_, __) => Container(color: Colors.black),
@@ -1079,6 +1082,9 @@ class _TvLeanbackScreenState extends State<TvLeanbackScreen> {
                           CachedNetworkImage(
                             imageUrl: imageUrl,
                             fit: BoxFit.cover,
+                            memCacheWidth: isLandscape ? 400 : 250,
+                            memCacheHeight: isLandscape ? 220 : 360,
+                            filterQuality: FilterQuality.low,
                             placeholder: (_, __) => Container(color: const Color(0xFF161622)),
                             errorWidget: (_, __, ___) => Container(
                               color: const Color(0xFF161622),

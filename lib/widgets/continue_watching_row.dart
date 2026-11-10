@@ -167,32 +167,34 @@ class ContinueWatchingRow extends StatelessWidget {
 
     final List<WatchProgress> displayItems = realHistory;
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        // Section Header matching Netflix: "Continue Watching for {username}"
-        Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-          child: Text(
-            'Continue Watching for $activeProfileName',
-            style: const TextStyle(
-              fontSize: 18,
-              fontWeight: FontWeight.bold,
-              letterSpacing: 0.2,
-              color: AppTheme.textPrimary,
+    return RepaintBoundary(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          // Section Header matching Netflix: "Continue Watching for {username}"
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+            child: Text(
+              'Continue Watching for $activeProfileName',
+              style: const TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
+                letterSpacing: 0.2,
+                color: AppTheme.textPrimary,
+              ),
             ),
           ),
-        ),
 
-        // Horizontal Portrait Cards Row matching Netflix
-        SizedBox(
-          height: 204,
-          child: ListView.separated(
-            scrollDirection: Axis.horizontal,
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            itemCount: displayItems.length,
-            separatorBuilder: (c, i) => const SizedBox(width: 10),
-            itemBuilder: (context, index) {
+          // Horizontal Portrait Cards Row matching Netflix
+          SizedBox(
+            height: 204,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              physics: const BouncingScrollPhysics(),
+              padding: const EdgeInsets.symmetric(horizontal: 16),
+              itemCount: displayItems.length,
+              separatorBuilder: (c, i) => const SizedBox(width: 10),
+              itemBuilder: (context, index) {
               final raw = displayItems[index];
 
               final int id = raw.id;
@@ -276,6 +278,9 @@ class ContinueWatchingRow extends StatelessWidget {
                                 ? CachedNetworkImage(
                                     imageUrl: imageUrl,
                                     fit: BoxFit.cover,
+                                    memCacheWidth: 240,
+                                    memCacheHeight: 360,
+                                    filterQuality: FilterQuality.low,
                                     placeholder: (c, u) => Container(color: AppTheme.surfaceVariant),
                                     errorWidget: (c, u, e) => Container(color: AppTheme.surfaceVariant),
                                   )
@@ -378,6 +383,7 @@ class ContinueWatchingRow extends StatelessWidget {
         ),
         const SizedBox(height: 12),
       ],
-    );
+    ),
+  );
   }
 }

@@ -74,6 +74,9 @@ class ProfileAvatarTile extends StatelessWidget {
                 child: CachedNetworkImage(
                   imageUrl: avatarUrl!,
                   fit: BoxFit.cover,
+                  memCacheWidth: (size * 2).toInt().clamp(60, 240),
+                  memCacheHeight: (size * 2).toInt().clamp(60, 240),
+                  filterQuality: FilterQuality.low,
                   placeholder: (c, u) => Container(color: gradientColors.first),
                   errorWidget: (c, u, e) => CustomPaint(
                     size: Size(size * 0.65, size * 0.65),

@@ -137,7 +137,7 @@ class _DetailModalState extends State<DetailModal> {
 
     final backdropUrl = ApiConstants.getImageUrl(
       widget.item.backdropPath ?? widget.item.posterPath,
-      size: 'original',
+      size: 'w780',
     );
 
     final matchPercentage = widget.item.voteAverage > 0
@@ -186,6 +186,9 @@ class _DetailModalState extends State<DetailModal> {
                             ? CachedNetworkImage(
                                 imageUrl: backdropUrl,
                                 fit: BoxFit.cover,
+                                memCacheWidth: 780,
+                                memCacheHeight: 440,
+                                filterQuality: FilterQuality.low,
                                 placeholder: (c, u) => Container(color: const Color(0xFF222222)),
                                 errorWidget: (c, u, e) => Container(color: const Color(0xFF222222)),
                               )

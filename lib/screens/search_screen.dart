@@ -525,47 +525,51 @@ class _SearchScreenState extends State<SearchScreen> {
                             final item = displayList[index];
                             final imageUrl = ApiConstants.getImageUrl(
                               item.backdropPath ?? item.posterPath,
-                              size: 'w500',
+                              size: 'w342',
                             );
                             final regionBadge = _resolveRegionBadge(item);
 
-                            return TvFocusable(
-                              focusNode: index == 0 ? _firstResultFocusNode : null,
-                              scaleFactor: 1.02,
-                              glowColor: AppTheme.primaryRed,
-                              borderRadius: BorderRadius.circular(10),
-                              onPressed: () => _openDetail(item),
-                              child: Container(
-                                height: 86,
-                                padding: const EdgeInsets.all(6),
-                                decoration: BoxDecoration(
-                                  color: const Color(0xFF121212),
-                                  borderRadius: BorderRadius.circular(10),
-                                  border: Border.all(
-                                    color: Colors.white.withValues(alpha: 0.06),
+                            return RepaintBoundary(
+                              child: TvFocusable(
+                                focusNode: index == 0 ? _firstResultFocusNode : null,
+                                scaleFactor: 1.02,
+                                glowColor: AppTheme.primaryRed,
+                                borderRadius: BorderRadius.circular(10),
+                                onPressed: () => _openDetail(item),
+                                child: Container(
+                                  height: 86,
+                                  padding: const EdgeInsets.all(6),
+                                  decoration: BoxDecoration(
+                                    color: const Color(0xFF121212),
+                                    borderRadius: BorderRadius.circular(10),
+                                    border: Border.all(
+                                      color: Colors.white.withValues(alpha: 0.06),
+                                    ),
                                   ),
-                                ),
-                                child: Row(
-                                  children: [
-                                    // Landscape Thumbnail
-                                    Container(
-                                      width: 132,
-                                      height: 74,
-                                      decoration: BoxDecoration(
-                                        borderRadius: BorderRadius.circular(7),
-                                        color: const Color(0xFF1A1A1A),
-                                      ),
-                                      clipBehavior: Clip.antiAlias,
-                                      child: Stack(
-                                        fit: StackFit.expand,
-                                        children: [
-                                          imageUrl.isNotEmpty
-                                              ? CachedNetworkImage(
-                                                  imageUrl: imageUrl,
-                                                  fit: BoxFit.cover,
-                                                  placeholder: (c, u) => Container(color: const Color(0xFF1A1A1A)),
-                                                  errorWidget: (c, u, e) => Container(color: const Color(0xFF1A1A1A)),
-                                                )
+                                  child: Row(
+                                    children: [
+                                      // Landscape Thumbnail
+                                      Container(
+                                        width: 132,
+                                        height: 74,
+                                        decoration: BoxDecoration(
+                                          borderRadius: BorderRadius.circular(7),
+                                          color: const Color(0xFF1A1A1A),
+                                        ),
+                                        clipBehavior: Clip.antiAlias,
+                                        child: Stack(
+                                          fit: StackFit.expand,
+                                          children: [
+                                            imageUrl.isNotEmpty
+                                                ? CachedNetworkImage(
+                                                    imageUrl: imageUrl,
+                                                    fit: BoxFit.cover,
+                                                    memCacheWidth: 264,
+                                                    memCacheHeight: 148,
+                                                    filterQuality: FilterQuality.low,
+                                                    placeholder: (c, u) => Container(color: const Color(0xFF1A1A1A)),
+                                                    errorWidget: (c, u, e) => Container(color: const Color(0xFF1A1A1A)),
+                                                  )
                                               : Container(color: const Color(0xFF1A1A1A)),
                                           Container(
                                             decoration: BoxDecoration(
@@ -715,6 +719,7 @@ class _SearchScreenState extends State<SearchScreen> {
                                     ),
                                   ],
                                 ),
+                              ),
                               ),
                             );
                           },

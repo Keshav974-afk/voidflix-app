@@ -281,8 +281,9 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final downloadProvider = context.watch<DownloadProvider>();
-    final completedDownloads = downloadProvider.completedItems;
+    final completedDownloadsCount = context.select<DownloadProvider, int>(
+      (p) => p.items.where((i) => i.status == 'completed').length,
+    );
     final profileProv = context.watch<ProfileProvider>();
     final activeProfile = profileProv.activeProfile;
     final isKids = activeProfile.isKids;
@@ -323,7 +324,7 @@ class _HomeScreenState extends State<HomeScreen> {
         final isOffline = _isOffline || (mediaProvider.error != null && !hasAnyMedia);
 
         if (isOffline && !hasAnyMedia && !mediaProvider.isLoadingHome) {
-          return _buildOfflineView(context, completedDownloads, mediaProvider);
+          return _buildOfflineView(context, context.read<DownloadProvider>().completedItems, mediaProvider);
         }
 
         return RefreshIndicator(
@@ -347,12 +348,14 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
             ]);
           },
-          child: SingleChildScrollView(
+          child: CustomScrollView(
             controller: _scrollController,
             physics: const AlwaysScrollableScrollPhysics(),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
+            slivers: [
+              SliverToBoxAdapter(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
                 // 1. Netflix Top Category Pills Row
                 Padding(
                   padding: EdgeInsets.only(
@@ -412,7 +415,7 @@ class _HomeScreenState extends State<HomeScreen> {
               ),
 
                 // Offline Notice Banner if cached feed is active but network disconnected
-                if (_isOffline && completedDownloads.isNotEmpty)
+                if (_isOffline && completedDownloadsCount > 0)
                   Container(
                     margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
                     padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
@@ -434,7 +437,7 @@ class _HomeScreenState extends State<HomeScreen> {
                                 style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
                               ),
                               Text(
-                                "${completedDownloads.length} downloaded title${completedDownloads.length > 1 ? 's' : ''} available to play",
+                                "$completedDownloadsCount downloaded title${completedDownloadsCount > 1 ? 's' : ''} available to play",
                                 style: const TextStyle(color: Colors.white60, fontSize: 11),
                               ),
                             ],
@@ -812,46 +815,47 @@ class _HomeScreenState extends State<HomeScreen> {
                   ),
                 ),
                 const SizedBox(height: 14),
-
-                LayoutBuilder(
-                  builder: (context, constraints) {
-                    final count = (constraints.maxWidth / 115.0).floor().clamp(3, 8);
-                    return GridView.builder(
-                      shrinkWrap: true,
-                      physics: const NeverScrollableScrollPhysics(),
-                      padding: const EdgeInsets.symmetric(horizontal: 12),
-                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                        crossAxisCount: count,
-                        childAspectRatio: 0.65,
-                        crossAxisSpacing: 8,
-                        mainAxisSpacing: 10,
-                      ),
-                      itemCount: _infiniteItems.length,
-                      itemBuilder: (context, index) {
-                        return MediaCard(item: _infiniteItems[index]);
-                      },
-                    );
-                  },
-                ),
-
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 24),
-                  child: Center(
-                    child: _isLoadingMore
-                        ? const SizedBox(
-                            width: 28,
-                            height: 28,
-                            child: CircularProgressIndicator(strokeWidth: 2.5, color: AppTheme.primaryRed),
-                          )
-                        : const SizedBox.shrink(),
-                  ),
-                ),
-
-                const SizedBox(height: 96),
               ],
             ),
           ),
-        );
+
+          // High-Performance Virtualized SliverGrid (Never-Ending Catalog at 120 FPS!)
+          SliverPadding(
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            sliver: SliverGrid(
+              gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
+                maxCrossAxisExtent: 130.0,
+                childAspectRatio: 0.65,
+                crossAxisSpacing: 8,
+                mainAxisSpacing: 10,
+              ),
+              delegate: SliverChildBuilderDelegate(
+                (context, index) => MediaCard(item: _infiniteItems[index]),
+                childCount: _infiniteItems.length,
+                addAutomaticKeepAlives: false,
+              ),
+            ),
+          ),
+
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(vertical: 24),
+              child: Center(
+                child: _isLoadingMore
+                    ? const SizedBox(
+                        width: 28,
+                        height: 28,
+                        child: CircularProgressIndicator(strokeWidth: 2.5, color: AppTheme.primaryRed),
+                      )
+                    : const SizedBox.shrink(),
+              ),
+            ),
+          ),
+
+          const SliverToBoxAdapter(child: SizedBox(height: 96)),
+        ],
+      ),
+    );
       },
     );
   }

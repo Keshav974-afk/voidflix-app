@@ -32,13 +32,14 @@ class MyVoidflixScreen extends StatelessWidget {
     final watchlistProvider = context.watch<WatchlistProvider>();
     final mediaProvider = context.watch<MediaProvider>();
     final notifProvider = context.watch<NotificationProvider>();
-    final downloadProvider = context.watch<DownloadProvider>();
+    final downloadCount = context.select<DownloadProvider, int>(
+      (p) => p.items.where((i) => i.status == 'completed').length,
+    );
 
     final activeProfile = profileProvider.activeProfile;
     final historyItems = historyProvider.history;
     final watchlistItems = watchlistProvider.watchlist;
     final likedItems = mediaProvider.trending.take(6).toList();
-    final downloadCount = downloadProvider.completedItems.length;
     final canPop = Navigator.of(context).canPop();
 
     return TvScreenWrapper(
@@ -250,7 +251,7 @@ class MyVoidflixScreen extends StatelessWidget {
                               season: item.season,
                               episode: item.episode,
                             );
-                            final dlItem = downloadProvider.getItem(dlId);
+                            final dlItem = context.read<DownloadProvider>().getItem(dlId);
                             final isDownloaded = dlItem != null && dlItem.status == 'completed';
                             final resumeSec = item.positionSeconds > 0
                                 ? item.positionSeconds.toDouble()
@@ -284,6 +285,9 @@ class MyVoidflixScreen extends StatelessWidget {
                                   CachedNetworkImage(
                                     imageUrl: ApiService.getImageUrl(item.posterPath ?? item.backdropPath, size: 'w300'),
                                     fit: BoxFit.cover,
+                                    memCacheWidth: 200,
+                                    memCacheHeight: 300,
+                                    filterQuality: FilterQuality.low,
                                     errorWidget: (c, u, e) => Container(color: Colors.grey[900]),
                                   ),
                                   // Dark translucent scrim
@@ -403,6 +407,9 @@ class MyVoidflixScreen extends StatelessWidget {
                               child: CachedNetworkImage(
                                 imageUrl: ApiService.getImageUrl(item.posterPath, size: 'w300'),
                                 fit: BoxFit.cover,
+                                memCacheWidth: 200,
+                                memCacheHeight: 300,
+                                filterQuality: FilterQuality.low,
                                 errorWidget: (c, u, e) => Container(color: Colors.grey[900]),
                               ),
                             ),
@@ -525,6 +532,9 @@ class MyVoidflixScreen extends StatelessWidget {
                         child: CachedNetworkImage(
                           imageUrl: ApiService.getImageUrl(item.posterPath, size: 'w300'),
                           fit: BoxFit.cover,
+                          memCacheWidth: 200,
+                          memCacheHeight: 300,
+                          filterQuality: FilterQuality.low,
                           errorWidget: (c, u, e) => Container(color: Colors.grey[900]),
                         ),
                       ),

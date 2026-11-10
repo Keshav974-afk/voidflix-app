@@ -719,7 +719,7 @@ class _ProfileGateScreenState extends State<ProfileGateScreen> {
     final profiles = profileProvider.profiles;
     final featuredItem = _trendingPosters.isNotEmpty ? _trendingPosters.first : null;
     final heroImageUrl = featuredItem != null
-        ? ApiService.getImageUrl(featuredItem.backdropPath ?? featuredItem.posterPath, size: 'original')
+        ? ApiService.getImageUrl(featuredItem.backdropPath ?? featuredItem.posterPath, size: 'w780')
         : '';
 
     final isDesktopOrTv = MediaQuery.of(context).size.width >= 600 ||
@@ -750,6 +750,9 @@ class _ProfileGateScreenState extends State<ProfileGateScreen> {
                     imageUrl: heroImageUrl,
                     fit: BoxFit.cover,
                     alignment: Alignment.topCenter,
+                    memCacheWidth: 780,
+                    memCacheHeight: 440,
+                    filterQuality: FilterQuality.low,
                     placeholder: (c, u) => Container(color: const Color(0xFF1B1B22)),
                     errorWidget: (c, u, e) => Container(color: const Color(0xFF1B1B22)),
                   )

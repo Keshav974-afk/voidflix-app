@@ -41,6 +41,11 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
   int _activeCategoryIndex = 0; // 0: Home, 1: Series, 2: Films, 3: New & Hot, etc.
   int _bottomTabIndex = 0; // 0: Home, 1: Clips, 2: Search, 3: My Voidflix
 
+  // Lazy instantiate screens only on first visit to keep startup fast,
+  // while retaining state & scroll positions in memory for instant tab switching!
+  final Set<int> _loadedBottomTabs = {0};
+  final Set<int> _loadedCategoryTabs = {0};
+
   @override
   void initState() {
     super.initState();
@@ -55,17 +60,6 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
     });
   }
 
-  final List<Widget> _categoryScreens = const [
-    HomeScreen(),
-    SeriesScreen(),
-    MoviesScreen(),
-    NewPopularScreen(),
-    AnimeScreen(),
-    DramaScreen(),
-    LiveTvScreen(),
-    KidsScreen(),
-  ];
-
   @override
   Widget build(BuildContext context) {
     final tvMode = context.watch<TvModeService>();
@@ -75,17 +69,6 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
 
     final isDesktop = !kIsWeb &&
         (Platform.isWindows || Platform.isLinux || Platform.isMacOS || MediaQuery.of(context).size.width >= 850);
-
-    Widget bodyContent;
-    if (_bottomTabIndex == 1) {
-      bodyContent = const ClipsScreen();
-    } else if (_bottomTabIndex == 2) {
-      bodyContent = const SearchScreen();
-    } else if (_bottomTabIndex == 3) {
-      bodyContent = const MyVoidflixScreen();
-    } else {
-      bodyContent = _categoryScreens[_activeCategoryIndex.clamp(0, _categoryScreens.length - 1)];
-    }
 
     return Scaffold(
       backgroundColor: AppTheme.background,
@@ -97,19 +80,47 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
                   onCategorySelected: (idx) {
                     setState(() {
                       _activeCategoryIndex = idx;
+                      _loadedCategoryTabs.add(idx);
                       _bottomTabIndex = 0;
                     });
                   },
                   onSearchTap: () {
-                    setState(() => _bottomTabIndex = 2);
+                    setState(() {
+                      _bottomTabIndex = 2;
+                      _loadedBottomTabs.add(2);
+                    });
                   },
                 )
               : null),
       body: Stack(
         children: [
-          // Screen body content
+          // Instant-switching lazy preserved screen stack
           Positioned.fill(
-            child: bodyContent,
+            child: IndexedStack(
+              index: _bottomTabIndex,
+              children: [
+                // Tab 0: Categories stack
+                IndexedStack(
+                  index: _activeCategoryIndex.clamp(0, 7),
+                  children: [
+                    const HomeScreen(),
+                    _loadedCategoryTabs.contains(1) ? const SeriesScreen() : const SizedBox.shrink(),
+                    _loadedCategoryTabs.contains(2) ? const MoviesScreen() : const SizedBox.shrink(),
+                    _loadedCategoryTabs.contains(3) ? const NewPopularScreen() : const SizedBox.shrink(),
+                    _loadedCategoryTabs.contains(4) ? const AnimeScreen() : const SizedBox.shrink(),
+                    _loadedCategoryTabs.contains(5) ? const DramaScreen() : const SizedBox.shrink(),
+                    _loadedCategoryTabs.contains(6) ? const LiveTvScreen() : const SizedBox.shrink(),
+                    _loadedCategoryTabs.contains(7) ? const KidsScreen() : const SizedBox.shrink(),
+                  ],
+                ),
+                // Tab 1: Clips
+                _loadedBottomTabs.contains(1) ? const ClipsScreen() : const SizedBox.shrink(),
+                // Tab 2: Search
+                _loadedBottomTabs.contains(2) ? const SearchScreen() : const SizedBox.shrink(),
+                // Tab 3: My Voidflix
+                _loadedBottomTabs.contains(3) ? const MyVoidflixScreen() : const SizedBox.shrink(),
+              ],
+            ),
           ),
 
           // Mobile Floating Pill Bottom Bar (Only on phones/tablets; hidden on PC desktop)
@@ -118,11 +129,16 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
               left: 0,
               right: 0,
               bottom: 6,
-              child: FloatingBottomBar(
-                currentIndex: _bottomTabIndex,
-                onTap: (idx) {
-                  setState(() => _bottomTabIndex = idx);
-                },
+              child: RepaintBoundary(
+                child: FloatingBottomBar(
+                  currentIndex: _bottomTabIndex,
+                  onTap: (idx) {
+                    setState(() {
+                      _bottomTabIndex = idx;
+                      _loadedBottomTabs.add(idx);
+                    });
+                  },
+                ),
               ),
             ),
         ],

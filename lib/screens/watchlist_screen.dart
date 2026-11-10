@@ -61,6 +61,9 @@ class WatchlistScreen extends StatelessWidget {
                                   ? CachedNetworkImage(
                                       imageUrl: activeProfile.avatar,
                                       fit: BoxFit.cover,
+                                      memCacheWidth: 70,
+                                      memCacheHeight: 70,
+                                      filterQuality: FilterQuality.low,
                                       placeholder: (c, u) => Container(color: AppTheme.primaryRed),
                                       errorWidget: (c, u, e) => Container(
                                         color: AppTheme.primaryRed,

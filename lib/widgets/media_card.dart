@@ -43,7 +43,7 @@ class MediaCard extends StatelessWidget {
 
     final posterUrl = isLandscape
         ? ApiConstants.getImageUrl(item.backdropPath ?? item.posterPath, size: 'w780')
-        : ApiConstants.getImageUrl(item.posterPath, size: 'w500');
+        : ApiConstants.getImageUrl(item.posterPath, size: 'w342');
 
     Widget cardContent = Container(
       width: width,
@@ -67,7 +67,10 @@ class MediaCard extends StatelessWidget {
             CachedNetworkImage(
               imageUrl: posterUrl,
               fit: BoxFit.cover,
-              placeholder: (context, url) => Container(color: const Color(0xFF222222)),
+              memCacheWidth: isLandscape ? 500 : 260,
+              memCacheHeight: isLandscape ? 280 : 390,
+              filterQuality: FilterQuality.low,
+              placeholder: (context, url) => const ColoredBox(color: Color(0xFF222222)),
               errorWidget: (context, url, error) => Container(
                 color: const Color(0xFF222222),
                 padding: const EdgeInsets.all(8),
@@ -151,12 +154,14 @@ class MediaCard extends StatelessWidget {
       }
     }
 
-    return TvFocusable(
-      scaleFactor: 1.07,
-      glowColor: AppTheme.primaryRed,
-      borderRadius: BorderRadius.circular(6),
-      onPressed: handleAction,
-      child: cardContent,
+    return RepaintBoundary(
+      child: TvFocusable(
+        scaleFactor: 1.07,
+        glowColor: AppTheme.primaryRed,
+        borderRadius: BorderRadius.circular(6),
+        onPressed: handleAction,
+        child: cardContent,
+      ),
     );
   }
 }

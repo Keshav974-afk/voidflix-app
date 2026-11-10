@@ -327,7 +327,7 @@ class _DetailScreenState extends State<DetailScreen> {
     }
 
     final detail = _detail!;
-    final backdropUrl = ApiConstants.getImageUrl(detail.backdropPath ?? detail.posterPath, size: 'original');
+    final backdropUrl = ApiConstants.getImageUrl(detail.backdropPath ?? detail.posterPath, size: 'w780');
     final watchlistProvider = context.watch<WatchlistProvider>();
     final downloadProvider = context.watch<DownloadProvider>();
     final inWatchlist = watchlistProvider.isInWatchlist(detail.id);
@@ -398,6 +398,9 @@ class _DetailScreenState extends State<DetailScreen> {
                     CachedNetworkImage(
                       imageUrl: backdropUrl,
                       fit: BoxFit.cover,
+                      memCacheWidth: 780,
+                      memCacheHeight: 440,
+                      filterQuality: FilterQuality.low,
                       placeholder: (c, u) => Container(color: AppTheme.surfaceVariant),
                       errorWidget: (c, u, e) => Container(color: AppTheme.surfaceVariant),
                     )

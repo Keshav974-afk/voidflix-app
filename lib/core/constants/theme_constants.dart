@@ -105,8 +105,11 @@ class AppTheme {
       splashFactory: InkSparkle.splashFactory,
       pageTransitionsTheme: const PageTransitionsTheme(
         builders: {
-          TargetPlatform.android: CupertinoPageTransitionsBuilder(),
+          TargetPlatform.android: FadeForwardsPageTransitionsBuilder(),
           TargetPlatform.iOS: CupertinoPageTransitionsBuilder(),
+          TargetPlatform.windows: ZoomPageTransitionsBuilder(),
+          TargetPlatform.linux: ZoomPageTransitionsBuilder(),
+          TargetPlatform.macOS: CupertinoPageTransitionsBuilder(),
         },
       ),
     );

@@ -152,27 +152,31 @@ class _HeroBannerState extends State<HeroBanner> {
 
     if (isWide) {
       // Desktop / Tablet Hero Layout (80vh full bleed backdrop)
-      final backdropUrl = ApiConstants.getImageUrl(item.backdropPath, size: 'original');
+      final backdropUrl = ApiConstants.getImageUrl(item.backdropPath, size: 'w1280');
 
-      return SizedBox(
-        height: 520,
-        width: double.infinity,
-        child: Stack(
-          children: [
-            // Backdrop Image with Animated Crossfade
-            Positioned.fill(
-              child: AnimatedSwitcher(
-                duration: const Duration(milliseconds: 800),
-                child: backdropUrl.isNotEmpty
-                    ? CachedNetworkImage(
-                        key: ValueKey(item.id),
-                        imageUrl: backdropUrl,
-                        fit: BoxFit.cover,
-                        width: double.infinity,
-                        height: double.infinity,
-                        placeholder: (c, u) => Container(color: AppTheme.cardColor),
-                        errorWidget: (c, u, e) => Container(color: AppTheme.cardColor),
-                      )
+      return RepaintBoundary(
+        child: SizedBox(
+          height: 520,
+          width: double.infinity,
+          child: Stack(
+            children: [
+              // Backdrop Image with Animated Crossfade
+              Positioned.fill(
+                child: AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 800),
+                  child: backdropUrl.isNotEmpty
+                      ? CachedNetworkImage(
+                          key: ValueKey(item.id),
+                          imageUrl: backdropUrl,
+                          fit: BoxFit.cover,
+                          memCacheWidth: 1280,
+                          memCacheHeight: 720,
+                          filterQuality: FilterQuality.low,
+                          width: double.infinity,
+                          height: double.infinity,
+                          placeholder: (c, u) => Container(color: AppTheme.cardColor),
+                          errorWidget: (c, u, e) => Container(color: AppTheme.cardColor),
+                        )
                     : Container(color: AppTheme.cardColor),
               ),
             ),
@@ -381,13 +385,15 @@ class _HeroBannerState extends State<HeroBanner> {
             ),
           ],
         ),
+      ),
       );
     }
 
     // Mobile Hero Layout (Exact Netflix mobile poster card with genres and pill buttons)
     final posterUrl = ApiConstants.getImageUrl(item.posterPath ?? item.backdropPath, size: 'w780');
 
-    return Padding(
+    return RepaintBoundary(
+      child: Padding(
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
       child: Column(
         children: [
@@ -420,6 +426,9 @@ class _HeroBannerState extends State<HeroBanner> {
                           key: ValueKey(item.id),
                           imageUrl: posterUrl,
                           fit: BoxFit.cover,
+                          memCacheWidth: 780,
+                          memCacheHeight: 900,
+                          filterQuality: FilterQuality.low,
                           width: double.infinity,
                           height: double.infinity,
                           placeholder: (c, u) => Container(color: const Color(0xFF222222)),
@@ -666,6 +675,7 @@ class _HeroBannerState extends State<HeroBanner> {
           _buildIndicatorDots(list),
         ],
       ),
+    ),
     );
   }
 
