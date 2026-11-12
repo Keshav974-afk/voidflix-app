@@ -1216,30 +1216,41 @@ class _ProfileGateScreenState extends State<ProfileGateScreen> {
 
                       const SizedBox(height: 52),
 
-                      // [ MANAGE PROFILES ] Outlined Pill Button
+                      // [ Manage profiles ] Outlined Pill Button (Matching Netflix screenshot in English)
                       TvFocusable(
                         scaleFactor: 1.05,
                         glowColor: Colors.white,
-                        borderRadius: BorderRadius.circular(4),
+                        borderRadius: BorderRadius.circular(24),
                         onPressed: () => setState(() => _isManaging = !_isManaging),
                         child: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 12),
+                          padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 10),
                           decoration: BoxDecoration(
                             color: _isManaging ? Colors.white : Colors.transparent,
-                            borderRadius: BorderRadius.circular(4),
+                            borderRadius: BorderRadius.circular(24),
                             border: Border.all(
-                              color: _isManaging ? Colors.white : Colors.white54,
+                              color: _isManaging ? Colors.white : Colors.white38,
                               width: 1.2,
                             ),
                           ),
-                          child: Text(
-                            _isManaging ? 'DONE' : 'MANAGE PROFILES',
-                            style: GoogleFonts.inter(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
-                              color: _isManaging ? Colors.black : Colors.white70,
-                              letterSpacing: 2.0,
-                            ),
+                          child: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(
+                                _isManaging ? Icons.check_rounded : Icons.edit_outlined,
+                                size: 16,
+                                color: _isManaging ? Colors.black : Colors.white70,
+                              ),
+                              const SizedBox(width: 8),
+                              Text(
+                                _isManaging ? 'Done' : 'Manage profiles',
+                                style: GoogleFonts.inter(
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.w500,
+                                  color: _isManaging ? Colors.black : Colors.white70,
+                                  letterSpacing: 0.5,
+                                ),
+                              ),
+                            ],
                           ),
                         ),
                       ),

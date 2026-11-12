@@ -325,14 +325,14 @@ class _HeroBannerState extends State<HeroBanner> {
                   Row(
                     children: [
                       TvFocusable(
-                        borderRadius: BorderRadius.circular(6),
+                        borderRadius: BorderRadius.circular(28),
                         glowColor: Colors.white,
                         onPressed: () => _playItem(item),
                         child: Container(
                           padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
                           decoration: BoxDecoration(
                             color: Colors.white,
-                            borderRadius: BorderRadius.circular(6),
+                            borderRadius: BorderRadius.circular(28),
                           ),
                           child: const Row(
                             mainAxisSize: MainAxisSize.min,
@@ -349,14 +349,14 @@ class _HeroBannerState extends State<HeroBanner> {
                       ),
                       const SizedBox(width: 12),
                       TvFocusable(
-                        borderRadius: BorderRadius.circular(6),
+                        borderRadius: BorderRadius.circular(28),
                         glowColor: Colors.white,
                         onPressed: () => DetailModal.show(context, item),
                         child: Container(
                           padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
                           decoration: BoxDecoration(
                             color: Colors.white24,
-                            borderRadius: BorderRadius.circular(6),
+                            borderRadius: BorderRadius.circular(28),
                           ),
                           child: const Row(
                             mainAxisSize: MainAxisSize.min,
@@ -582,14 +582,14 @@ class _HeroBannerState extends State<HeroBanner> {
                           // Play button
                           Expanded(
                             child: TvFocusable(
-                              borderRadius: BorderRadius.circular(6),
+                              borderRadius: BorderRadius.circular(28),
                               glowColor: Colors.white,
                               onPressed: () => _playItem(item),
                               child: Container(
                                 padding: const EdgeInsets.symmetric(vertical: 11),
                                 decoration: BoxDecoration(
                                   color: Colors.white,
-                                  borderRadius: BorderRadius.circular(6),
+                                  borderRadius: BorderRadius.circular(28),
                                 ),
                                 child: Row(
                                   mainAxisAlignment: MainAxisAlignment.center,
@@ -614,14 +614,14 @@ class _HeroBannerState extends State<HeroBanner> {
                           // My List button (frosted glass)
                           Expanded(
                             child: TvFocusable(
-                              borderRadius: BorderRadius.circular(6),
+                              borderRadius: BorderRadius.circular(28),
                               glowColor: Colors.white,
                               onPressed: () => watchlist.toggleWatchlist(item),
                               child: Container(
                                 padding: const EdgeInsets.symmetric(vertical: 11),
                                 decoration: BoxDecoration(
                                   color: Colors.white.withValues(alpha: 0.25),
-                                  borderRadius: BorderRadius.circular(6),
+                                  borderRadius: BorderRadius.circular(28),
                                 ),
                                 child: Row(
                                   mainAxisAlignment: MainAxisAlignment.center,
@@ -649,14 +649,14 @@ class _HeroBannerState extends State<HeroBanner> {
 
                           // Info icon button
                           TvFocusable(
-                            borderRadius: BorderRadius.circular(6),
+                            borderRadius: BorderRadius.circular(28),
                             glowColor: Colors.white,
                             onPressed: () => DetailModal.show(context, item),
                             child: Container(
                               padding: const EdgeInsets.all(10),
                               decoration: BoxDecoration(
                                 color: Colors.white.withValues(alpha: 0.25),
-                                borderRadius: BorderRadius.circular(6),
+                                shape: BoxShape.circle,
                               ),
                               child: const Icon(Icons.info_outline, color: Colors.white, size: 20),
                             ),

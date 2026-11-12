@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:cached_network_image/cached_network_image.dart';
@@ -63,42 +64,49 @@ class _ClipsScreenState extends State<ClipsScreen> {
       );
     }
 
+    final isDesktop = MediaQuery.of(context).size.width >= 768;
+
     return TvScreenWrapper(
       onBack: canPop ? () => Navigator.of(context).pop() : null,
       child: Scaffold(
         backgroundColor: Colors.black,
-        body: Stack(
-          children: [
-            PageView.builder(
-              controller: _pageController,
-              scrollDirection: Axis.vertical,
-              itemCount: clips.length,
-              onPageChanged: (index) {
-                setState(() => _currentPage = index);
-              },
-              itemBuilder: (context, index) {
-                final item = clips[index];
-                final isCurrent = index == _currentPage;
-
-                return ClipPlayerTile(
-                  key: ValueKey('clip_${item.id}'),
-                  item: item,
-                  isActive: isCurrent,
-                  isMuted: _isMuted,
-                  onToggleMute: () {
-                    setState(() => _isMuted = !_isMuted);
+        body: Center(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(maxWidth: isDesktop ? 480 : double.infinity),
+            child: Stack(
+              children: [
+                PageView.builder(
+                  controller: _pageController,
+                  scrollDirection: Axis.vertical,
+                  itemCount: clips.length,
+                  onPageChanged: (index) {
+                    setState(() => _currentPage = index);
                   },
-                );
-              },
-            ),
-            if (canPop)
-              const SafeArea(
-                child: Padding(
-                  padding: EdgeInsets.all(16.0),
-                  child: TvBackButton(showBackground: true),
+                  itemBuilder: (context, index) {
+                    final item = clips[index];
+                    final isCurrent = index == _currentPage;
+
+                    return ClipPlayerTile(
+                      key: ValueKey('clip_${item.id}'),
+                      item: item,
+                      isActive: isCurrent,
+                      isMuted: _isMuted,
+                      onToggleMute: () {
+                        setState(() => _isMuted = !_isMuted);
+                      },
+                    );
+                  },
                 ),
-              ),
-          ],
+                if (canPop)
+                  const SafeArea(
+                    child: Padding(
+                      padding: EdgeInsets.all(16.0),
+                      child: TvBackButton(showBackground: true),
+                    ),
+                  ),
+              ],
+            ),
+          ),
         ),
       ),
     );
@@ -130,6 +138,17 @@ class _ClipPlayerTileState extends State<ClipPlayerTile> {
   WebViewController? _webController;
   VideoPlayerController? _videoPlayerController;
   bool _isLiked = false;
+  bool _showMuteIndicator = false;
+  Timer? _muteTimer;
+
+  void _triggerMuteToggle() {
+    widget.onToggleMute();
+    _muteTimer?.cancel();
+    setState(() => _showMuteIndicator = true);
+    _muteTimer = Timer(const Duration(milliseconds: 1400), () {
+      if (mounted) setState(() => _showMuteIndicator = false);
+    });
+  }
 
   @override
   void initState() {
@@ -158,6 +177,7 @@ class _ClipPlayerTileState extends State<ClipPlayerTile> {
 
   @override
   void dispose() {
+    _muteTimer?.cancel();
     _disposeNativePlayer();
     super.dispose();
   }
@@ -361,11 +381,11 @@ class _ClipPlayerTileState extends State<ClipPlayerTile> {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Container(
-                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 5),
                 decoration: BoxDecoration(
                   color: Colors.black.withValues(alpha: 0.65),
-                  borderRadius: BorderRadius.circular(6),
-                  border: Border.all(color: AppTheme.primaryRed, width: 1.2),
+                  borderRadius: BorderRadius.circular(20),
+                  border: Border.all(color: AppTheme.primaryRed.withValues(alpha: 0.8), width: 1.2),
                 ),
                 child: const Row(
                   mainAxisSize: MainAxisSize.min,
@@ -385,12 +405,13 @@ class _ClipPlayerTileState extends State<ClipPlayerTile> {
                 ),
               ),
               GestureDetector(
-                onTap: widget.onToggleMute,
+                onTap: _triggerMuteToggle,
                 child: Container(
-                  padding: const EdgeInsets.all(8),
+                  padding: const EdgeInsets.all(9),
                   decoration: BoxDecoration(
                     color: Colors.black.withValues(alpha: 0.65),
                     shape: BoxShape.circle,
+                    border: Border.all(color: Colors.white24, width: 0.8),
                   ),
                   child: Icon(
                     widget.isMuted ? Icons.volume_off : Icons.volume_up,
@@ -402,6 +423,51 @@ class _ClipPlayerTileState extends State<ClipPlayerTile> {
             ],
           ),
         ),
+
+        // Animated Central Volume / Mute Feedback HUD
+        if (_showMuteIndicator)
+          Center(
+            child: IgnorePointer(
+              child: AnimatedOpacity(
+                duration: const Duration(milliseconds: 180),
+                opacity: _showMuteIndicator ? 1.0 : 0.0,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: 0.82),
+                    borderRadius: BorderRadius.circular(24),
+                    border: Border.all(color: Colors.white24, width: 1),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: 0.6),
+                        blurRadius: 16,
+                        offset: const Offset(0, 4),
+                      ),
+                    ],
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Icon(
+                        widget.isMuted ? Icons.volume_off_rounded : Icons.volume_up_rounded,
+                        color: Colors.white,
+                        size: 22,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        widget.isMuted ? 'Muted' : 'Sound On',
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.bold,
+                          fontSize: 14,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
 
         // 4. Right Side Actions (Reels / Netflix style vertical icons)
         Positioned(
@@ -520,15 +586,16 @@ class _ClipPlayerTileState extends State<ClipPlayerTile> {
               const SizedBox(height: 14),
               ElevatedButton.icon(
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: AppTheme.primaryRed,
-                  foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                  backgroundColor: Colors.white,
+                  foregroundColor: Colors.black,
+                  elevation: 0,
+                  padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
                 ),
-                icon: const Icon(Icons.play_arrow, color: Colors.white, size: 22),
+                icon: const Icon(Icons.play_arrow, color: Colors.black, size: 22),
                 label: Text(
                   widget.item.mediaType == 'tv' ? 'Watch Full Series' : 'Watch Full Movie',
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14),
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.black),
                 ),
                 onPressed: () {
                   Navigator.of(context).push(
@@ -564,12 +631,13 @@ class _ClipPlayerTileState extends State<ClipPlayerTile> {
         mainAxisSize: MainAxisSize.min,
         children: [
           Container(
-            padding: const EdgeInsets.all(10),
+            padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
               color: Colors.black.withValues(alpha: 0.55),
               shape: BoxShape.circle,
+              border: Border.all(color: Colors.white12, width: 0.8),
             ),
-            child: Icon(icon, color: color, size: 24),
+            child: Icon(icon, color: color, size: 22),
           ),
           const SizedBox(height: 4),
           Text(

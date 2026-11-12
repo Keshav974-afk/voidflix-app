@@ -18,10 +18,31 @@ import 'netflix_season_picker.dart';
 
 class DetailModal extends StatefulWidget {
   final MediaItem item;
+  final bool isDialog;
 
-  const DetailModal({super.key, required this.item});
+  const DetailModal({super.key, required this.item, this.isDialog = false});
 
   static Future<void> show(BuildContext context, MediaItem item) {
+    final isWide = MediaQuery.of(context).size.width >= 768;
+    if (isWide) {
+      return showDialog(
+        context: context,
+        barrierDismissible: true,
+        barrierColor: Colors.black.withValues(alpha: 0.75),
+        builder: (_) => Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 840, maxHeight: 720),
+            child: Material(
+              color: Colors.transparent,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(16),
+                child: DetailModal(item: item, isDialog: true),
+              ),
+            ),
+          ),
+        ),
+      );
+    }
     return showModalBottomSheet(
       context: context,
       isScrollControlled: true,
@@ -147,24 +168,27 @@ class _DetailModalState extends State<DetailModal> {
     final isTv = widget.item.mediaType == 'tv';
 
     return Container(
-      height: MediaQuery.of(context).size.height * 0.90,
-      decoration: const BoxDecoration(
-        color: Color(0xFF181818),
-        borderRadius: BorderRadius.vertical(top: Radius.circular(16)),
+      height: widget.isDialog ? null : MediaQuery.of(context).size.height * 0.90,
+      decoration: BoxDecoration(
+        color: const Color(0xFF181818),
+        borderRadius: widget.isDialog
+            ? BorderRadius.circular(16)
+            : const BorderRadius.vertical(top: Radius.circular(16)),
       ),
       clipBehavior: Clip.antiAlias,
       child: Column(
         children: [
-          // Drag handle indicator
-          Container(
-            margin: const EdgeInsets.only(top: 8, bottom: 4),
-            width: 40,
-            height: 4,
-            decoration: BoxDecoration(
-              color: Colors.white24,
-              borderRadius: BorderRadius.circular(2),
+          // Drag handle indicator (only on bottom sheet)
+          if (!widget.isDialog)
+            Container(
+              margin: const EdgeInsets.only(top: 8, bottom: 4),
+              width: 40,
+              height: 4,
+              decoration: BoxDecoration(
+                color: Colors.white24,
+                borderRadius: BorderRadius.circular(2),
+              ),
             ),
-          ),
           if (_isLoading)
             const LinearProgressIndicator(
               color: AppTheme.primaryRed,
@@ -428,7 +452,7 @@ class _DetailModalState extends State<DetailModal> {
                               foregroundColor: Colors.black,
                               elevation: 0,
                               shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(6),
+                                borderRadius: BorderRadius.circular(24),
                               ),
                             ),
                             icon: const Icon(Icons.play_arrow, color: Colors.black, size: 26),
@@ -475,7 +499,7 @@ class _DetailModalState extends State<DetailModal> {
                                     backgroundColor: const Color(0xFF262626),
                                     foregroundColor: Colors.white,
                                     elevation: 0,
-                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
                                   ),
                                   icon: SizedBox(
                                     width: 18,
@@ -514,7 +538,7 @@ class _DetailModalState extends State<DetailModal> {
                                     backgroundColor: const Color(0xFF262626),
                                     foregroundColor: Colors.white,
                                     elevation: 0,
-                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
                                   ),
                                   icon: const Icon(Icons.download_done_rounded, color: AppTheme.primaryRed, size: 22),
                                   label: Text(
@@ -549,7 +573,7 @@ class _DetailModalState extends State<DetailModal> {
                                   backgroundColor: const Color(0xFF262626),
                                   foregroundColor: Colors.white,
                                   elevation: 0,
-                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(6)),
+                                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
                                 ),
                                 icon: const Icon(Icons.file_download_outlined, color: Colors.white, size: 22),
                                 label: Text(

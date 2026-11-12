@@ -79,7 +79,7 @@ class Top10BadgeCard extends StatelessWidget {
               child: Container(
                 width: 120,
                 decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(8),
+                  borderRadius: BorderRadius.circular(12),
                   color: AppTheme.cardColor,
                   boxShadow: [
                     BoxShadow(

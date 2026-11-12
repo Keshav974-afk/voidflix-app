@@ -6,6 +6,7 @@ import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
 import '../core/constants/api_constants.dart';
 import '../core/constants/theme_constants.dart';
+import '../core/services/tv_mode_service.dart';
 import '../core/network/api_service.dart';
 import '../core/services/youtube_service.dart';
 import '../core/utils/platform_utils.dart';
@@ -136,12 +137,13 @@ class _DetailScreenState extends State<DetailScreen> {
           _isLoading = false;
         });
 
-        // Initialize trailer preview if available
+        // Initialize trailer preview if available (Only autoplay on Desktop/TV wide screens, NOT on mobile)
+        final isMobilePhone = !PlatformUtils.isDesktop && !TvModeService().isTvMode && MediaQuery.of(context).size.width < 768;
         final trailer = detail.videos.where((v) =>
             v.site.toLowerCase() == 'youtube' &&
             v.type.toLowerCase() == 'trailer').firstOrNull ??
             detail.videos.where((v) => v.site.toLowerCase() == 'youtube').firstOrNull;
-        if (trailer != null && trailer.key.isNotEmpty) {
+        if (!isMobilePhone && trailer != null && trailer.key.isNotEmpty) {
           _updateTrailerPlayer(trailer.key);
         }
 

@@ -1177,6 +1177,15 @@ class _PlayerScreenState extends State<PlayerScreen> {
             preferredAudio = profile.preferredAudioLang;
           }
         } catch (_) {}
+        if (preferredAudio == null || preferredAudio.isEmpty || preferredAudio == 'Original Audio') {
+          try {
+            final sp = await SharedPreferences.getInstance();
+            final savedAudio = sp.getString('voidflix_preferred_audio_lang');
+            if (savedAudio != null && savedAudio.isNotEmpty && savedAudio != 'Original Audio') {
+              preferredAudio = savedAudio;
+            }
+          } catch (_) {}
+        }
 
         streams = await StreamExtractor.extractNetMirror(
           type: widget.mediaType,
@@ -1234,6 +1243,16 @@ class _PlayerScreenState extends State<PlayerScreen> {
             preferredList = profile.preferredLanguages;
           }
         } catch (_) {}
+
+        if (preferredAudio == null || preferredAudio.isEmpty || preferredAudio == 'Original Audio') {
+          try {
+            final sp = await SharedPreferences.getInstance();
+            final savedAudio = sp.getString('voidflix_preferred_audio_lang');
+            if (savedAudio != null && savedAudio.isNotEmpty && savedAudio != 'Original Audio') {
+              preferredAudio = savedAudio;
+            }
+          } catch (_) {}
+        }
 
         final audioPrefs = [
           if (preferredAudio != null && preferredAudio.isNotEmpty) preferredAudio,
@@ -2762,9 +2781,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                         itemCount: audioOptions.length,
                                         itemBuilder: (c, idx) {
                                           final opt = audioOptions[idx];
-                                          final isSelected = opt.streamIndex == tempAudioIndex ||
-                                              (tempAudioIndex < _directStreams.length &&
-                                                  LanguageUtils.cleanLanguageName(_directStreams[tempAudioIndex].language).toLowerCase() == opt.label.toLowerCase());
+                                          final isSelected = opt.streamIndex == tempAudioIndex;
 
                                           final item = InkWell(
                                             borderRadius: BorderRadius.circular(8),

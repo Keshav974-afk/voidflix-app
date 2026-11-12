@@ -1566,13 +1566,12 @@ class StreamExtractor {
         String primaryDubId = dubSubjectId ?? defaultDubId ?? '';
         String primaryDubLabel = defaultLabel;
 
-        if (dubSubjectId == null && preferredAudioLang != null && availableDubs.isNotEmpty) {
-          final prefClean = preferredAudioLang.toLowerCase().replaceAll(RegExp(r'[^a-z]'), '');
+        if (dubSubjectId == null && preferredAudioLang != null && preferredAudioLang.isNotEmpty && availableDubs.isNotEmpty) {
           for (final d in availableDubs) {
-            final lClean = d['language']!.toLowerCase().replaceAll(RegExp(r'[^a-z]'), '');
-            if (lClean.contains(prefClean) || prefClean.contains(lClean)) {
+            final lang = d['language'] ?? '';
+            if (LanguageUtils.matches(lang, preferredAudioLang)) {
               primaryDubId = d['dubId']!;
-              primaryDubLabel = cleanDubLang(d['language']!, detectedOriginalLang);
+              primaryDubLabel = cleanDubLang(lang, detectedOriginalLang);
               break;
             }
           }

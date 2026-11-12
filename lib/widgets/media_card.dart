@@ -50,7 +50,7 @@ class MediaCard extends StatelessWidget {
       height: height,
       decoration: BoxDecoration(
         color: AppTheme.cardColor,
-        borderRadius: BorderRadius.circular(6),
+        borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.4),
@@ -158,7 +158,7 @@ class MediaCard extends StatelessWidget {
       child: TvFocusable(
         scaleFactor: 1.07,
         glowColor: AppTheme.primaryRed,
-        borderRadius: BorderRadius.circular(6),
+        borderRadius: BorderRadius.circular(12),
         onPressed: handleAction,
         child: cardContent,
       ),

@@ -221,7 +221,7 @@ class ContinueWatchingRow extends StatelessWidget {
               return Container(
                 width: 118,
                 decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(8),
+                  borderRadius: BorderRadius.circular(12),
                   color: const Color(0xFF141414),
                   border: Border.all(color: Colors.white.withValues(alpha: 0.06)),
                   boxShadow: [

@@ -374,7 +374,7 @@ class LanguageUtils {
     return result;
   }
 
-  /// Checks if candidate matches target language (handles codes, names, and native scripts)
+  /// Checks if candidate matches target language (handles codes, names, aliases, and native scripts)
   static bool matches(String? candidate, String target) {
     if (candidate == null) return false;
     final c = candidate.trim().toLowerCase();
@@ -382,7 +382,57 @@ class LanguageUtils {
     if (c.isEmpty || t.isEmpty) return false;
 
     if (c == t) return true;
-    if (c.contains(t) || t.contains(c)) return true;
+
+    // Direct alias mappings for high-priority language families
+    const hindiAliases = {'hi', 'hin', 'hindi', 'हिंदी', 'हिन्दी'};
+    if (hindiAliases.contains(t) || hindiAliases.contains(c)) {
+      if (hindiAliases.contains(c) || hindiAliases.contains(t)) return true;
+      if (c.contains('hindi') || c.contains('hin') || RegExp(r'\bhi\b').hasMatch(c)) return true;
+      if (t.contains('hindi') || t.contains('hin') || RegExp(r'\bhi\b').hasMatch(t)) return true;
+    }
+
+    const englishAliases = {'en', 'eng', 'english'};
+    if (englishAliases.contains(t) || englishAliases.contains(c)) {
+      if (englishAliases.contains(c) || englishAliases.contains(t)) return true;
+      if (c.contains('english') || c.contains('eng') || RegExp(r'\ben\b').hasMatch(c)) return true;
+      if (t.contains('english') || t.contains('eng') || RegExp(r'\ben\b').hasMatch(t)) return true;
+    }
+
+    const spanishAliases = {'es', 'spa', 'spanish', 'español', 'espanol'};
+    if (spanishAliases.contains(t) || spanishAliases.contains(c)) {
+      if (spanishAliases.contains(c) || spanishAliases.contains(t)) return true;
+      if (c.contains('spanish') || c.contains('espanol') || RegExp(r'\bes\b').hasMatch(c)) return true;
+      if (t.contains('spanish') || t.contains('espanol') || RegExp(r'\bes\b').hasMatch(t)) return true;
+    }
+
+    const japaneseAliases = {'ja', 'jpn', 'japanese', 'nihongo', '日本語'};
+    if (japaneseAliases.contains(t) || japaneseAliases.contains(c)) {
+      if (japaneseAliases.contains(c) || japaneseAliases.contains(t)) return true;
+      if (c.contains('japanese') || c.contains('japan') || RegExp(r'\bja\b').hasMatch(c)) return true;
+      if (t.contains('japanese') || t.contains('japan') || RegExp(r'\bja\b').hasMatch(t)) return true;
+    }
+
+    const koreanAliases = {'ko', 'kor', 'korean', 'hangul', '한국어'};
+    if (koreanAliases.contains(t) || koreanAliases.contains(c)) {
+      if (koreanAliases.contains(c) || koreanAliases.contains(t)) return true;
+      if (c.contains('korean') || c.contains('korea') || RegExp(r'\bko\b').hasMatch(c)) return true;
+      if (t.contains('korean') || t.contains('korea') || RegExp(r'\bko\b').hasMatch(t)) return true;
+    }
+
+    const frenchAliases = {'fr', 'fra', 'fre', 'french', 'français', 'francais'};
+    if (frenchAliases.contains(t) || frenchAliases.contains(c)) {
+      if (frenchAliases.contains(c) || frenchAliases.contains(t)) return true;
+      if (c.contains('french') || c.contains('francais') || RegExp(r'\bfr\b').hasMatch(c)) return true;
+    }
+
+    const germanAliases = {'de', 'deu', 'ger', 'german', 'deutsch'};
+    if (germanAliases.contains(t) || germanAliases.contains(c)) {
+      if (germanAliases.contains(c) || germanAliases.contains(t)) return true;
+      if (c.contains('german') || c.contains('deutsch') || RegExp(r'\bde\b').hasMatch(c)) return true;
+    }
+
+    // Only do substring check if length > 3 to avoid 2-letter collisions (e.g. 'in', 'hi', 'pa')
+    if (c.length > 3 && t.length > 3 && (c.contains(t) || t.contains(c))) return true;
 
     final infoC = getInfo(candidate);
     final infoT = getInfo(target);
@@ -394,7 +444,7 @@ class LanguageUtils {
   }
 
   /// Selects the best audio stream index following strict user priority:
-  /// 1. User-selected preferred languages from active profile
+  /// 1. User-selected preferred languages from active profile / settings
   /// 2. English fallback
   /// 3. Any / first available stream
   static int pickBestAudioIndex(
@@ -403,22 +453,27 @@ class LanguageUtils {
   }) {
     if (streams.isEmpty) return 0;
 
-    // 1. Try user preferred languages in order
+    // 1. Try user preferred languages in order (skipping subtitle-only releases)
     for (final pref in preferredLangs) {
-      if (pref.trim().isEmpty) continue;
+      if (pref.trim().isEmpty || pref.toLowerCase() == 'original audio' || pref.toLowerCase() == 'default') continue;
       final idx = streams.indexWhere(
-        (s) => matches(s.language, pref) || matches(s.sourceName, pref),
+        (s) => !isSubtitleOnly(s.language) &&
+               (matches(s.language, pref) || matches(s.sourceName, pref)),
       );
       if (idx != -1) return idx;
     }
 
     // 2. Fallback to English
     final enIdx = streams.indexWhere(
-      (s) => matches(s.language, 'en') || matches(s.sourceName, 'english'),
+      (s) => !isSubtitleOnly(s.language) &&
+             (matches(s.language, 'en') || matches(s.sourceName, 'english')),
     );
     if (enIdx != -1) return enIdx;
 
-    // 3. Any / first available
+    // 3. Any / first available non-subtitle-only stream
+    final firstNonSub = streams.indexWhere((s) => !isSubtitleOnly(s.language) && !isSubtitleOnly(s.sourceName));
+    if (firstNonSub != -1) return firstNonSub;
+
     return 0;
   }
 
