@@ -1,14 +1,22 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import 'package:provider/provider.dart';
 import 'package:share_plus/share_plus.dart';
+import 'package:video_player/video_player.dart';
+import 'package:webview_flutter/webview_flutter.dart';
+import 'package:webview_flutter_android/webview_flutter_android.dart';
 import '../core/constants/api_constants.dart';
 import '../core/constants/theme_constants.dart';
 import '../core/network/api_service.dart';
+import '../core/services/youtube_service.dart';
+import '../core/utils/language_utils.dart';
+import '../core/utils/platform_utils.dart';
 import '../models/media_item.dart';
 import '../models/media_detail.dart';
 import '../providers/download_provider.dart';
 import '../providers/history_provider.dart';
+import '../providers/profile_provider.dart';
 import '../providers/watchlist_provider.dart';
 import '../screens/downloads_screen.dart';
 import '../screens/player_screen.dart';
@@ -57,13 +65,25 @@ class DetailModal extends StatefulWidget {
 
 class _DetailModalState extends State<DetailModal> {
   final ApiService _apiService = ApiService();
+  final ScrollController _scrollController = ScrollController();
   MediaDetail? _detail;
   bool _isLoading = true;
   int _selectedSeason = 1;
   List<TvEpisode> _episodes = [];
   bool _isLoadingEpisodes = false;
-  int _selectedTab = 0; // 0: Episodes (if TV), 1: More Like This
+  int _selectedTab = 0; // 0: Episodes (tv) or Trailers (movie), etc.
   bool _isLiked = false;
+
+  // Trailer Player state
+  String? _trailerKey;
+  WebViewController? _trailerWebController;
+  VideoPlayerController? _trailerVideoController;
+  bool _isPlayingTrailer = false;
+  bool _isTrailerMuted = true;
+  bool _isTrailerLoading = false;
+  bool _showMuteToast = false;
+  Timer? _muteToastTimer;
+  Timer? _autoPlayTimer;
 
   @override
   void initState() {
@@ -71,12 +91,34 @@ class _DetailModalState extends State<DetailModal> {
     _loadDetail();
   }
 
+  @override
+  void dispose() {
+    _stopTrailer();
+    _scrollController.dispose();
+    super.dispose();
+  }
+
   Future<void> _loadDetail() async {
     try {
-      final detail = await _apiService.getDetails(widget.item.mediaType, widget.item.id);
+      final profileProvider = context.read<ProfileProvider>();
+      final activeProfile = profileProvider.activeProfile;
+      final pref = activeProfile.preferredAudioLang ??
+          (activeProfile.preferredLanguages.isNotEmpty ? activeProfile.preferredLanguages.first : null);
+      final prefLangCode = (pref != null && !pref.toLowerCase().contains('original'))
+          ? LanguageUtils.getInfo(pref).code.toLowerCase()
+          : null;
+
+      final detail = await _apiService.getDetails(
+        widget.item.mediaType,
+        widget.item.id,
+        languageCode: prefLangCode,
+      );
+
       if (mounted) {
+        final trailerKey = detail.findTrailerKey(preferredLangCode: prefLangCode);
         setState(() {
           _detail = detail;
+          _trailerKey = trailerKey;
           _isLoading = false;
         });
 
@@ -84,10 +126,157 @@ class _DetailModalState extends State<DetailModal> {
           _selectedSeason = detail.seasons.first.seasonNumber;
           _loadSeasonEpisodes(_selectedSeason);
         }
+
+        // Autoplay trailer preview smoothly after bottom sheet settles
+        if (trailerKey != null && trailerKey.isNotEmpty) {
+          _autoPlayTimer = Timer(const Duration(milliseconds: 650), () {
+            if (mounted) {
+              _initTrailer(trailerKey);
+            }
+          });
+        }
       }
     } catch (_) {
       if (mounted) setState(() => _isLoading = false);
     }
+  }
+
+  void _initTrailer(String key) {
+    if (key.isEmpty) return;
+    _stopTrailer(clearKey: false);
+    setState(() {
+      _trailerKey = key;
+      _isTrailerLoading = true;
+    });
+
+    if (PlatformUtils.isWebViewSupported) {
+      final controller = WebViewController()
+        ..setJavaScriptMode(JavaScriptMode.unrestricted)
+        ..setBackgroundColor(Colors.black)
+        ..setUserAgent('Mozilla/5.0 (Linux; Android 13; Pixel 7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Mobile Safari/537.36')
+        ..setNavigationDelegate(
+          NavigationDelegate(
+            onNavigationRequest: (request) {
+              if (request.url.contains('embed') ||
+                  request.url.startsWith('about:blank') ||
+                  request.url.startsWith('data:') ||
+                  request.url.contains('voidflix.org')) {
+                return NavigationDecision.navigate;
+              }
+              return NavigationDecision.prevent;
+            },
+            onPageFinished: (url) {
+              if (mounted) {
+                setState(() {
+                  _isTrailerLoading = false;
+                  _isPlayingTrailer = true;
+                });
+              }
+            },
+          ),
+        );
+
+      if (controller.platform is AndroidWebViewController) {
+        final android = controller.platform as AndroidWebViewController;
+        android.setMediaPlaybackRequiresUserGesture(false);
+        android.setMixedContentMode(MixedContentMode.alwaysAllow);
+        android.setAllowContentAccess(true);
+        android.setAllowFileAccess(true);
+      }
+
+      final html = YoutubeService.buildTrailerEmbedHtml(key, isMuted: _isTrailerMuted);
+      controller.loadHtmlString(html, baseUrl: 'https://voidflix.org');
+
+      if (mounted) {
+        setState(() {
+          _trailerWebController = controller;
+        });
+      }
+    } else {
+      _initNativeTrailer(key);
+    }
+  }
+
+  Future<void> _initNativeTrailer(String key) async {
+    try {
+      final directUrl = await YoutubeService.extractDirectStream(key);
+      if (!mounted) return;
+      if (directUrl != null && directUrl.isNotEmpty) {
+        final vc = VideoPlayerController.networkUrl(Uri.parse(directUrl));
+        await vc.initialize();
+        if (!mounted) {
+          vc.dispose();
+          return;
+        }
+        vc.setLooping(true);
+        vc.setVolume(_isTrailerMuted ? 0.0 : 1.0);
+        await vc.play();
+        if (mounted) {
+          setState(() {
+            _trailerVideoController = vc;
+            _isTrailerLoading = false;
+            _isPlayingTrailer = true;
+          });
+        }
+      } else {
+        if (mounted) setState(() => _isTrailerLoading = false);
+      }
+    } catch (_) {
+      if (mounted) setState(() => _isTrailerLoading = false);
+    }
+  }
+
+  void _toggleTrailerMute() {
+    final newMute = !_isTrailerMuted;
+    setState(() {
+      _isTrailerMuted = newMute;
+      _showMuteToast = true;
+    });
+    _muteToastTimer?.cancel();
+    _muteToastTimer = Timer(const Duration(milliseconds: 1400), () {
+      if (mounted) setState(() => _showMuteToast = false);
+    });
+
+    if (PlatformUtils.isWebViewSupported) {
+      final fn = newMute ? 'mute' : 'unMute';
+      _trailerWebController?.runJavaScript('''
+        var f = document.getElementById("trailer-frame");
+        if (f && f.contentWindow) {
+          f.contentWindow.postMessage('{"event":"command","func":"$fn","args":""}', '*');
+        }
+      ''');
+    } else {
+      _trailerVideoController?.setVolume(newMute ? 0.0 : 1.0);
+    }
+  }
+
+  void _stopTrailer({bool clearKey = true}) {
+    _autoPlayTimer?.cancel();
+    _muteToastTimer?.cancel();
+    try {
+      if (PlatformUtils.isWebViewSupported) {
+        _trailerWebController?.runJavaScript('''
+          var f = document.getElementById("trailer-frame");
+          if (f && f.contentWindow) {
+            f.contentWindow.postMessage('{"event":"command","func":"pauseVideo","args":""}', '*');
+          }
+          document.body.innerHTML = '';
+        ''');
+        _trailerWebController?.loadHtmlString('<html><body style="background:#000;"></body></html>');
+      }
+      _trailerWebController = null;
+      final vc = _trailerVideoController;
+      _trailerVideoController = null;
+      vc?.pause();
+      vc?.dispose();
+      if (mounted) {
+        setState(() {
+          _isPlayingTrailer = false;
+          _isTrailerLoading = false;
+          if (clearKey) _trailerKey = null;
+        });
+      }
+    } catch (_) {}
   }
 
   Future<void> _loadSeasonEpisodes(int seasonNumber) async {
@@ -112,6 +301,7 @@ class _DetailModalState extends State<DetailModal> {
     String? episodeTitle,
     double? startPositionSeconds,
   }) {
+    _stopTrailer();
     Navigator.of(context).pop(); // Dismiss modal
     final title = widget.item.mediaType == 'tv' && episodeTitle != null
         ? '${widget.item.title}: S${season}E$episode "$episodeTitle"'
@@ -198,53 +388,224 @@ class _DetailModalState extends State<DetailModal> {
 
           Expanded(
             child: CustomScrollView(
+              controller: _scrollController,
               slivers: [
-                // Top Backdrop / Trailer Section
+                // Top Backdrop / Trailer Section with Live Mobile Preview
                 SliverToBoxAdapter(
                   child: Stack(
                     children: [
-                      // Backdrop Image
+                      // 1. 16:9 Player / Backdrop Frame
                       AspectRatio(
                         aspectRatio: 16 / 9,
-                        child: backdropUrl.isNotEmpty
-                            ? CachedNetworkImage(
-                                imageUrl: backdropUrl,
-                                fit: BoxFit.cover,
-                                memCacheWidth: 780,
-                                memCacheHeight: 440,
-                                filterQuality: FilterQuality.low,
-                                placeholder: (c, u) => Container(color: const Color(0xFF222222)),
-                                errorWidget: (c, u, e) => Container(color: const Color(0xFF222222)),
+                        child: Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            // Backdrop Base Image
+                            backdropUrl.isNotEmpty
+                                ? CachedNetworkImage(
+                                    imageUrl: backdropUrl,
+                                    fit: BoxFit.cover,
+                                    memCacheWidth: 780,
+                                    memCacheHeight: 440,
+                                    filterQuality: FilterQuality.low,
+                                    placeholder: (c, u) => Container(color: const Color(0xFF222222)),
+                                    errorWidget: (c, u, e) => Container(color: const Color(0xFF222222)),
+                                  )
+                                : Container(color: const Color(0xFF222222)),
+
+                            // Interactive Trailer Video Player (Web or Native)
+                            if (_isPlayingTrailer && _trailerWebController != null)
+                              Positioned.fill(
+                                child: IgnorePointer(
+                                  ignoring: false,
+                                  child: WebViewWidget(controller: _trailerWebController!),
+                                ),
                               )
-                            : Container(color: const Color(0xFF222222)),
+                            else if (_isPlayingTrailer && _trailerVideoController != null && _trailerVideoController!.value.isInitialized)
+                              Positioned.fill(
+                                child: FittedBox(
+                                  fit: BoxFit.cover,
+                                  child: SizedBox(
+                                    width: _trailerVideoController!.value.size.width,
+                                    height: _trailerVideoController!.value.size.height,
+                                    child: VideoPlayer(_trailerVideoController!),
+                                  ),
+                                ),
+                              ),
+
+                            // Loading Spinner when trailer is buffering
+                            if (_isTrailerLoading)
+                              Container(
+                                color: Colors.black45,
+                                child: const Center(
+                                  child: SizedBox(
+                                    width: 32,
+                                    height: 32,
+                                    child: CircularProgressIndicator(color: AppTheme.primaryRed, strokeWidth: 2.5),
+                                  ),
+                                ),
+                              ),
+
+                            // "Play Trailer" overlay button when stopped or available
+                            if (_trailerKey != null && !_isPlayingTrailer && !_isTrailerLoading)
+                              Center(
+                                child: GestureDetector(
+                                  onTap: () => _initTrailer(_trailerKey!),
+                                  child: Container(
+                                    padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                                    decoration: BoxDecoration(
+                                      color: Colors.black.withValues(alpha: 0.75),
+                                      borderRadius: BorderRadius.circular(24),
+                                      border: Border.all(color: Colors.white38, width: 1),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: Colors.black.withValues(alpha: 0.5),
+                                          blurRadius: 10,
+                                        ),
+                                      ],
+                                    ),
+                                    child: const Row(
+                                      mainAxisSize: MainAxisSize.min,
+                                      children: [
+                                        Icon(Icons.play_arrow_rounded, color: Colors.white, size: 22),
+                                        SizedBox(width: 6),
+                                        Text(
+                                          'Preview Trailer',
+                                          style: TextStyle(
+                                            color: Colors.white,
+                                            fontWeight: FontWeight.bold,
+                                            fontSize: 13,
+                                          ),
+                                        ),
+                                      ],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
                       ),
 
                       // Gradient fade at bottom
                       Positioned.fill(
-                        child: Container(
-                          decoration: BoxDecoration(
-                            gradient: LinearGradient(
-                              begin: Alignment.topCenter,
-                              end: Alignment.bottomCenter,
-                              stops: const [0.0, 0.6, 1.0],
-                              colors: [
-                                Colors.transparent,
-                                Colors.black.withValues(alpha: 0.3),
-                                const Color(0xFF181818),
-                              ],
+                        child: IgnorePointer(
+                          child: Container(
+                            decoration: BoxDecoration(
+                              gradient: LinearGradient(
+                                begin: Alignment.topCenter,
+                                end: Alignment.bottomCenter,
+                                stops: const [0.0, 0.6, 1.0],
+                                colors: [
+                                  Colors.transparent,
+                                  Colors.black.withValues(alpha: 0.3),
+                                  const Color(0xFF181818),
+                                ],
+                              ),
                             ),
                           ),
                         ),
                       ),
 
-                      // Close button top right - clean, fittable, touch-friendly UI
+                      // Trailer Badge on Top Left
+                      Positioned(
+                        top: 12,
+                        left: 14,
+                        child: Container(
+                          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                          decoration: BoxDecoration(
+                            color: Colors.black.withValues(alpha: 0.65),
+                            borderRadius: BorderRadius.circular(16),
+                            border: Border.all(color: AppTheme.primaryRed.withValues(alpha: 0.8), width: 1),
+                          ),
+                          child: const Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              Icon(Icons.movie_filter_outlined, color: AppTheme.primaryRed, size: 12),
+                              SizedBox(width: 5),
+                              Text(
+                                'OFFICIAL TRAILER',
+                                style: TextStyle(
+                                  color: Colors.white,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w900,
+                                  letterSpacing: 0.8,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+
+                      // Sound Mute Toggle on Bottom Right (when trailer is playing)
+                      if (_isPlayingTrailer)
+                        Positioned(
+                          bottom: 12,
+                          right: 14,
+                          child: GestureDetector(
+                            onTap: _toggleTrailerMute,
+                            child: Container(
+                              padding: const EdgeInsets.all(8),
+                              decoration: BoxDecoration(
+                                color: Colors.black.withValues(alpha: 0.75),
+                                shape: BoxShape.circle,
+                                border: Border.all(color: Colors.white24, width: 0.8),
+                              ),
+                              child: Icon(
+                                _isTrailerMuted ? Icons.volume_off_rounded : Icons.volume_up_rounded,
+                                color: Colors.white,
+                                size: 18,
+                              ),
+                            ),
+                          ),
+                        ),
+
+                      // Central Sound HUD indicator
+                      if (_showMuteToast)
+                        Positioned.fill(
+                          child: Center(
+                            child: IgnorePointer(
+                              child: Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                                decoration: BoxDecoration(
+                                  color: Colors.black.withValues(alpha: 0.85),
+                                  borderRadius: BorderRadius.circular(20),
+                                  border: Border.all(color: Colors.white24, width: 0.8),
+                                ),
+                                child: Row(
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Icon(
+                                      _isTrailerMuted ? Icons.volume_off_rounded : Icons.volume_up_rounded,
+                                      color: Colors.white,
+                                      size: 18,
+                                    ),
+                                    const SizedBox(width: 6),
+                                    Text(
+                                      _isTrailerMuted ? 'Muted' : 'Sound On',
+                                      style: const TextStyle(
+                                        color: Colors.white,
+                                        fontWeight: FontWeight.bold,
+                                        fontSize: 13,
+                                      ),
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                          ),
+                        ),
+
+                      // Close button top right - stops trailer and pops modal
                       Positioned(
                         top: 12,
                         right: 14,
                         child: Material(
                           color: Colors.transparent,
                           child: InkWell(
-                            onTap: () => Navigator.of(context).pop(),
+                            onTap: () {
+                              _stopTrailer();
+                              Navigator.of(context).pop();
+                            },
                             borderRadius: BorderRadius.circular(20),
                             child: Container(
                               width: 36,
@@ -701,7 +1062,7 @@ class _DetailModalState extends State<DetailModal> {
                   ),
                 ),
 
-                // TV Shows: Episodes / More Like This Tabs
+                // TV Shows: Episodes (0) / Trailers & More (1) / More Like This (2)
                 if (isTv) ...[
                   SliverToBoxAdapter(
                     child: Padding(
@@ -715,9 +1076,15 @@ class _DetailModalState extends State<DetailModal> {
                           ),
                           const SizedBox(width: 16),
                           _buildTabButton(
-                            title: 'More Like This',
+                            title: 'Trailers & More',
                             isSelected: _selectedTab == 1,
                             onTap: () => setState(() => _selectedTab = 1),
+                          ),
+                          const SizedBox(width: 16),
+                          _buildTabButton(
+                            title: 'More Like This',
+                            isSelected: _selectedTab == 2,
+                            onTap: () => setState(() => _selectedTab = 2),
                           ),
                         ],
                       ),
@@ -977,26 +1344,40 @@ class _DetailModalState extends State<DetailModal> {
                           childCount: _episodes.length,
                         ),
                       ),
+                  ] else if (_selectedTab == 1) ...[
+                    // Trailers & More Grid / List
+                    _buildTrailersSliver(),
                   ] else ...[
                     // Recommendations Grid
                     _buildRecommendationsSliver(),
                   ],
                 ] else ...[
-                  // Movies: More Like This
+                  // Movies: Trailers & More (0) / More Like This (1)
                   SliverToBoxAdapter(
                     child: Padding(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-                      child: const Text(
-                        'More Like This',
-                        style: TextStyle(
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                          color: Colors.white,
-                        ),
+                      padding: const EdgeInsets.symmetric(horizontal: 16),
+                      child: Row(
+                        children: [
+                          _buildTabButton(
+                            title: 'Trailers & More',
+                            isSelected: _selectedTab == 0,
+                            onTap: () => setState(() => _selectedTab = 0),
+                          ),
+                          const SizedBox(width: 16),
+                          _buildTabButton(
+                            title: 'More Like This',
+                            isSelected: _selectedTab == 1,
+                            onTap: () => setState(() => _selectedTab = 1),
+                          ),
+                        ],
                       ),
                     ),
                   ),
-                  _buildRecommendationsSliver(),
+                  if (_selectedTab == 0) ...[
+                    _buildTrailersSliver(),
+                  ] else ...[
+                    _buildRecommendationsSliver(),
+                  ],
                 ],
 
                 const SliverToBoxAdapter(child: SizedBox(height: 32)),
@@ -1065,6 +1446,166 @@ class _DetailModalState extends State<DetailModal> {
     );
   }
 
+  Widget _buildTrailersSliver() {
+    final vids = _detail?.videos ?? [];
+    if (vids.isEmpty && (_trailerKey == null || _trailerKey!.isEmpty)) {
+      return const SliverToBoxAdapter(
+        child: Padding(
+          padding: EdgeInsets.symmetric(vertical: 36, horizontal: 16),
+          child: Center(
+            child: Text(
+              'No trailers available for this title.',
+              style: TextStyle(color: Colors.white54, fontSize: 13),
+            ),
+          ),
+        ),
+      );
+    }
+
+    final backdropUrl = ApiConstants.getImageUrl(
+      widget.item.backdropPath ?? widget.item.posterPath,
+      size: 'w780',
+    );
+
+    final displayList = vids.isNotEmpty
+        ? vids
+        : [
+            MediaVideo(
+              id: '1',
+              name: 'Official Trailer',
+              key: _trailerKey!,
+              site: 'YouTube',
+              type: 'Trailer',
+            )
+          ];
+
+    return SliverPadding(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+      sliver: SliverList(
+        delegate: SliverChildBuilderDelegate(
+          (context, index) {
+            final v = displayList[index];
+            final thumb = v.youtubeThumbnailUrl.isNotEmpty ? v.youtubeThumbnailUrl : backdropUrl;
+            final isCurrent = v.key == _trailerKey && _isPlayingTrailer;
+
+            return InkWell(
+              onTap: () {
+                _initTrailer(v.key);
+                if (_scrollController.hasClients) {
+                  _scrollController.animateTo(
+                    0,
+                    duration: const Duration(milliseconds: 300),
+                    curve: Curves.easeOut,
+                  );
+                }
+              },
+              borderRadius: BorderRadius.circular(8),
+              child: Container(
+                margin: const EdgeInsets.only(bottom: 12),
+                padding: const EdgeInsets.all(8),
+                decoration: BoxDecoration(
+                  color: isCurrent ? AppTheme.primaryRed.withValues(alpha: 0.15) : const Color(0xFF222222),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(
+                    color: isCurrent ? AppTheme.primaryRed : Colors.white.withValues(alpha: 0.08),
+                    width: 1.2,
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    // 16:9 Thumbnail
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(6),
+                      child: Stack(
+                        alignment: Alignment.center,
+                        children: [
+                          CachedNetworkImage(
+                            imageUrl: thumb,
+                            width: 120,
+                            height: 68,
+                            fit: BoxFit.cover,
+                            placeholder: (c, u) => Container(width: 120, height: 68, color: Colors.black26),
+                            errorWidget: (c, u, e) => Container(width: 120, height: 68, color: Colors.black26),
+                          ),
+                          Container(
+                            width: 28,
+                            height: 28,
+                            decoration: BoxDecoration(
+                              shape: BoxShape.circle,
+                              color: isCurrent ? AppTheme.primaryRed : Colors.black.withValues(alpha: 0.7),
+                              border: Border.all(color: Colors.white70, width: 1),
+                            ),
+                            child: Icon(
+                              isCurrent ? Icons.volume_up_rounded : Icons.play_arrow_rounded,
+                              color: Colors.white,
+                              size: 16,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    // Title & Tag
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            v.name,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              color: isCurrent ? Colors.white : Colors.white.withValues(alpha: 0.9),
+                              fontWeight: isCurrent ? FontWeight.bold : FontWeight.w600,
+                              fontSize: 13,
+                            ),
+                          ),
+                          const SizedBox(height: 4),
+                          Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: Colors.white.withValues(alpha: 0.1),
+                                  borderRadius: BorderRadius.circular(4),
+                                ),
+                                child: Text(
+                                  v.type.toUpperCase(),
+                                  style: const TextStyle(
+                                    color: Colors.white70,
+                                    fontSize: 9,
+                                    fontWeight: FontWeight.bold,
+                                    letterSpacing: 0.5,
+                                  ),
+                                ),
+                              ),
+                              if (isCurrent) ...[
+                                const SizedBox(width: 8),
+                                const Text(
+                                  'Playing Now',
+                                  style: TextStyle(
+                                    color: AppTheme.primaryRed,
+                                    fontSize: 10,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                              ],
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            );
+          },
+          childCount: displayList.length,
+        ),
+      ),
+    );
+  }
+
   Widget _buildRecommendationsSliver() {
     final recs = _detail?.recommendations ?? [];
     if (recs.isEmpty) {
@@ -1092,6 +1633,11 @@ class _DetailModalState extends State<DetailModal> {
             return MediaCard(
               item: recs[index],
               forceType: widget.item.mediaType,
+              onTap: () {
+                _stopTrailer();
+                Navigator.of(context).pop();
+                DetailModal.show(context, recs[index].copyWith(mediaType: widget.item.mediaType));
+              },
             );
           },
           childCount: recs.length,

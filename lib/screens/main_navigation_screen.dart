@@ -114,7 +114,7 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
                   ],
                 ),
                 // Tab 1: Clips
-                _loadedBottomTabs.contains(1) ? const ClipsScreen() : const SizedBox.shrink(),
+                _loadedBottomTabs.contains(1) ? ClipsScreen(isActive: _bottomTabIndex == 1) : const SizedBox.shrink(),
                 // Tab 2: Search
                 _loadedBottomTabs.contains(2) ? const SearchScreen() : const SizedBox.shrink(),
                 // Tab 3: My Voidflix

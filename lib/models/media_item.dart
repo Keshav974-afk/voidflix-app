@@ -65,6 +65,36 @@ class MediaItem {
     };
   }
 
+  MediaItem copyWith({
+    int? id,
+    String? title,
+    String? posterPath,
+    String? backdropPath,
+    String? overview,
+    double? voteAverage,
+    String? releaseDate,
+    String? mediaType,
+    List<int>? genreIds,
+    bool? isAdult,
+    String? originalLanguage,
+    double? popularity,
+  }) {
+    return MediaItem(
+      id: id ?? this.id,
+      title: title ?? this.title,
+      posterPath: posterPath ?? this.posterPath,
+      backdropPath: backdropPath ?? this.backdropPath,
+      overview: overview ?? this.overview,
+      voteAverage: voteAverage ?? this.voteAverage,
+      releaseDate: releaseDate ?? this.releaseDate,
+      mediaType: mediaType ?? this.mediaType,
+      genreIds: genreIds ?? this.genreIds,
+      isAdult: isAdult ?? this.isAdult,
+      originalLanguage: originalLanguage ?? this.originalLanguage,
+      popularity: popularity ?? this.popularity,
+    );
+  }
+
   String get displayTitle => title;
 
   String get year {

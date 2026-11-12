@@ -12,16 +12,20 @@ import '../core/constants/api_constants.dart';
 import '../core/network/api_service.dart';
 import '../core/services/youtube_service.dart';
 import '../core/services/tv_mode_service.dart';
+import '../core/utils/language_utils.dart';
 import '../core/utils/platform_utils.dart';
 import '../models/media_item.dart';
 import '../providers/media_provider.dart';
+import '../providers/profile_provider.dart';
 import '../providers/watchlist_provider.dart';
 import '../widgets/detail_modal.dart';
 import '../widgets/tv_back_button.dart';
 import 'player_screen.dart';
 
 class ClipsScreen extends StatefulWidget {
-  const ClipsScreen({super.key});
+  final bool isActive;
+
+  const ClipsScreen({super.key, this.isActive = true});
 
   @override
   State<ClipsScreen> createState() => _ClipsScreenState();
@@ -38,6 +42,43 @@ class _ClipsScreenState extends State<ClipsScreen> {
     super.dispose();
   }
 
+  List<MediaItem> _buildClipsFeed(MediaProvider media, String? langCode) {
+    final Set<int> seenIds = {};
+    final List<MediaItem> feed = [];
+
+    void addItems(List<MediaItem> items) {
+      for (final it in items) {
+        if (seenIds.add(it.id)) {
+          feed.add(it);
+        }
+      }
+    }
+
+    if (langCode == 'hi' || langCode == 'pa' || langCode == 'ta' || langCode == 'te' || langCode == 'ml') {
+      addItems(media.bollywoodMovies);
+      addItems(media.indianSeries);
+      addItems(media.southIndianMovies);
+      addItems(media.trending);
+      addItems(media.popularMovies);
+    } else if (langCode == 'ko') {
+      addItems(media.asianDrama);
+      addItems(media.trending);
+      addItems(media.popularMovies);
+    } else if (langCode == 'ja') {
+      addItems(media.anime);
+      addItems(media.animeMovies);
+      addItems(media.trending);
+      addItems(media.popularMovies);
+    } else {
+      addItems(media.trending);
+      addItems(media.popularMovies);
+      addItems(media.trendingTV);
+      addItems(media.nowPlayingMovies);
+    }
+
+    return feed.isEmpty ? media.trending : feed;
+  }
+
   @override
   Widget build(BuildContext context) {
     // Strictly exclude Clips from Android TV mode
@@ -51,7 +92,16 @@ class _ClipsScreenState extends State<ClipsScreen> {
     }
 
     final mediaProvider = context.watch<MediaProvider>();
-    final clips = mediaProvider.trending;
+    final profileProvider = context.watch<ProfileProvider>();
+    final activeProfile = profileProvider.activeProfile;
+
+    final pref = activeProfile.preferredAudioLang ??
+        (activeProfile.preferredLanguages.isNotEmpty ? activeProfile.preferredLanguages.first : null);
+    final prefLangCode = (pref != null && !pref.toLowerCase().contains('original'))
+        ? LanguageUtils.getInfo(pref).code.toLowerCase()
+        : null;
+
+    final clips = _buildClipsFeed(mediaProvider, prefLangCode);
     final canPop = Navigator.of(context).canPop();
 
     if (clips.isEmpty) {
@@ -89,8 +139,9 @@ class _ClipsScreenState extends State<ClipsScreen> {
                     return ClipPlayerTile(
                       key: ValueKey('clip_${item.id}'),
                       item: item,
-                      isActive: isCurrent,
+                      isActive: widget.isActive && isCurrent,
                       isMuted: _isMuted,
+                      preferredLangCode: prefLangCode,
                       onToggleMute: () {
                         setState(() => _isMuted = !_isMuted);
                       },
@@ -117,6 +168,7 @@ class ClipPlayerTile extends StatefulWidget {
   final MediaItem item;
   final bool isActive;
   final bool isMuted;
+  final String? preferredLangCode;
   final VoidCallback onToggleMute;
 
   const ClipPlayerTile({
@@ -124,6 +176,7 @@ class ClipPlayerTile extends StatefulWidget {
     required this.item,
     required this.isActive,
     required this.isMuted,
+    this.preferredLangCode,
     required this.onToggleMute,
   });
 
@@ -159,25 +212,77 @@ class _ClipPlayerTileState extends State<ClipPlayerTile> {
   @override
   void didUpdateWidget(covariant ClipPlayerTile oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.isActive != widget.isActive || oldWidget.isMuted != widget.isMuted) {
-      if (PlatformUtils.isWebViewSupported) {
-        if (widget.isActive && _trailerKey != null) {
-          _initWebController(_trailerKey!);
-        }
+    if (oldWidget.isActive != widget.isActive) {
+      if (widget.isActive) {
+        _resumeClip();
       } else {
-        _videoPlayerController?.setVolume(widget.isMuted ? 0.0 : 1.0);
-        if (widget.isActive) {
-          _videoPlayerController?.play();
-        } else {
-          _videoPlayerController?.pause();
-        }
+        _pauseClip();
       }
+    }
+    if (oldWidget.isMuted != widget.isMuted) {
+      _applyMute(widget.isMuted);
+    }
+  }
+
+  void _pauseClip() {
+    if (PlatformUtils.isWebViewSupported) {
+      _webController?.runJavaScript('''
+        var f = document.getElementById("trailer-frame");
+        if (f && f.contentWindow) {
+          f.contentWindow.postMessage('{"event":"command","func":"pauseVideo","args":""}', '*');
+        }
+      ''');
+    } else {
+      _videoPlayerController?.pause();
+    }
+  }
+
+  void _resumeClip() {
+    if (!widget.isActive) return;
+    if (_trailerKey == null) return;
+
+    if (PlatformUtils.isWebViewSupported) {
+      if (_webController != null) {
+        _webController?.runJavaScript('''
+          var f = document.getElementById("trailer-frame");
+          if (f && f.contentWindow) {
+            f.contentWindow.postMessage('{"event":"command","func":"playVideo","args":""}', '*');
+          }
+        ''');
+      } else {
+        _initWebController(_trailerKey!);
+      }
+    } else {
+      if (_videoPlayerController != null) {
+        _videoPlayerController?.play();
+      } else {
+        _initNativePlayer(_trailerKey!);
+      }
+    }
+  }
+
+  void _applyMute(bool muted) {
+    if (PlatformUtils.isWebViewSupported) {
+      final fn = muted ? 'mute' : 'unMute';
+      _webController?.runJavaScript('''
+        var f = document.getElementById("trailer-frame");
+        if (f && f.contentWindow) {
+          f.contentWindow.postMessage('{"event":"command","func":"$fn","args":""}', '*');
+        }
+      ''');
+    } else {
+      _videoPlayerController?.setVolume(muted ? 0.0 : 1.0);
     }
   }
 
   @override
   void dispose() {
     _muteTimer?.cancel();
+    _pauseClip();
+    try {
+      _webController?.loadHtmlString('<html><body style="background:#000;"></body></html>');
+    } catch (_) {}
+    _webController = null;
     _disposeNativePlayer();
     super.dispose();
   }
@@ -190,25 +295,25 @@ class _ClipPlayerTileState extends State<ClipPlayerTile> {
 
   Future<void> _fetchTrailer() async {
     try {
-      final detail = await _apiService.getDetails(widget.item.mediaType, widget.item.id);
+      final detail = await _apiService.getDetails(
+        widget.item.mediaType,
+        widget.item.id,
+        languageCode: widget.preferredLangCode,
+      );
       if (!mounted) return;
 
       if (detail.logoPath != null && detail.logoPath!.isNotEmpty) {
         _logoPath = detail.logoPath;
       }
 
-      final trailer = detail.videos.where((v) =>
-          v.site.toLowerCase() == 'youtube' &&
-          v.type.toLowerCase() == 'trailer').firstOrNull ??
-          detail.videos.where((v) => v.site.toLowerCase() == 'youtube').firstOrNull;
-
-      if (trailer != null && trailer.key.isNotEmpty) {
-        _trailerKey = trailer.key;
+      final key = detail.findTrailerKey(preferredLangCode: widget.preferredLangCode);
+      if (key != null && key.isNotEmpty) {
+        _trailerKey = key;
         if (widget.isActive) {
           if (PlatformUtils.isWebViewSupported) {
-            _initWebController(trailer.key);
+            _initWebController(key);
           } else {
-            _initNativePlayer(trailer.key);
+            _initNativePlayer(key);
           }
         }
       }
@@ -344,9 +449,13 @@ class _ClipPlayerTileState extends State<ClipPlayerTile> {
               ),
               icon: const Icon(Icons.play_arrow_rounded, size: 24),
               label: const Text('Watch Trailer on YouTube', style: TextStyle(fontWeight: FontWeight.bold)),
-              onPressed: () {
+              onPressed: () async {
+                _pauseClip();
                 final ytUrl = 'https://www.youtube.com/watch?v=$_trailerKey';
-                launchUrl(Uri.parse(ytUrl), mode: LaunchMode.externalApplication);
+                await launchUrl(Uri.parse(ytUrl), mode: LaunchMode.externalApplication);
+                if (mounted && widget.isActive) {
+                  _resumeClip();
+                }
               },
             ),
           ),
@@ -517,7 +626,13 @@ class _ClipPlayerTileState extends State<ClipPlayerTile> {
                 icon: Icons.info_outline,
                 label: 'Details',
                 color: Colors.white,
-                onTap: () => DetailModal.show(context, widget.item),
+                onTap: () async {
+                  _pauseClip();
+                  await DetailModal.show(context, widget.item);
+                  if (mounted && widget.isActive) {
+                    _resumeClip();
+                  }
+                },
               ),
             ],
           ),
@@ -597,8 +712,9 @@ class _ClipPlayerTileState extends State<ClipPlayerTile> {
                   widget.item.mediaType == 'tv' ? 'Watch Full Series' : 'Watch Full Movie',
                   style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14, color: Colors.black),
                 ),
-                onPressed: () {
-                  Navigator.of(context).push(
+                onPressed: () async {
+                  _pauseClip();
+                  await Navigator.of(context).push(
                     MaterialPageRoute(
                       builder: (_) => PlayerScreen(
                         mediaId: widget.item.id,
@@ -609,6 +725,9 @@ class _ClipPlayerTileState extends State<ClipPlayerTile> {
                       ),
                     ),
                   );
+                  if (mounted && widget.isActive) {
+                    _resumeClip();
+                  }
                 },
               ),
             ],

@@ -349,11 +349,17 @@ class ApiService {
     }
   }
 
-  Future<MediaDetail> getDetails(String type, int id) async {
-    final data = await _get('/$type/$id', {
+  Future<MediaDetail> getDetails(String type, int id, {String? languageCode}) async {
+    final queryParams = <String, String>{
       'append_to_response': 'credits,recommendations,videos,release_dates,content_ratings,images',
       'include_image_language': 'en,null',
-    });
+    };
+    if (languageCode != null && languageCode.isNotEmpty) {
+      queryParams['include_video_language'] = '$languageCode,en,null';
+    } else {
+      queryParams['include_video_language'] = 'en,null';
+    }
+    final data = await _get('/$type/$id', queryParams);
     return MediaDetail.fromJson(data as Map<String, dynamic>, type);
   }
 

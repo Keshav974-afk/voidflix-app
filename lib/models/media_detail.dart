@@ -81,6 +81,7 @@ class MediaVideo {
   final String key;
   final String site;
   final String type;
+  final String iso6391;
 
   MediaVideo({
     required this.id,
@@ -88,6 +89,7 @@ class MediaVideo {
     required this.key,
     required this.site,
     required this.type,
+    this.iso6391 = 'en',
   });
 
   factory MediaVideo.fromJson(Map<String, dynamic> json) {
@@ -97,6 +99,7 @@ class MediaVideo {
       key: (json['key'] ?? '') as String,
       site: (json['site'] ?? 'YouTube') as String,
       type: (json['type'] ?? 'Trailer') as String,
+      iso6391: (json['iso_639_1'] ?? 'en') as String,
     );
   }
 
@@ -230,6 +233,52 @@ class MediaDetail {
       logoPath: logoPath,
       originalLanguage: json['original_language'] as String?,
     );
+  }
+
+  String? findTrailerKey({String? preferredLangCode}) {
+    if (videos.isEmpty) return trailerKey;
+    final ytVideos = videos.where((v) => v.site.toLowerCase() == 'youtube' && v.key.isNotEmpty).toList();
+    if (ytVideos.isEmpty) return trailerKey;
+
+    // 1. Check preferred language
+    if (preferredLangCode != null && preferredLangCode.isNotEmpty) {
+      final code = preferredLangCode.toLowerCase().trim();
+      final prefTrailer = ytVideos.cast<MediaVideo?>().firstWhere(
+        (v) => (v!.type.toLowerCase() == 'trailer' || v.type.toLowerCase() == 'teaser') && v.iso6391.toLowerCase() == code,
+        orElse: () => ytVideos.cast<MediaVideo?>().firstWhere(
+          (v) => v!.iso6391.toLowerCase() == code,
+          orElse: () => ytVideos.cast<MediaVideo?>().firstWhere(
+            (v) => v!.name.toLowerCase().contains(code),
+            orElse: () => null,
+          ),
+        ),
+      );
+      if (prefTrailer != null) return prefTrailer.key;
+    }
+
+    // 2. Check original language
+    if (originalLanguage != null && originalLanguage!.isNotEmpty) {
+      final origCode = originalLanguage!.toLowerCase().trim();
+      final origTrailer = ytVideos.cast<MediaVideo?>().firstWhere(
+        (v) => (v!.type.toLowerCase() == 'trailer' || v.type.toLowerCase() == 'teaser') && v.iso6391.toLowerCase() == origCode,
+        orElse: () => null,
+      );
+      if (origTrailer != null) return origTrailer.key;
+    }
+
+    // 3. Fallback to English trailer
+    final enTrailer = ytVideos.cast<MediaVideo?>().firstWhere(
+      (v) => (v!.type.toLowerCase() == 'trailer' || v.type.toLowerCase() == 'teaser') && v.iso6391.toLowerCase() == 'en',
+      orElse: () => null,
+    );
+    if (enTrailer != null) return enTrailer.key;
+
+    // 4. Any Trailer or Teaser
+    final anyTrailer = ytVideos.cast<MediaVideo?>().firstWhere(
+      (v) => (v!.type.toLowerCase() == 'trailer' || v.type.toLowerCase() == 'teaser'),
+      orElse: () => ytVideos.first,
+    );
+    return anyTrailer?.key ?? trailerKey;
   }
 
   MediaItem toMediaItem() {
