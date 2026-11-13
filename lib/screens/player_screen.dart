@@ -2178,13 +2178,16 @@ class _PlayerScreenState extends State<PlayerScreen> {
             ),
           );
           try {
-            SharePlus.instance.share(
-              ShareParams(
-                files: [XFile(exportedFile.path)],
-                text: 'Watch this moment from "${widget.mediaTitle}" on Voidflix!\nhttps://voidflix.org/${widget.mediaType}/${widget.mediaId}',
-                subject: 'Voidflix Moment: ${widget.mediaTitle}',
-              ),
-            );
+                final shareUrl = widget.mediaType == 'tv'
+                    ? 'https://voidflix.org/watch/tv/${widget.mediaId}?s=${widget.season}&e=${widget.episode}'
+                    : 'https://voidflix.org/watch/movie/${widget.mediaId}';
+                SharePlus.instance.share(
+                  ShareParams(
+                    files: [XFile(exportedFile.path)],
+                    text: 'Watch this moment from "${widget.mediaTitle}" on Voidflix!\n$shareUrl',
+                    subject: 'Voidflix Moment: ${widget.mediaTitle}',
+                  ),
+                );
           } catch (_) {}
         } else {
           ScaffoldMessenger.of(context).showSnackBar(

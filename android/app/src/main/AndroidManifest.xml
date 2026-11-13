@@ -40,6 +40,24 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
                 <category android:name="android.intent.category.LEANBACK_LAUNCHER"/>
             </intent-filter>
+
+            <!-- Deep linking: Custom scheme voidflix:// -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="voidflix" />
+            </intent-filter>
+
+            <!-- Deep linking: Web URLs https://voidflix.org/* -->
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host="voidflix.org" />
+                <data android:scheme="https" android:host="www.voidflix.org" />
+                <data android:scheme="http" android:host="voidflix.org" />
+            </intent-filter>
         </activity>
 
         <service

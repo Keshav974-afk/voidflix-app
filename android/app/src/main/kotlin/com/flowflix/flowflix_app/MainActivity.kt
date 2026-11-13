@@ -34,6 +34,7 @@ class MainActivity : FlutterActivity() {
     private var wakeLock: PowerManager.WakeLock? = null
     private var multicastLock: android.net.wifi.WifiManager.MulticastLock? = null
     private val finishedDownloadIds = HashSet<Int>()
+    private var initialDeepLink: String? = null
 
     private fun applyEdgeToEdgeCutout() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
@@ -55,6 +56,7 @@ class MainActivity : FlutterActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         applyEdgeToEdgeCutout()
         super.onCreate(savedInstanceState)
+        intent?.dataString?.let { initialDeepLink = it }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             try {
                 applyEdgeToEdgeCutout()
@@ -76,6 +78,16 @@ class MainActivity : FlutterActivity() {
         }
         // Start background notification watcher so alerts work even when app is closed
         VoidflixNotificationChecker.startBackgroundWatcher(applicationContext)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        intent.dataString?.let { link ->
+            flutterEngine?.dartExecutor?.binaryMessenger?.let { messenger ->
+                MethodChannel(messenger, CHANNEL).invokeMethod("onDeepLink", link)
+            }
+        }
     }
 
     override fun onResume() {
@@ -132,6 +144,10 @@ class MainActivity : FlutterActivity() {
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
             when (call.method) {
+                "getInitialDeepLink" -> {
+                    result.success(initialDeepLink)
+                    initialDeepLink = null
+                }
                 "isPipSupported" -> {
                     val supported = Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
                             packageManager.hasSystemFeature(android.content.pm.PackageManager.FEATURE_PICTURE_IN_PICTURE)

@@ -8,6 +8,7 @@ import 'package:fvp/fvp.dart' as fvp;
 import 'package:window_manager/window_manager.dart';
 import 'core/constants/theme_constants.dart';
 import 'core/services/app_logger.dart';
+import 'core/services/deep_link_service.dart';
 import 'core/services/tv_mode_service.dart';
 import 'core/services/cast_service.dart';
 import 'core/services/voidcast_service.dart';
@@ -29,8 +30,11 @@ class VoidflixHttpOverrides extends HttpOverrides {
   }
 }
 
+final GlobalKey<NavigatorState> navigatorKey = GlobalKey<NavigatorState>();
+
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  DeepLinkService.instance.init(navigatorKey);
 
   // High-performance display & input tuning (smooth 90Hz/120Hz VSYNC touch resampling)
   GestureBinding.instance.resamplingEnabled = true;
@@ -155,6 +159,7 @@ class FlowflixApp extends StatelessWidget {
         ChangeNotifierProvider(create: (_) => VoidCastService()..initialize()),
       ],
       child: MaterialApp(
+        navigatorKey: navigatorKey,
         title: 'Voidflix',
         debugShowCheckedModeBanner: false,
         theme: AppTheme.darkTheme,

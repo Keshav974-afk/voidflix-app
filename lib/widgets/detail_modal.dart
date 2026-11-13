@@ -968,9 +968,12 @@ class _DetailModalState extends State<DetailModal> {
                               label: 'Share',
                               isActive: false,
                               onTap: () {
+                                final shareUrl = widget.item.mediaType == 'tv'
+                                    ? 'https://voidflix.org/watch/tv/${widget.item.id}?s=$_selectedSeason&e=1'
+                                    : 'https://voidflix.org/watch/movie/${widget.item.id}';
                                 SharePlus.instance.share(
                                   ShareParams(
-                                    text: 'Check out "${widget.item.title}" on Voidflix!\nhttps://voidflix.org/${widget.item.mediaType}/${widget.item.id}',
+                                    text: 'Check out "${widget.item.title}" on Voidflix!\n$shareUrl',
                                     subject: 'Watch ${widget.item.title} on Voidflix',
                                   ),
                                 );

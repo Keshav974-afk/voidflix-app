@@ -13,6 +13,7 @@ import '../models/media_item.dart';
 import '../providers/history_provider.dart';
 import 'detail_screen.dart';
 import 'player_screen.dart';
+import '../widgets/detail_modal.dart';
 import '../widgets/tv_back_button.dart';
 import '../widgets/tv_focusable.dart';
 
@@ -26,6 +27,7 @@ class SearchScreen extends StatefulWidget {
 class _SearchScreenState extends State<SearchScreen> {
   final TextEditingController _controller = TextEditingController();
   final FocusNode _searchFocusNode = FocusNode();
+  final FocusNode _firstFilterChipFocusNode = FocusNode();
   final FocusNode _firstResultFocusNode = FocusNode();
   final ApiService _apiService = ApiService();
   Timer? _debounce;
@@ -193,14 +195,18 @@ class _SearchScreenState extends State<SearchScreen> {
 
   void _openDetail(MediaItem item) {
     FocusScope.of(context).unfocus();
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => DetailScreen(
-          mediaId: item.id,
-          mediaType: item.mediaType,
+    if (TvModeService().isTvMode) {
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => DetailScreen(
+            mediaId: item.id,
+            mediaType: item.mediaType,
+          ),
         ),
-      ),
-    );
+      );
+    } else {
+      DetailModal.show(context, item);
+    }
   }
 
   void _playItem(MediaItem item) {
@@ -278,7 +284,11 @@ class _SearchScreenState extends State<SearchScreen> {
               child: Focus(
                 onKeyEvent: (node, event) {
                   if (isTv && event is KeyDownEvent && event.logicalKey == LogicalKeyboardKey.arrowDown) {
-                    _firstResultFocusNode.requestFocus();
+                    if (!isSearching) {
+                      _firstFilterChipFocusNode.requestFocus();
+                    } else {
+                      _firstResultFocusNode.requestFocus();
+                    }
                     return KeyEventResult.handled;
                   }
                   return KeyEventResult.ignored;
@@ -344,6 +354,7 @@ class _SearchScreenState extends State<SearchScreen> {
                       final label = _quickFilters[idx];
                       final isSelected = _selectedQuickFilter == label;
                       return TvFocusable(
+                        focusNode: idx == 0 ? _firstFilterChipFocusNode : null,
                         borderRadius: BorderRadius.circular(18),
                         glowColor: Colors.white,
                         onPressed: () {
