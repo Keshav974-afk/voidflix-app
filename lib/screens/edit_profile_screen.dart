@@ -67,6 +67,9 @@ class _EditProfileScreenState extends State<EditProfileScreen> {
     await prefs.setString('profile_${widget.profile.id}_preferred_sub', _preferredSubtitle);
     await prefs.setBool('profile_${widget.profile.id}_autoplay_next', _autoplayNext);
     await prefs.setBool('profile_${widget.profile.id}_autoplay_previews', _autoplayPreviews);
+    if (_preferredAudio.isNotEmpty && _preferredAudio != 'Original Audio') {
+      await prefs.setString('voidflix_preferred_audio_lang', _preferredAudio);
+    }
   }
 
   @override

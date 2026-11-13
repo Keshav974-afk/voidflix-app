@@ -889,27 +889,29 @@ class DownloadProvider extends ChangeNotifier {
         // Priority 6: Voidflix Backend Extraction
         () async {
           try {
-            final voidflixStream = await StreamExtractor.extractVoidflixBackend(
+            final voidflixStreams = await StreamExtractor.extractVoidflixBackend(
               type: mediaType,
               tmdbId: mediaId,
               season: season,
               episode: episode,
             ).timeout(const Duration(seconds: 10));
-            if (voidflixStream != null) {
-              if (voidflixStream.subtitles.isNotEmpty) availableSubs.addAll(voidflixStream.subtitles);
-              for (final q in voidflixStream.qualities) {
-                final proxiedDownloadUrl = q.url.contains('?')
-                    ? '${q.url}&download=${Uri.encodeComponent('$title.mp4')}'
-                    : '${q.url}?download=${Uri.encodeComponent('$title.mp4')}';
-                candidates.add(_DownloadCandidate(
-                  url: proxiedDownloadUrl,
-                  headers: voidflixStream.headers,
-                  isHls: q.url.contains('.m3u8') || voidflixStream.type == 'hls',
-                  qualityLabel: q.label,
-                  serverName: 'Voidflix',
-                  audioLanguage: voidflixStream.language,
-                  height: q.height > 0 ? q.height : 1080,
-                ));
+            if (voidflixStreams.isNotEmpty) {
+              for (final voidflixStream in voidflixStreams) {
+                if (voidflixStream.subtitles.isNotEmpty) availableSubs.addAll(voidflixStream.subtitles);
+                for (final q in voidflixStream.qualities) {
+                  final proxiedDownloadUrl = q.url.contains('?')
+                      ? '${q.url}&download=${Uri.encodeComponent('$title.mp4')}'
+                      : '${q.url}?download=${Uri.encodeComponent('$title.mp4')}';
+                  candidates.add(_DownloadCandidate(
+                    url: proxiedDownloadUrl,
+                    headers: voidflixStream.headers,
+                    isHls: q.url.contains('.m3u8') || voidflixStream.type == 'hls',
+                    qualityLabel: q.label,
+                    serverName: 'Voidflix',
+                    audioLanguage: voidflixStream.language,
+                    height: q.height > 0 ? q.height : 1080,
+                  ));
+                }
               }
             }
           } catch (_) {}

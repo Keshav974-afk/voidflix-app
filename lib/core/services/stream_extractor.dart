@@ -650,23 +650,32 @@ class StreamExtractor {
   }
 
   /// Extracts high-speed proxied streams directly from Voidflix API backend (same as flowflix-web)
-  static Future<ExtractedStream?> extractVoidflixBackend({
+  /// Features multi-audio dubs (Hindi, Spanish, French, etc.) and qualities.
+  static Future<List<ExtractedStream>> extractVoidflixBackend({
     required String type, // 'movie' or 'tv'
     required int tmdbId,
     int season = 1,
     int episode = 1,
+    String? preferredAudioLang,
+    String? originalLanguage,
+    String? server,
   }) async {
-    final cacheKey = getCacheKey(type, tmdbId, season, episode, prefix: 'voidflix');
+    final cacheKey = getCacheKey(type, tmdbId, season, episode, prefix: 'voidflix_${server ?? "all"}_${preferredAudioLang ?? "def"}');
     final cached = await getCachedEntry(cacheKey);
     if (cached != null && cached.streams.isNotEmpty) {
       debugPrint('StreamExtractor: Reusing cached Voidflix stream for $cacheKey (instant!)');
-      return cached.streams.first;
+      return cached.streams;
     }
 
     try {
-      final uri = Uri.parse(
-        'https://voidflix.org/api/public/extract?type=$type&id=$tmdbId&s=$season&e=$episode',
-      );
+      var urlStr = 'https://voidflix.org/api/public/extract?type=$type&id=$tmdbId&s=$season&e=$episode';
+      if (server != null && server.isNotEmpty) {
+        urlStr += '&server=${Uri.encodeComponent(server)}';
+      }
+      if (originalLanguage != null && originalLanguage.isNotEmpty) {
+        urlStr += '&orig_lang=${Uri.encodeComponent(originalLanguage)}';
+      }
+      final uri = Uri.parse(urlStr);
       final res = await http.get(
         uri,
         headers: {
@@ -676,10 +685,10 @@ class StreamExtractor {
         },
       ).timeout(const Duration(seconds: 8));
 
-      if (res.statusCode != 200) return null;
+      if (res.statusCode != 200) return <ExtractedStream>[];
       final json = jsonDecode(res.body) as Map<String, dynamic>;
       final rawHls = json['hls'] as String?;
-      if (rawHls == null || rawHls.isEmpty) return null;
+      if (rawHls == null || rawHls.isEmpty) return <ExtractedStream>[];
 
       String resolveUrl(String u) {
         if (u.startsWith('http')) return u;
@@ -689,17 +698,17 @@ class StreamExtractor {
 
       final hlsUrl = resolveUrl(rawHls);
       final kind = (json['kind'] as String?) ?? 'mp4';
-      final rawProvider = (json['provider'] as String?) ?? 'Direct';
+      final rawProvider = (json['provider'] as String?) ?? (server ?? 'StellarHD');
       final cleanProvider = rawProvider.toLowerCase().contains('vidlink')
           ? 'VoidHD'
           : rawProvider.toLowerCase().contains('vidrock')
               ? 'PulsarHD'
               : rawProvider.toLowerCase().contains('videasy')
                   ? 'TurboStream'
-                  : 'Ultra';
+                  : rawProvider;
 
       // Parse Qualities
-      final qualities = <StreamQuality>[];
+      final topQualities = <StreamQuality>[];
       final rawQualities = json['qualities'] as List<dynamic>?;
       if (rawQualities != null) {
         for (final q in rawQualities) {
@@ -707,7 +716,7 @@ class StreamExtractor {
             final qUrl = resolveUrl(q['url'] as String);
             final label = (q['label'] as String?) ?? 'HD';
             final height = (q['height'] as num?)?.toInt() ?? 0;
-            qualities.add(StreamQuality(label: label, height: height, url: qUrl));
+            topQualities.add(StreamQuality(label: label, height: height, url: qUrl));
           }
         }
       }
@@ -726,24 +735,70 @@ class StreamExtractor {
         }
       }
 
-      final stream = ExtractedStream(
-        url: hlsUrl,
-        type: kind,
-        sourceName: 'VoidDirect ($cleanProvider)',
-        headers: {
-          'Referer': 'https://voidflix.org/',
-          'User-Agent':
-              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-        },
-        qualityLabel: qualities.isNotEmpty ? qualities.first.label : 'HD',
-        qualities: qualities,
-        subtitles: subs,
-      );
-      setCachedEntry(cacheKey, [stream]);
-      return stream;
+      final headers = {
+        'Referer': 'https://voidflix.org/',
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      };
+
+      final results = <ExtractedStream>[];
+
+      // Parse multi-audio tracks from backend
+      final rawAudios = json['audios'] as List<dynamic>?;
+      if (rawAudios != null && rawAudios.isNotEmpty) {
+        for (final a in rawAudios) {
+          if (a is Map<String, dynamic> && a['url'] != null) {
+            final aUrl = resolveUrl(a['url'] as String);
+            final aLabel = (a['label'] as String?) ?? 'Audio';
+            final cleanLabel = LanguageUtils.cleanLanguageName(aLabel);
+
+            final aQualities = <StreamQuality>[];
+            final rawAQ = a['qualities'] as List<dynamic>?;
+            if (rawAQ != null && rawAQ.isNotEmpty) {
+              for (final q in rawAQ) {
+                if (q is Map<String, dynamic> && q['url'] != null) {
+                  final qUrl = resolveUrl(q['url'] as String);
+                  final label = (q['label'] as String?) ?? 'HD';
+                  final height = (q['height'] as num?)?.toInt() ?? 0;
+                  aQualities.add(StreamQuality(label: label, height: height, url: qUrl));
+                }
+              }
+            }
+            if (aQualities.isEmpty) {
+              aQualities.addAll(topQualities);
+            }
+
+            results.add(ExtractedStream(
+              url: aUrl,
+              type: kind,
+              sourceName: 'VoidDirect ($cleanProvider)',
+              language: cleanLabel,
+              headers: headers,
+              qualityLabel: aQualities.isNotEmpty ? aQualities.first.label : 'HD',
+              qualities: aQualities,
+              subtitles: subs,
+            ));
+          }
+        }
+      }
+
+      if (results.isEmpty) {
+        results.add(ExtractedStream(
+          url: hlsUrl,
+          type: kind,
+          sourceName: 'VoidDirect ($cleanProvider)',
+          language: 'English',
+          headers: headers,
+          qualityLabel: topQualities.isNotEmpty ? topQualities.first.label : 'HD',
+          qualities: topQualities,
+          subtitles: subs,
+        ));
+      }
+
+      setCachedEntry(cacheKey, results);
+      return results;
     } catch (e) {
       debugPrint('Voidflix backend extraction error: $e');
-      return null;
+      return <ExtractedStream>[];
     }
   }
 
@@ -1675,9 +1730,9 @@ class StreamExtractor {
         // Fetch rich external subtitles in background if needed
         if (nmStreams.first.subtitles.length <= 1) {
           extractVoidflixBackend(type: type, tmdbId: tmdbId, season: season, episode: episode).then((vf) {
-            if (vf != null && vf.subtitles.isNotEmpty) {
+            if (vf.isNotEmpty && vf.first.subtitles.isNotEmpty) {
               final enriched = nmStreams.map((s) => s.copyWith(
-                subtitles: [...s.subtitles, ...vf.subtitles.where((sub) => !s.subtitles.any((es) => es.language == sub.language))],
+                subtitles: [...s.subtitles, ...vf.first.subtitles.where((sub) => !s.subtitles.any((es) => es.language == sub.language))],
               )).toList();
               setCachedEntry(key, enriched);
             }
@@ -1761,9 +1816,10 @@ class StreamExtractor {
         tmdbId: tmdbId,
         season: season,
         episode: episode,
+        preferredAudioLang: preferredAudioLang,
       ).catchError((e) {
         debugPrint('Voidflix extractor error: $e');
-        return null;
+        return <ExtractedStream>[];
       });
 
       // Netflix-Style Fast Path: if ultra-fast Telegram or Cinejoy returns in <650ms,
@@ -1782,7 +1838,15 @@ class StreamExtractor {
         setCachedEntry(key, fastDirect);
 
         // Background worker to enrich cache with all alternate audio & subtitles
-        Future.wait([screenfetchFuture, aoneroomFuture, cinejoyFuture, vidrockFuture, vidlinkFuture, voidflixFuture]).then((all) {
+        Future.wait([
+          screenfetchFuture,
+          telegramFuture,
+          aoneroomFuture,
+          cinejoyFuture,
+          vidrockFuture,
+          vidlinkFuture,
+          voidflixFuture,
+        ]).then((all) {
           try {
             final sfList = all[0] as List<ExtractedStream>;
             final tList = all[1] as List<ExtractedStream>;
@@ -1790,10 +1854,10 @@ class StreamExtractor {
             final cList = all[3] as List<ExtractedStream>;
             final vList = all[4] as List<ExtractedStream>;
             final vl = all[5] as ExtractedStream?;
-            final vf = all[6] as ExtractedStream?;
+            final vfList = all[6] as List<ExtractedStream>;
 
             List<SubtitleTrack> bgSubs = [];
-            if (vf != null && vf.subtitles.isNotEmpty) bgSubs = vf.subtitles;
+            if (vfList.isNotEmpty && vfList.first.subtitles.isNotEmpty) bgSubs = vfList.first.subtitles;
             if (vl != null && vl.subtitles.isNotEmpty && bgSubs.isEmpty) bgSubs = vl.subtitles;
 
             final combined = <ExtractedStream>[];
@@ -1812,6 +1876,9 @@ class StreamExtractor {
             for (final v in vList) {
               combined.add(v.copyWith(subtitles: bgSubs.isNotEmpty ? bgSubs : v.subtitles));
             }
+            for (final vf in vfList) {
+              combined.add(vf.copyWith(subtitles: bgSubs.isNotEmpty ? bgSubs : vf.subtitles));
+            }
             if (combined.isNotEmpty) {
               setCachedEntry(key, combined);
             }
@@ -1823,6 +1890,7 @@ class StreamExtractor {
 
       final futures = await Future.wait([
         screenfetchFuture,
+        telegramFuture,
         aoneroomFuture,
         cinejoyFuture,
         vidrockFuture,
@@ -1836,10 +1904,10 @@ class StreamExtractor {
       final cinejoyStreams = futures[3] as List<ExtractedStream>;
       final vidrockStreams = futures[4] as List<ExtractedStream>;
       final vidlinkStream = futures[5] as ExtractedStream?;
-      final voidflixStream = futures[6] as ExtractedStream?;
+      final voidflixStreams = futures[6] as List<ExtractedStream>;
 
-      if (voidflixStream != null && voidflixStream.subtitles.isNotEmpty) {
-        sharedSubs = voidflixStream.subtitles;
+      if (voidflixStreams.isNotEmpty && voidflixStreams.first.subtitles.isNotEmpty) {
+        sharedSubs = voidflixStreams.first.subtitles;
       }
       if (vidlinkStream != null && vidlinkStream.subtitles.isNotEmpty && sharedSubs.isEmpty) {
         sharedSubs = vidlinkStream.subtitles;
@@ -1853,6 +1921,11 @@ class StreamExtractor {
       // 0.5 Add Aoneroom streams
       for (final ar in aoneroomStreams) {
         results.add(ar.copyWith(subtitles: ar.subtitles.isNotEmpty ? ar.subtitles : sharedSubs));
+      }
+
+      // 1. Add Voidflix backend streams (multi-audio dubs from StellarHD/Voidflix)
+      for (final vf in voidflixStreams) {
+        results.add(vf.copyWith(subtitles: vf.subtitles.isNotEmpty ? vf.subtitles : sharedSubs));
       }
 
       // 1. Add Telegram streams (Direct VPS MTProto, highest speed, uncompressed multi-audio)
@@ -1904,9 +1977,9 @@ class StreamExtractor {
         results.add(vidlinkStream);
       }
 
-      // 4. Add Voidflix backend stream if present
-      if (voidflixStream != null) {
-        results.add(voidflixStream);
+      // 4. Add Voidflix backend streams if present
+      for (final vf in voidflixStreams) {
+        results.add(vf.copyWith(subtitles: vf.subtitles.isNotEmpty ? vf.subtitles : sharedSubs));
       }
     } catch (e) {
       debugPrint('Parallel extraction error: $e');

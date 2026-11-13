@@ -316,15 +316,17 @@ class _DownloadOptionsSheetContentState
         // 3. Voidflix Backend
         () async {
           try {
-            final s = await StreamExtractor.extractVoidflixBackend(
+            final streams = await StreamExtractor.extractVoidflixBackend(
               type: widget.mediaType,
               tmdbId: widget.mediaId,
               season: widget.season,
               episode: widget.episode,
             ).timeout(const Duration(seconds: 9));
-            if (!mounted || s == null) return;
-            addSubtitles(s.subtitles);
-            addStreamGroup(s, 'Voidflix');
+            if (!mounted || streams.isEmpty) return;
+            for (final s in streams) {
+              addSubtitles(s.subtitles);
+              addStreamGroup(s, 'Voidflix');
+            }
             if (_audioGroups.isNotEmpty && mounted) {
               setState(() => _isExtracting = false);
             }

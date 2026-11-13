@@ -383,53 +383,121 @@ class LanguageUtils {
 
     if (c == t) return true;
 
-    // Direct alias mappings for high-priority language families
-    const hindiAliases = {'hi', 'hin', 'hindi', 'हिंदी', 'हिन्दी'};
-    if (hindiAliases.contains(t) || hindiAliases.contains(c)) {
-      if (hindiAliases.contains(c) || hindiAliases.contains(t)) return true;
-      if (c.contains('hindi') || c.contains('hin') || RegExp(r'\bhi\b').hasMatch(c)) return true;
-      if (t.contains('hindi') || t.contains('hin') || RegExp(r'\bhi\b').hasMatch(t)) return true;
-    }
+    // Helper functions to check language family membership
+    bool isHindi(String s) =>
+        const {'hi', 'hin', 'hindi', 'हिंदी', 'हिन्दी'}.contains(s) ||
+        s.startsWith('hi-') ||
+        s.startsWith('hin-') ||
+        s.contains('hindi') ||
+        RegExp(r'\bhi\b').hasMatch(s);
 
-    const englishAliases = {'en', 'eng', 'english'};
-    if (englishAliases.contains(t) || englishAliases.contains(c)) {
-      if (englishAliases.contains(c) || englishAliases.contains(t)) return true;
-      if (c.contains('english') || c.contains('eng') || RegExp(r'\ben\b').hasMatch(c)) return true;
-      if (t.contains('english') || t.contains('eng') || RegExp(r'\ben\b').hasMatch(t)) return true;
-    }
+    if (isHindi(t) || isHindi(c)) return isHindi(t) && isHindi(c);
 
-    const spanishAliases = {'es', 'spa', 'spanish', 'español', 'espanol'};
-    if (spanishAliases.contains(t) || spanishAliases.contains(c)) {
-      if (spanishAliases.contains(c) || spanishAliases.contains(t)) return true;
-      if (c.contains('spanish') || c.contains('espanol') || RegExp(r'\bes\b').hasMatch(c)) return true;
-      if (t.contains('spanish') || t.contains('espanol') || RegExp(r'\bes\b').hasMatch(t)) return true;
-    }
+    bool isEnglish(String s) =>
+        const {'en', 'eng', 'english'}.contains(s) ||
+        s.startsWith('en-') ||
+        s.startsWith('eng-') ||
+        s.contains('english') ||
+        RegExp(r'\ben\b').hasMatch(s);
 
-    const japaneseAliases = {'ja', 'jpn', 'japanese', 'nihongo', '日本語'};
-    if (japaneseAliases.contains(t) || japaneseAliases.contains(c)) {
-      if (japaneseAliases.contains(c) || japaneseAliases.contains(t)) return true;
-      if (c.contains('japanese') || c.contains('japan') || RegExp(r'\bja\b').hasMatch(c)) return true;
-      if (t.contains('japanese') || t.contains('japan') || RegExp(r'\bja\b').hasMatch(t)) return true;
-    }
+    if (isEnglish(t) || isEnglish(c)) return isEnglish(t) && isEnglish(c);
 
-    const koreanAliases = {'ko', 'kor', 'korean', 'hangul', '한국어'};
-    if (koreanAliases.contains(t) || koreanAliases.contains(c)) {
-      if (koreanAliases.contains(c) || koreanAliases.contains(t)) return true;
-      if (c.contains('korean') || c.contains('korea') || RegExp(r'\bko\b').hasMatch(c)) return true;
-      if (t.contains('korean') || t.contains('korea') || RegExp(r'\bko\b').hasMatch(t)) return true;
-    }
+    bool isSpanish(String s) =>
+        const {'es', 'spa', 'spanish', 'español', 'espanol', 'esla'}.contains(s) ||
+        s.startsWith('es-') ||
+        s.startsWith('spa-') ||
+        s.contains('spanish') ||
+        s.contains('espanol') ||
+        s.contains('español') ||
+        RegExp(r'\bes\b').hasMatch(s);
 
-    const frenchAliases = {'fr', 'fra', 'fre', 'french', 'français', 'francais'};
-    if (frenchAliases.contains(t) || frenchAliases.contains(c)) {
-      if (frenchAliases.contains(c) || frenchAliases.contains(t)) return true;
-      if (c.contains('french') || c.contains('francais') || RegExp(r'\bfr\b').hasMatch(c)) return true;
-    }
+    if (isSpanish(t) || isSpanish(c)) return isSpanish(t) && isSpanish(c);
 
-    const germanAliases = {'de', 'deu', 'ger', 'german', 'deutsch'};
-    if (germanAliases.contains(t) || germanAliases.contains(c)) {
-      if (germanAliases.contains(c) || germanAliases.contains(t)) return true;
-      if (c.contains('german') || c.contains('deutsch') || RegExp(r'\bde\b').hasMatch(c)) return true;
-    }
+    bool isJapanese(String s) =>
+        const {'ja', 'jpn', 'japanese', 'nihongo', '日本語'}.contains(s) ||
+        s.startsWith('ja-') ||
+        s.startsWith('jpn-') ||
+        s.contains('japanese') ||
+        s.contains('japan') ||
+        RegExp(r'\bja\b').hasMatch(s);
+
+    if (isJapanese(t) || isJapanese(c)) return isJapanese(t) && isJapanese(c);
+
+    bool isKorean(String s) =>
+        const {'ko', 'kor', 'korean', 'hangul', '한국어'}.contains(s) ||
+        s.startsWith('ko-') ||
+        s.startsWith('kor-') ||
+        s.contains('korean') ||
+        s.contains('korea') ||
+        RegExp(r'\bko\b').hasMatch(s);
+
+    if (isKorean(t) || isKorean(c)) return isKorean(t) && isKorean(c);
+
+    bool isFrench(String s) =>
+        const {'fr', 'fra', 'fre', 'french', 'français', 'francais'}.contains(s) ||
+        s.startsWith('fr-') ||
+        s.startsWith('fra-') ||
+        s.contains('french') ||
+        s.contains('francais') ||
+        s.contains('français') ||
+        RegExp(r'\bfr\b').hasMatch(s);
+
+    if (isFrench(t) || isFrench(c)) return isFrench(t) && isFrench(c);
+
+    bool isGerman(String s) =>
+        const {'de', 'deu', 'ger', 'german', 'deutsch'}.contains(s) ||
+        s.startsWith('de-') ||
+        s.startsWith('deu-') ||
+        s.contains('german') ||
+        s.contains('deutsch') ||
+        RegExp(r'\bde\b').hasMatch(s);
+
+    if (isGerman(t) || isGerman(c)) return isGerman(t) && isGerman(c);
+
+    bool isPortuguese(String s) =>
+        const {'pt', 'por', 'portuguese', 'português', 'portugues', 'ptbr'}.contains(s) ||
+        s.startsWith('pt-') ||
+        s.startsWith('por-') ||
+        s.contains('portuguese') ||
+        s.contains('portugues') ||
+        RegExp(r'\bpt\b').hasMatch(s);
+
+    if (isPortuguese(t) || isPortuguese(c)) return isPortuguese(t) && isPortuguese(c);
+
+    bool isRussian(String s) =>
+        const {'ru', 'rus', 'russian', 'русский'}.contains(s) ||
+        s.startsWith('ru-') ||
+        s.startsWith('rus-') ||
+        s.contains('russian') ||
+        RegExp(r'\bru\b').hasMatch(s);
+
+    if (isRussian(t) || isRussian(c)) return isRussian(t) && isRussian(c);
+
+    bool isItalian(String s) =>
+        const {'it', 'ita', 'italian', 'italiano'}.contains(s) ||
+        s.startsWith('it-') ||
+        s.startsWith('ita-') ||
+        s.contains('italian') ||
+        RegExp(r'\bit\b').hasMatch(s);
+
+    if (isItalian(t) || isItalian(c)) return isItalian(t) && isItalian(c);
+
+    bool isArabic(String s) =>
+        const {'ar', 'ara', 'arabic', 'العربية'}.contains(s) ||
+        s.startsWith('ar-') ||
+        s.startsWith('ara-') ||
+        s.contains('arabic') ||
+        RegExp(r'\bar\b').hasMatch(s);
+
+    if (isArabic(t) || isArabic(c)) return isArabic(t) && isArabic(c);
+
+    bool isChinese(String s) =>
+        const {'zh', 'zho', 'chi', 'chinese', '中文'}.contains(s) ||
+        s.startsWith('zh-') ||
+        s.contains('chinese') ||
+        RegExp(r'\bzh\b').hasMatch(s);
+
+    if (isChinese(t) || isChinese(c)) return isChinese(t) && isChinese(c);
 
     // Only do substring check if length > 3 to avoid 2-letter collisions (e.g. 'in', 'hi', 'pa')
     if (c.length > 3 && t.length > 3 && (c.contains(t) || t.contains(c))) return true;

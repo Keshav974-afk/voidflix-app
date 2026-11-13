@@ -198,6 +198,11 @@ class ProfileProvider extends ChangeNotifier {
     notifyListeners();
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_keyProfile, profile.id);
+    if (profile.preferredAudioLang != null &&
+        profile.preferredAudioLang!.isNotEmpty &&
+        profile.preferredAudioLang != 'Original Audio') {
+      await prefs.setString('voidflix_preferred_audio_lang', profile.preferredAudioLang!);
+    }
   }
 
   void markProfileChosen() {
@@ -265,6 +270,12 @@ class ProfileProvider extends ChangeNotifier {
       _profiles[idx] = updated;
       if (_activeProfile?.id == id) {
         _activeProfile = updated;
+        if (preferredAudioLang != null &&
+            preferredAudioLang.isNotEmpty &&
+            preferredAudioLang != 'Original Audio') {
+          final p = await SharedPreferences.getInstance();
+          await p.setString('voidflix_preferred_audio_lang', preferredAudioLang);
+        }
       }
       await _saveProfilesList();
       notifyListeners();

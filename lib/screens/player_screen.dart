@@ -974,8 +974,23 @@ class _PlayerScreenState extends State<PlayerScreen> {
           if (mounted) {
             final profile = context.read<ProfileProvider>().activeProfile;
             preferredAudio = profile.preferredAudioLang;
+            if (preferredAudio == null || preferredAudio.isEmpty || preferredAudio == 'Original Audio') {
+              if (profile.preferredLanguages.isNotEmpty) {
+                preferredAudio = profile.preferredLanguages.first;
+              }
+            }
           }
         } catch (_) {}
+
+        if (preferredAudio == null || preferredAudio.isEmpty || preferredAudio == 'Original Audio') {
+          try {
+            final sp = await SharedPreferences.getInstance();
+            final savedAudio = sp.getString('voidflix_preferred_audio_lang');
+            if (savedAudio != null && savedAudio.isNotEmpty && savedAudio != 'Original Audio') {
+              preferredAudio = savedAudio;
+            }
+          } catch (_) {}
+        }
 
         streams = await StreamExtractor.extractNetMirror(
           type: widget.mediaType,
@@ -985,6 +1000,22 @@ class _PlayerScreenState extends State<PlayerScreen> {
           preferredAudioLang: preferredAudio,
           originalLanguage: widget.originalLanguage,
         ).timeout(const Duration(milliseconds: 12000), onTimeout: () => <ExtractedStream>[]);
+
+        if (streams.isEmpty) {
+          // Cloudflare Voidflix backend fallback (contains all multi-audio dubs from StellarHD)
+          final vfStreams = await StreamExtractor.extractVoidflixBackend(
+            type: widget.mediaType,
+            tmdbId: widget.mediaId,
+            season: _currentSeason,
+            episode: _currentEpisode,
+            preferredAudioLang: preferredAudio,
+            originalLanguage: widget.originalLanguage,
+            server: 'StellarHD',
+          ).timeout(const Duration(milliseconds: 7000), onTimeout: () => <ExtractedStream>[]);
+          if (vfStreams.isNotEmpty) {
+            streams = vfStreams;
+          }
+        }
 
         if (streams.isEmpty) {
           // Fast-fallback 1: Screenfetch (Filmpire HLS via voidflix.org)
@@ -997,29 +1028,30 @@ class _PlayerScreenState extends State<PlayerScreen> {
           if (sfStreams.isNotEmpty) {
             streams = sfStreams;
           } else {
-              // Fast-fallback 3: Aoneroom (MovieBox direct MP4)
-              final aStreams = await StreamExtractor.extractAoneroom(
+            // Fast-fallback 3: Aoneroom (MovieBox direct MP4)
+            final aStreams = await StreamExtractor.extractAoneroom(
+              type: widget.mediaType,
+              tmdbId: widget.mediaId,
+              title: widget.mediaTitle,
+              season: _currentSeason,
+              episode: _currentEpisode,
+              preferredAudioLang: preferredAudio,
+            ).timeout(const Duration(milliseconds: 3500), onTimeout: () => <ExtractedStream>[]);
+            if (aStreams.isNotEmpty) {
+              streams = aStreams;
+            } else {
+              // Fast-fallback 4: Cinejoy
+              streams = await StreamExtractor.extractCinejoy(
                 type: widget.mediaType,
                 tmdbId: widget.mediaId,
                 title: widget.mediaTitle,
                 season: _currentSeason,
                 episode: _currentEpisode,
-              ).timeout(const Duration(milliseconds: 3500), onTimeout: () => <ExtractedStream>[]);
-              if (aStreams.isNotEmpty) {
-                streams = aStreams;
-              } else {
-                // Fast-fallback 4: Cinejoy
-                streams = await StreamExtractor.extractCinejoy(
-                  type: widget.mediaType,
-                  tmdbId: widget.mediaId,
-                  title: widget.mediaTitle,
-                  season: _currentSeason,
-                  episode: _currentEpisode,
-                  preferredServer: 'Nebula',
-                ).timeout(const Duration(milliseconds: 4000), onTimeout: () => <ExtractedStream>[]);
-              }
+                preferredServer: 'Nebula',
+              ).timeout(const Duration(milliseconds: 4000), onTimeout: () => <ExtractedStream>[]);
             }
           }
+        }
       } else if (server.name.contains('QuantumStream') || server.name.contains('Screenfetch')) {
         streams = await StreamExtractor.extractScreenfetch(
           type: widget.mediaType,
@@ -1197,6 +1229,21 @@ class _PlayerScreenState extends State<PlayerScreen> {
         ).timeout(const Duration(milliseconds: 12000), onTimeout: () => <ExtractedStream>[]);
 
         if (streams.isEmpty) {
+          final vfStreams = await StreamExtractor.extractVoidflixBackend(
+            type: widget.mediaType,
+            tmdbId: widget.mediaId,
+            season: _currentSeason,
+            episode: _currentEpisode,
+            preferredAudioLang: preferredAudio,
+            originalLanguage: widget.originalLanguage,
+            server: 'StellarHD',
+          ).timeout(const Duration(milliseconds: 7000), onTimeout: () => <ExtractedStream>[]);
+          if (vfStreams.isNotEmpty) {
+            streams = vfStreams;
+          }
+        }
+
+        if (streams.isEmpty) {
           final sfStreams = await StreamExtractor.extractScreenfetch(
             type: widget.mediaType,
             tmdbId: widget.mediaId,
@@ -1220,6 +1267,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 tmdbId: widget.mediaId,
                 season: _currentSeason,
                 episode: _currentEpisode,
+                preferredAudioLang: preferredAudio,
               );
             }
           }
@@ -1241,6 +1289,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
             preferredAudio = profile.preferredAudioLang;
             preferredSub = profile.preferredSubtitleLang;
             preferredList = profile.preferredLanguages;
+            if ((preferredAudio == null || preferredAudio.isEmpty || preferredAudio == 'Original Audio') && profile.preferredLanguages.isNotEmpty) {
+              preferredAudio = profile.preferredLanguages.first;
+            }
           }
         } catch (_) {}
 
@@ -1485,57 +1536,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
       } else {
         _fallbackToNextNativeOrEmbed(resumePosition: startPosition);
       }
-    }
-  }
-
-  Future<void> _switchVideoStream(String url, Duration startPos, bool wasPlaying) async {
-    final controller = _videoPlayerController;
-    if (controller == null) return;
-
-    setState(() => _isBuffering = true);
-
-    try {
-      final headers = _directStreams.isNotEmpty
-          ? _directStreams[_selectedStreamIndex].headers
-          : <String, String>{};
-
-      VideoPlayerController newController;
-      try {
-        newController = VideoPlayerController.networkUrl(
-          Uri.parse(url),
-          httpHeaders: headers,
-        );
-        await newController.initialize();
-      } catch (_) {
-        final proxyUrl = await StreamProxyService.instance.getProxyUrl(url, headers);
-        newController = VideoPlayerController.networkUrl(Uri.parse(proxyUrl));
-        await newController.initialize();
-      }
-      if (!mounted) {
-        newController.dispose();
-        return;
-      }
-
-      _disposeVideoController();
-      _videoPlayerController = newController;
-      newController.addListener(_videoPlayerListener);
-
-      await newController.seekTo(startPos);
-      await newController.setPlaybackSpeed(_playbackSpeed);
-
-      if (wasPlaying) {
-        await newController.play();
-      }
-
-      setState(() {
-        _isBuffering = false;
-        _isPlaying = wasPlaying;
-        _totalDuration = newController.value.duration;
-        _currentPosition = newController.value.position;
-      });
-    } catch (e) {
-      debugPrint('Error switching video stream: $e');
-      setState(() => _isBuffering = false);
     }
   }
 
@@ -2612,10 +2612,55 @@ class _PlayerScreenState extends State<PlayerScreen> {
   Future<void> _selectAudioSource(int index) async {
     if (index >= _directStreams.length) return;
     _selectedStreamIndex = index;
-    final stream = _directStreams[index];
+    var stream = _directStreams[index];
+
+    // 1. If Aoneroom lazy stream, resolve the playable stream URL now
+    if (stream.url.isEmpty && stream.headers['x-aoneroom-subject-id'] != null) {
+      final subjectId = stream.headers['x-aoneroom-subject-id']!;
+      final resolved = await StreamExtractor.extractAoneroomPlayUrl(
+        subjectId: subjectId,
+        language: stream.language,
+        season: widget.mediaType == 'tv' ? _currentSeason : null,
+        episode: widget.mediaType == 'tv' ? _currentEpisode : null,
+      );
+      if (resolved != null && resolved.isNotEmpty) {
+        stream = resolved.first;
+        _directStreams[index] = stream;
+      }
+    }
+
+    if (stream.url.isEmpty) {
+      AppLogger.instance.error('Player', 'Cannot switch audio: stream URL is empty for ${stream.language}');
+      return;
+    }
+
     final currentPos = _videoPlayerController?.value.position ?? Duration.zero;
     final wasPlaying = _videoPlayerController?.value.isPlaying ?? false;
-    await _switchVideoStream(stream.url, currentPos, wasPlaying);
+
+    // Pick quality matching current height if possible
+    String targetUrl = stream.url;
+    if (_selectedQualityIndex >= 0 && _selectedQualityIndex < _availableQualities.length) {
+      final currentHeight = _availableQualities[_selectedQualityIndex].height;
+      if (stream.qualities.isNotEmpty) {
+        final matchIdx = stream.qualities.indexWhere((q) => q.height == currentHeight);
+        final qIdx = matchIdx != -1 ? matchIdx : 0;
+        targetUrl = stream.qualities[qIdx].url;
+      }
+    }
+
+    // Save as preferred audio in SharedPreferences for subsequent videos
+    try {
+      final cleanLang = LanguageUtils.cleanLanguageName(stream.language);
+      final sp = await SharedPreferences.getInstance();
+      await sp.setString('voidflix_preferred_audio_lang', cleanLang);
+    } catch (_) {}
+
+    await _initNativePlayer(
+      stream.copyWith(url: targetUrl),
+      startPosition: currentPos,
+      autoPlay: wasPlaying,
+      isMidStreamRecovery: true,
+    );
   }
 
   Future<void> _selectQuality(int index) async {
@@ -2624,7 +2669,17 @@ class _PlayerScreenState extends State<PlayerScreen> {
     final target = _availableQualities[index];
     final currentPos = _videoPlayerController?.value.position ?? Duration.zero;
     final wasPlaying = _videoPlayerController?.value.isPlaying ?? false;
-    await _switchVideoStream(target.url, currentPos, wasPlaying);
+    final currentStream = _selectedStreamIndex < _directStreams.length
+        ? _directStreams[_selectedStreamIndex]
+        : null;
+    if (currentStream != null) {
+      await _initNativePlayer(
+        currentStream.copyWith(url: target.url),
+        startPosition: currentPos,
+        autoPlay: wasPlaying,
+        isMidStreamRecovery: true,
+      );
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -2784,7 +2839,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                         itemCount: audioOptions.length,
                                         itemBuilder: (c, idx) {
                                           final opt = audioOptions[idx];
-                                          final isSelected = opt.streamIndex == tempAudioIndex;
+                                          final currentSelectedLang = (tempAudioIndex >= 0 && tempAudioIndex < _directStreams.length)
+                                              ? LanguageUtils.cleanLanguageName(_directStreams[tempAudioIndex].language).toLowerCase()
+                                              : '';
+                                          final isSelected = opt.streamIndex == tempAudioIndex || opt.label.toLowerCase() == currentSelectedLang;
 
                                           final item = InkWell(
                                             borderRadius: BorderRadius.circular(8),
@@ -3034,13 +3092,15 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                 borderRadius: BorderRadius.circular(24),
                                 glowColor: AppTheme.primaryRed,
                                 onPressed: () {
-                                  if (tempAudioIndex != _selectedStreamIndex) {
-                                    _selectAudioSource(tempAudioIndex);
-                                  }
-                                  if (tempSubtitle != _selectedSubtitle) {
-                                    _selectSubtitle(tempSubtitle);
-                                  }
+                                  final targetAudioIdx = tempAudioIndex;
+                                  final targetSub = tempSubtitle;
                                   Navigator.pop(ctx);
+                                  if (targetAudioIdx != _selectedStreamIndex) {
+                                    _selectAudioSource(targetAudioIdx);
+                                  }
+                                  if (targetSub != _selectedSubtitle) {
+                                    _selectSubtitle(targetSub);
+                                  }
                                 },
                                 child: Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 26, vertical: 10),
@@ -3061,13 +3121,15 @@ class _PlayerScreenState extends State<PlayerScreen> {
                             : InkWell(
                                 borderRadius: BorderRadius.circular(24),
                                 onTap: () {
-                                  if (tempAudioIndex != _selectedStreamIndex) {
-                                    _selectAudioSource(tempAudioIndex);
-                                  }
-                                  if (tempSubtitle != _selectedSubtitle) {
-                                    _selectSubtitle(tempSubtitle);
-                                  }
+                                  final targetAudioIdx = tempAudioIndex;
+                                  final targetSub = tempSubtitle;
                                   Navigator.pop(ctx);
+                                  if (targetAudioIdx != _selectedStreamIndex) {
+                                    _selectAudioSource(targetAudioIdx);
+                                  }
+                                  if (targetSub != _selectedSubtitle) {
+                                    _selectSubtitle(targetSub);
+                                  }
                                 },
                                 child: Container(
                                   padding: const EdgeInsets.symmetric(horizontal: 26, vertical: 10),
