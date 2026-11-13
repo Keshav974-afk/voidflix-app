@@ -34,6 +34,9 @@ jobs:
       - name: Make gradlew executable
         run: chmod +x android/gradlew
 
+      - name: Accept Android SDK Licenses
+        run: yes | flutter doctor --android-licenses || true
+
       - name: Build Split APKs
         run: flutter build apk --split-per-abi --release
 
