@@ -9,6 +9,7 @@ import '../core/constants/theme_constants.dart';
 import '../core/network/api_service.dart';
 import '../core/services/youtube_service.dart';
 import '../core/utils/platform_utils.dart';
+import '../core/utils/language_utils.dart';
 import '../models/media_detail.dart';
 import '../providers/download_provider.dart';
 import '../providers/history_provider.dart';
@@ -129,15 +130,27 @@ class _DetailScreenState extends State<DetailScreen> {
 
   Future<void> _loadDetail() async {
     try {
-      final detail = await _apiService.getDetails(widget.mediaType, widget.mediaId);
+      final profileProvider = context.read<ProfileProvider>();
+      final activeProfile = profileProvider.activeProfile;
+      final pref = activeProfile.preferredAudioLang ??
+          (activeProfile.preferredLanguages.isNotEmpty ? activeProfile.preferredLanguages.first : null);
+      final prefLangCode = (pref != null && !pref.toLowerCase().contains('original'))
+          ? LanguageUtils.getInfo(pref).code.toLowerCase()
+          : null;
+
+      final detail = await _apiService.getDetails(
+        widget.mediaType,
+        widget.mediaId,
+        languageCode: prefLangCode,
+      );
       if (mounted) {
         setState(() {
           _detail = detail;
           _isLoading = false;
         });
 
-        // Initialize trailer preview if available
-        final trailerKey = detail.findTrailerKey();
+        // Initialize trailer preview strictly with official trailer or teaser
+        final trailerKey = detail.findTrailerKey(preferredLangCode: prefLangCode);
         if (trailerKey != null && trailerKey.isNotEmpty) {
           _updateTrailerPlayer(trailerKey);
         }
@@ -1462,24 +1475,27 @@ class _DetailScreenState extends State<DetailScreen> {
                       ),
                   ] else if ((!isTv && _activeTabIndex == 0) || (isTv && _activeTabIndex == 1)) ...[
                     // TRAILERS & MORE TAB
-                    if (detail.videos.isEmpty && detail.trailerKey == null)
-                      const Padding(
-                        padding: EdgeInsets.symmetric(vertical: 24),
-                        child: Center(
-                          child: Text(
-                            'No trailers available for this title.',
-                            style: TextStyle(color: Colors.white60),
+                    // Strictly filter to official trailers and teasers (no clips or BTS)
+                    () {
+                      final trailersList = detail.videos.where((v) => v.isTrailerOrTeaser).toList();
+                      if (trailersList.isEmpty && detail.trailerKey == null) {
+                        return const Padding(
+                          padding: EdgeInsets.symmetric(vertical: 24),
+                          child: Center(
+                            child: Text(
+                              'No trailers available for this title.',
+                              style: TextStyle(color: Colors.white60),
+                            ),
                           ),
-                        ),
-                      )
-                    else
-                      ListView.separated(
+                        );
+                      }
+                      return ListView.separated(
                         shrinkWrap: true,
                         physics: const NeverScrollableScrollPhysics(),
-                        itemCount: detail.videos.isNotEmpty ? detail.videos.length : 1,
+                        itemCount: trailersList.isNotEmpty ? trailersList.length : 1,
                         separatorBuilder: (c, i) => const SizedBox(height: 16),
                         itemBuilder: (c, idx) {
-                          final v = detail.videos.isNotEmpty ? detail.videos[idx] : null;
+                          final v = trailersList.isNotEmpty ? trailersList[idx] : null;
                           final thumb = v?.youtubeThumbnailUrl ?? backdropUrl;
                           final trailerName = v?.name ?? 'Official Trailer';
 
@@ -1538,7 +1554,8 @@ class _DetailScreenState extends State<DetailScreen> {
                             ),
                           );
                         },
-                      ),
+                      );
+                    }(),
                   ] else ...[
                     // MORE LIKE THIS TAB (3-column grid)
                     if (detail.recommendations.isEmpty)

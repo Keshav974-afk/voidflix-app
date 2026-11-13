@@ -401,10 +401,11 @@ class ApiService {
       'append_to_response': 'credits,recommendations,videos,release_dates,content_ratings,images',
       'include_image_language': 'en,null',
     };
+    const commonVideoLangs = 'en,hi,es,ko,ja,fr,ta,te,pa,ml,tr,zh,de,it,pt,ru,id,null';
     if (languageCode != null && languageCode.isNotEmpty) {
-      queryParams['include_video_language'] = '$languageCode,en,null';
+      queryParams['include_video_language'] = '$languageCode,$commonVideoLangs';
     } else {
-      queryParams['include_video_language'] = 'en,null';
+      queryParams['include_video_language'] = commonVideoLangs;
     }
     final data = await _get('/$type/$id', queryParams);
     return MediaDetail.fromJson(data as Map<String, dynamic>, type);

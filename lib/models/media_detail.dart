@@ -1,4 +1,5 @@
 import 'media_item.dart';
+import '../core/utils/language_utils.dart';
 
 class CastMember {
   final int id;
@@ -82,6 +83,7 @@ class MediaVideo {
   final String site;
   final String type;
   final String iso6391;
+  final bool official;
 
   MediaVideo({
     required this.id,
@@ -90,6 +92,7 @@ class MediaVideo {
     required this.site,
     required this.type,
     this.iso6391 = 'en',
+    this.official = false,
   });
 
   factory MediaVideo.fromJson(Map<String, dynamic> json) {
@@ -100,7 +103,33 @@ class MediaVideo {
       site: (json['site'] ?? 'YouTube') as String,
       type: (json['type'] ?? 'Trailer') as String,
       iso6391: (json['iso_639_1'] ?? 'en') as String,
+      official: json['official'] == true,
     );
+  }
+
+  bool get isYouTube => site.toLowerCase() == 'youtube' && key.isNotEmpty;
+
+  bool get isTrailer => type.toLowerCase().trim() == 'trailer';
+  bool get isTeaser => type.toLowerCase().trim() == 'teaser';
+  bool get isTrailerOrTeaser => isTrailer || isTeaser;
+
+  bool get isClip => type.toLowerCase().trim() == 'clip' || type.toLowerCase().contains('clip');
+  bool get isBehindTheScenes {
+    final t = type.toLowerCase().trim();
+    return t == 'behind the scenes' ||
+        t.contains('behind') ||
+        t == 'featurette' ||
+        t.contains('featurette') ||
+        t == 'bloopers' ||
+        t.contains('blooper');
+  }
+
+  bool get isClipOrBTS => isClip || isBehindTheScenes;
+
+  bool get isOfficial {
+    if (official) return true;
+    final n = name.toLowerCase();
+    return n.contains('official');
   }
 
   String get youtubeThumbnailUrl => 'https://img.youtube.com/vi/$key/mqdefault.jpg';
@@ -182,16 +211,22 @@ class MediaDetail {
     if (videos != null && videos['results'] != null) {
       final rawList = videos['results'] as List<dynamic>;
       videoResults = rawList
-          .where((v) => v['site'] == 'YouTube' && v['key'] != null)
+          .where((v) => v['site'] == 'YouTube' && v['key'] != null && (v['key'] as String).isNotEmpty)
           .map((v) => MediaVideo.fromJson(v as Map<String, dynamic>))
           .toList();
 
-      final match = rawList.firstWhere(
-        (v) => (v['type'] == 'Trailer' || v['type'] == 'Teaser') && v['site'] == 'YouTube',
-        orElse: () => null,
-      );
-      if (match != null) {
-        trailer = match['key'] as String?;
+      final trailerMatch = videoResults.where((v) => v.isTrailerOrTeaser).toList();
+      if (trailerMatch.isNotEmpty) {
+        trailerMatch.sort((a, b) {
+          int score(MediaVideo v) {
+            int s = 0;
+            if (v.isOfficial) s += 200;
+            if (v.isTrailer) s += 100;
+            return s;
+          }
+          return score(b) - score(a);
+        });
+        trailer = trailerMatch.first.key;
       }
     }
 
@@ -235,50 +270,179 @@ class MediaDetail {
     );
   }
 
+  /// Finds the official trailer or teaser key for the app trailer section.
+  /// Strictly filters to Trailers and Teasers only (no clips, no behind the scenes).
+  /// Priority:
+  /// 1. Official trailer / teaser in user preferred language
+  /// 2. Official trailer / teaser in media original language
+  /// 3. English official trailer / teaser fallback
+  /// 4. Any official trailer / teaser
+  /// Returns null if no trailer or teaser exists (never returns clips/BTS).
   String? findTrailerKey({String? preferredLangCode}) {
-    if (videos.isEmpty) return trailerKey;
-    final ytVideos = videos.where((v) => v.site.toLowerCase() == 'youtube' && v.key.isNotEmpty).toList();
-    if (ytVideos.isEmpty) return trailerKey;
+    final ytTrailers = videos.where((v) => v.isYouTube && v.isTrailerOrTeaser).toList();
+    if (ytTrailers.isEmpty) {
+      return trailerKey;
+    }
 
-    // 1. Check preferred language
+    int scoreTrailer(MediaVideo v, {String? targetLang}) {
+      int score = 0;
+      if (targetLang != null && targetLang.isNotEmpty) {
+        if (LanguageUtils.matches(v.iso6391, targetLang)) {
+          score += 1000;
+        } else if (LanguageUtils.matches(v.name, targetLang)) {
+          score += 500;
+        }
+      }
+
+      // Official status
+      if (v.official) score += 300;
+      if (v.name.toLowerCase().contains('official')) score += 200;
+
+      // Trailer vs Teaser
+      if (v.isTrailer) {
+        score += 150;
+        final n = v.name.toLowerCase();
+        if (n.contains('official trailer') || n.contains('main trailer') || n.contains('final trailer')) {
+          score += 100;
+        }
+      } else if (v.isTeaser) {
+        score += 80;
+        final n = v.name.toLowerCase();
+        if (n.contains('official teaser') || n.contains('teaser trailer')) {
+          score += 40;
+        }
+      }
+      return score;
+    }
+
+    // 1. Check user preferred language
     if (preferredLangCode != null && preferredLangCode.isNotEmpty) {
-      final code = preferredLangCode.toLowerCase().trim();
-      final prefTrailer = ytVideos.cast<MediaVideo?>().firstWhere(
-        (v) => (v!.type.toLowerCase() == 'trailer' || v.type.toLowerCase() == 'teaser') && v.iso6391.toLowerCase() == code,
-        orElse: () => ytVideos.cast<MediaVideo?>().firstWhere(
-          (v) => v!.iso6391.toLowerCase() == code,
-          orElse: () => ytVideos.cast<MediaVideo?>().firstWhere(
-            (v) => v!.name.toLowerCase().contains(code),
-            orElse: () => null,
-          ),
-        ),
-      );
-      if (prefTrailer != null) return prefTrailer.key;
+      final prefMatches = ytTrailers.where(
+        (v) => LanguageUtils.matches(v.iso6391, preferredLangCode) ||
+               LanguageUtils.matches(v.name, preferredLangCode),
+      ).toList();
+
+      if (prefMatches.isNotEmpty) {
+        prefMatches.sort((a, b) => scoreTrailer(b, targetLang: preferredLangCode) - scoreTrailer(a, targetLang: preferredLangCode));
+        return prefMatches.first.key;
+      }
     }
 
-    // 2. Check original language
+    // 2. Check original language of the media
     if (originalLanguage != null && originalLanguage!.isNotEmpty) {
-      final origCode = originalLanguage!.toLowerCase().trim();
-      final origTrailer = ytVideos.cast<MediaVideo?>().firstWhere(
-        (v) => (v!.type.toLowerCase() == 'trailer' || v.type.toLowerCase() == 'teaser') && v.iso6391.toLowerCase() == origCode,
-        orElse: () => null,
-      );
-      if (origTrailer != null) return origTrailer.key;
+      final origMatches = ytTrailers.where(
+        (v) => LanguageUtils.matches(v.iso6391, originalLanguage!) ||
+               v.iso6391.toLowerCase() == originalLanguage!.toLowerCase() ||
+               LanguageUtils.matches(v.name, originalLanguage!),
+      ).toList();
+
+      if (origMatches.isNotEmpty) {
+        origMatches.sort((a, b) => scoreTrailer(b, targetLang: originalLanguage) - scoreTrailer(a, targetLang: originalLanguage));
+        return origMatches.first.key;
+      }
     }
 
-    // 3. Fallback to English trailer
-    final enTrailer = ytVideos.cast<MediaVideo?>().firstWhere(
-      (v) => (v!.type.toLowerCase() == 'trailer' || v.type.toLowerCase() == 'teaser') && v.iso6391.toLowerCase() == 'en',
-      orElse: () => null,
-    );
-    if (enTrailer != null) return enTrailer.key;
+    // 3. Fallback: English trailer or teaser
+    final enMatches = ytTrailers.where(
+      (v) => LanguageUtils.matches(v.iso6391, 'en') ||
+             v.iso6391.toLowerCase() == 'en' ||
+             LanguageUtils.matches(v.name, 'english'),
+    ).toList();
 
-    // 4. Any Trailer or Teaser
-    final anyTrailer = ytVideos.cast<MediaVideo?>().firstWhere(
-      (v) => (v!.type.toLowerCase() == 'trailer' || v.type.toLowerCase() == 'teaser'),
-      orElse: () => ytVideos.first,
-    );
-    return anyTrailer?.key ?? trailerKey;
+    if (enMatches.isNotEmpty) {
+      enMatches.sort((a, b) => scoreTrailer(b, targetLang: 'en') - scoreTrailer(a, targetLang: 'en'));
+      return enMatches.first.key;
+    }
+
+    // 4. Any Trailer or Teaser available (sorted by score)
+    ytTrailers.sort((a, b) => scoreTrailer(b) - scoreTrailer(a));
+    return ytTrailers.first.key;
+  }
+
+  /// Finds the best clip or behind-the-scenes video for the Clips section.
+  /// Prioritizes actual Clips and Behind the Scenes in preferred / original language.
+  /// If no clips/BTS exist on TMDB, falls back to trailer or teaser.
+  MediaVideo? findBestClipVideo({String? preferredLangCode}) {
+    if (videos.isEmpty) return null;
+    final yt = videos.where((v) => v.isYouTube).toList();
+    if (yt.isEmpty) return null;
+
+    final clipsAndBts = yt.where((v) => v.isClipOrBTS).toList();
+
+    int scoreClip(MediaVideo v, {String? targetLang}) {
+      int score = 0;
+      if (targetLang != null && targetLang.isNotEmpty) {
+        if (LanguageUtils.matches(v.iso6391, targetLang)) {
+          score += 1000;
+        } else if (LanguageUtils.matches(v.name, targetLang)) {
+          score += 500;
+        }
+      }
+      if (v.isClip) {
+        score += 300;
+      } else if (v.isBehindTheScenes) {
+        score += 200;
+      }
+      if (v.official) {
+        score += 50;
+      }
+      return score;
+    }
+
+    // Prioritize actual clips and behind the scenes
+    if (clipsAndBts.isNotEmpty) {
+      // 1. Check preferred language
+      if (preferredLangCode != null && preferredLangCode.isNotEmpty) {
+        final prefMatches = clipsAndBts.where(
+          (v) => LanguageUtils.matches(v.iso6391, preferredLangCode) ||
+                 LanguageUtils.matches(v.name, preferredLangCode),
+        ).toList();
+        if (prefMatches.isNotEmpty) {
+          prefMatches.sort((a, b) => scoreClip(b, targetLang: preferredLangCode) - scoreClip(a, targetLang: preferredLangCode));
+          return prefMatches.first;
+        }
+      }
+
+      // 2. Check original language
+      if (originalLanguage != null && originalLanguage!.isNotEmpty) {
+        final origMatches = clipsAndBts.where(
+          (v) => LanguageUtils.matches(v.iso6391, originalLanguage!) ||
+                 v.iso6391.toLowerCase() == originalLanguage!.toLowerCase() ||
+                 LanguageUtils.matches(v.name, originalLanguage!),
+        ).toList();
+        if (origMatches.isNotEmpty) {
+          origMatches.sort((a, b) => scoreClip(b, targetLang: originalLanguage) - scoreClip(a, targetLang: originalLanguage));
+          return origMatches.first;
+        }
+      }
+
+      // 3. Fallback: English clips or BTS
+      final enMatches = clipsAndBts.where(
+        (v) => LanguageUtils.matches(v.iso6391, 'en') ||
+               v.iso6391.toLowerCase() == 'en' ||
+               LanguageUtils.matches(v.name, 'english'),
+      ).toList();
+      if (enMatches.isNotEmpty) {
+        enMatches.sort((a, b) => scoreClip(b, targetLang: 'en') - scoreClip(a, targetLang: 'en'));
+        return enMatches.first;
+      }
+
+      // 4. Any clips or BTS
+      clipsAndBts.sort((a, b) => scoreClip(b) - scoreClip(a));
+      return clipsAndBts.first;
+    }
+
+    // If no clips or BTS exist on TMDB, fall back to official trailer/teaser
+    final trailerKey = findTrailerKey(preferredLangCode: preferredLangCode);
+    if (trailerKey != null) {
+      return yt.firstWhere((v) => v.key == trailerKey, orElse: () => yt.first);
+    }
+
+    return null;
+  }
+
+  String? findClipKey({String? preferredLangCode}) {
+    return findBestClipVideo(preferredLangCode: preferredLangCode)?.key;
   }
 
   MediaItem toMediaItem() {

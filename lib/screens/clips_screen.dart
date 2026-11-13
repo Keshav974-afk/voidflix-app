@@ -15,6 +15,7 @@ import '../core/services/tv_mode_service.dart';
 import '../core/utils/language_utils.dart';
 import '../core/utils/platform_utils.dart';
 import '../models/media_item.dart';
+import '../models/media_detail.dart';
 import '../providers/media_provider.dart';
 import '../providers/profile_provider.dart';
 import '../providers/watchlist_provider.dart';
@@ -187,6 +188,7 @@ class ClipPlayerTile extends StatefulWidget {
 class _ClipPlayerTileState extends State<ClipPlayerTile> {
   final ApiService _apiService = ApiService();
   String? _trailerKey;
+  MediaVideo? _activeVideo;
   String? _logoPath;
   WebViewController? _webController;
   VideoPlayerController? _videoPlayerController;
@@ -306,14 +308,16 @@ class _ClipPlayerTileState extends State<ClipPlayerTile> {
         _logoPath = detail.logoPath;
       }
 
-      final key = detail.findTrailerKey(preferredLangCode: widget.preferredLangCode);
-      if (key != null && key.isNotEmpty) {
-        _trailerKey = key;
+      // Prioritize Clips, Behind the Scenes, and Featurettes in Clips section
+      final bestClip = detail.findBestClipVideo(preferredLangCode: widget.preferredLangCode);
+      if (bestClip != null && bestClip.key.isNotEmpty) {
+        _activeVideo = bestClip;
+        _trailerKey = bestClip.key;
         if (widget.isActive) {
           if (PlatformUtils.isWebViewSupported) {
-            _initWebController(key);
+            _initWebController(bestClip.key);
           } else {
-            _initNativePlayer(key);
+            _initNativePlayer(bestClip.key);
           }
         }
       }
@@ -448,7 +452,14 @@ class _ClipPlayerTileState extends State<ClipPlayerTile> {
                 shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(24)),
               ),
               icon: const Icon(Icons.play_arrow_rounded, size: 24),
-              label: const Text('Watch Trailer on YouTube', style: TextStyle(fontWeight: FontWeight.bold)),
+              label: Text(
+                _activeVideo?.isBehindTheScenes == true
+                    ? 'Watch BTS on YouTube'
+                    : (_activeVideo?.isClip == true
+                        ? 'Watch Clip on YouTube'
+                        : 'Watch on YouTube'),
+                style: const TextStyle(fontWeight: FontWeight.bold),
+              ),
               onPressed: () async {
                 _pauseClip();
                 final ytUrl = 'https://www.youtube.com/watch?v=$_trailerKey';
@@ -496,14 +507,32 @@ class _ClipPlayerTileState extends State<ClipPlayerTile> {
                   borderRadius: BorderRadius.circular(20),
                   border: Border.all(color: AppTheme.primaryRed.withValues(alpha: 0.8), width: 1.2),
                 ),
-                child: const Row(
+                child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Icon(Icons.movie_filter_outlined, color: AppTheme.primaryRed, size: 14),
-                    SizedBox(width: 6),
+                    Icon(
+                      _activeVideo?.isBehindTheScenes == true
+                          ? Icons.video_camera_back_outlined
+                          : (_activeVideo?.isClip == true
+                              ? Icons.movie_creation_outlined
+                              : (_activeVideo?.isTeaser == true
+                                  ? Icons.local_fire_department_outlined
+                                  : Icons.movie_filter_outlined)),
+                      color: AppTheme.primaryRed,
+                      size: 14,
+                    ),
+                    const SizedBox(width: 6),
                     Text(
-                      'OFFICIAL TRAILER CLIP',
-                      style: TextStyle(
+                      _activeVideo?.isBehindTheScenes == true
+                          ? 'BEHIND THE SCENES'
+                          : (_activeVideo?.isClip == true
+                              ? 'FEATURED CLIP'
+                              : (_activeVideo?.isTeaser == true
+                                  ? 'OFFICIAL TEASER'
+                                  : (_activeVideo?.isTrailer == true
+                                      ? 'OFFICIAL TRAILER'
+                                      : 'VOIDFLIX CLIPS'))),
+                      style: const TextStyle(
                         color: Colors.white,
                         fontSize: 11,
                         fontWeight: FontWeight.w900,
@@ -613,7 +642,7 @@ class _ClipPlayerTileState extends State<ClipPlayerTile> {
                 onTap: () {
                   SharePlus.instance.share(
                     ShareParams(
-                      text: 'Watch "${widget.item.title}" trailer on Voidflix!\nhttps://voidflix.org/${widget.item.mediaType}/${widget.item.id}',
+                      text: 'Watch "${widget.item.title}" on Voidflix!\nhttps://voidflix.org/watch/${widget.item.mediaType}/${widget.item.id}',
                       subject: 'Watch ${widget.item.title} on Voidflix',
                     ),
                   );
@@ -684,6 +713,28 @@ class _ClipPlayerTileState extends State<ClipPlayerTile> {
                     ],
                   ),
                 ),
+              if (_activeVideo != null &&
+                  _activeVideo!.name.isNotEmpty &&
+                  !_activeVideo!.name.toLowerCase().contains(widget.item.title.toLowerCase())) ...[
+                const SizedBox(height: 6),
+                Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(4),
+                  ),
+                  child: Text(
+                    _activeVideo!.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ],
               const SizedBox(height: 6),
               if (widget.item.overview.isNotEmpty)
                 Text(

@@ -1450,7 +1450,9 @@ class _DetailModalState extends State<DetailModal> {
   }
 
   Widget _buildTrailersSliver() {
-    final vids = _detail?.videos ?? [];
+    final allVids = _detail?.videos ?? [];
+    // Strictly filter to official trailers and teasers only (no clips or BTS)
+    final vids = allVids.where((v) => v.isTrailerOrTeaser).toList();
     if (vids.isEmpty && (_trailerKey == null || _trailerKey!.isEmpty)) {
       return const SliverToBoxAdapter(
         child: Padding(
@@ -1479,6 +1481,7 @@ class _DetailModalState extends State<DetailModal> {
               key: _trailerKey!,
               site: 'YouTube',
               type: 'Trailer',
+              official: true,
             )
           ];
 
