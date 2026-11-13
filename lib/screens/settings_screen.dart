@@ -77,8 +77,8 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   String get _formattedDeviceInfo {
     if (_deviceInfo != null) {
-      final versionName = _deviceInfo!['versionName']?.toString() ?? '1.0.0';
-      final versionCode = _deviceInfo!['versionCode']?.toString() ?? '1';
+      final versionName = _deviceInfo!['versionName']?.toString() ?? '0.4.4';
+      final versionCode = _deviceInfo!['versionCode']?.toString() ?? '10';
       final sdkInt = _deviceInfo!['sdkInt']?.toString() ?? '31';
       final primaryAbi = _deviceInfo!['primaryAbi']?.toString() ?? 'arm64-v8a';
       final model = _deviceInfo!['model']?.toString() ?? 'Device';
@@ -104,7 +104,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
           'ESN: $esn';
     }
 
-    return 'Version: 0.4.3, OS API: ${Platform.operatingSystemVersion}\n'
+    return 'Version: 0.4.4, OS API: ${Platform.operatingSystemVersion}\n'
         'Model: ${Platform.operatingSystem}\n'
         'Platform: ${Platform.isAndroid ? "Android" : Platform.operatingSystem}';
   }
@@ -1124,7 +1124,7 @@ class _SettingsScreenState extends State<SettingsScreen> {
               showLicensePage(
                 context: context,
                 applicationName: 'Voidflix',
-                applicationVersion: '0.4.3 (Build 9)',
+                applicationVersion: '0.4.4 (Build 10)',
               );
             },
           ),

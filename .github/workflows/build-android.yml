@@ -48,3 +48,9 @@ jobs:
         with:
           name: Voidflix-Android-Universal-APK
           path: build/app/outputs/flutter-apk/app-release.apk
+
+      - name: Create or Update GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload v0.4.4 build/app/outputs/flutter-apk/*.apk --clobber || gh release create v0.4.4 build/app/outputs/flutter-apk/*.apk --title "Voidflix v0.4.4" --notes "Official Android APK Release v0.4.4" --clobber || true

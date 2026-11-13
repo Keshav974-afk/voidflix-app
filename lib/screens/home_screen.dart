@@ -356,7 +356,8 @@ class _HomeScreenState extends State<HomeScreen> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                // 1. Netflix Top Category Pills Row
+                // 1. Netflix Top Category Pills Row (Hidden on Desktop Web/PC as Top Bar hosts categories)
+                if (MediaQuery.of(context).size.width < 850)
                 Padding(
                   padding: EdgeInsets.only(
                     top: MediaQuery.of(context).padding.top + 8,

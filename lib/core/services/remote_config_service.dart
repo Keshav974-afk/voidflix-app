@@ -154,8 +154,8 @@ class RemoteNotificationItem {
 
 class RemoteConfigService {
   static const String configEndpoint = 'https://voidflix.org/api/public/config';
-  static const String currentAppVersion = '1.0.3';
-  static const int currentBuildNumber = 11;
+  static const String currentAppVersion = '0.4.4';
+  static const int currentBuildNumber = 10;
 
   static RemoteAppUpdate? cachedUpdate;
   static List<RemotePromoBanner> cachedBanners = [];

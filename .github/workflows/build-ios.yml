@@ -55,4 +55,4 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh release upload v1.0.0 Voidflix.ipa --clobber || gh release create v1.0.0 Voidflix.ipa --title "Voidflix v1.0.0" --notes "Official iOS IPA & Android Release" --clobber || true
+          gh release upload v0.4.4 Voidflix.ipa --clobber || gh release create v0.4.4 Voidflix.ipa --title "Voidflix v0.4.4" --notes "Official iOS IPA & Android Release v0.4.4" --clobber || true

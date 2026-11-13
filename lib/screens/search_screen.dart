@@ -18,7 +18,8 @@ import '../widgets/tv_back_button.dart';
 import '../widgets/tv_focusable.dart';
 
 class SearchScreen extends StatefulWidget {
-  const SearchScreen({super.key});
+  final String? initialQuery;
+  const SearchScreen({super.key, this.initialQuery});
 
   @override
   State<SearchScreen> createState() => _SearchScreenState();
@@ -52,7 +53,23 @@ class _SearchScreenState extends State<SearchScreen> {
   @override
   void initState() {
     super.initState();
-    _loadRecommendations();
+    if (widget.initialQuery != null && widget.initialQuery!.trim().isNotEmpty) {
+      _controller.text = widget.initialQuery!.trim();
+      _performSearch(widget.initialQuery!.trim());
+    } else {
+      _loadRecommendations();
+    }
+  }
+
+  @override
+  void didUpdateWidget(covariant SearchScreen oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (widget.initialQuery != null &&
+        widget.initialQuery != oldWidget.initialQuery &&
+        widget.initialQuery!.trim().isNotEmpty) {
+      _controller.text = widget.initialQuery!.trim();
+      _performSearch(widget.initialQuery!.trim());
+    }
   }
 
   Future<void> _loadRecommendations() async {

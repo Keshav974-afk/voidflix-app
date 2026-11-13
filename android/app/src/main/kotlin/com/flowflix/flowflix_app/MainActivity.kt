@@ -306,7 +306,7 @@ class MainActivity : FlutterActivity() {
                             packageManager.getPackageInfo(packageName, 0)
                         }
 
-                        val versionName = packageInfo.versionName ?: "1.0.0"
+                        val versionName = packageInfo.versionName ?: "0.4.4"
                         val versionCode = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
                             packageInfo.longVersionCode
                         } else {

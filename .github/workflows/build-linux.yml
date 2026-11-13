@@ -38,16 +38,22 @@ jobs:
 
       - name: Package Standalone Tarball
         run: |
-          tar -C build/linux/x64/release/bundle -czvf Voidflix-Linux-x86_64-v0.4.3.tar.gz .
+          tar -C build/linux/x64/release/bundle -czvf Voidflix-Linux-x86_64-v0.4.4.tar.gz .
 
       - name: Upload Linux Release Artifact
         uses: actions/upload-artifact@v4
         with:
           name: Voidflix-Linux-x86_64
-          path: Voidflix-Linux-x86_64-v0.4.3.tar.gz
+          path: Voidflix-Linux-x86_64-v0.4.4.tar.gz
 
       - name: Upload Raw Release Bundle
         uses: actions/upload-artifact@v4
         with:
           name: Voidflix-Linux-Bundle
           path: build/linux/x64/release/bundle/
+
+      - name: Create or Update GitHub Release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release upload v0.4.4 Voidflix-Linux-x86_64-v0.4.4.tar.gz --clobber || gh release create v0.4.4 Voidflix-Linux-x86_64-v0.4.4.tar.gz --title "Voidflix v0.4.4" --notes "Official Native Linux Desktop Flutter Release v0.4.4" --clobber || true

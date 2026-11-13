@@ -1,6 +1,6 @@
 ; Inno Setup Compiler Script for Voidflix Native Windows Flutter Desktop Application
 #define MyAppName "Voidflix"
-#define MyAppVersion "0.4.3"
+#define MyAppVersion "0.4.4"
 #define MyAppPublisher "Voidflix"
 #define MyAppURL "https://voidflix.org"
 #define MyAppExeName "Voidflix.exe"

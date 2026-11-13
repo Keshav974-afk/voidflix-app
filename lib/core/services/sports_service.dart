@@ -32,7 +32,7 @@ class SportsService {
       final res = await http.get(
         Uri.parse('$_apiBase?category=$catKey'),
         headers: {
-          'User-Agent': 'Voidflix-App/0.4.2',
+          'User-Agent': 'Voidflix-App/0.4.4',
           'Accept': 'application/json',
         },
       ).timeout(const Duration(seconds: 15));
@@ -113,7 +113,7 @@ query GetLiveCricket {
       try {
         final cfgRes = await http.get(
           Uri.parse('https://voidflix.org/api/public/config'),
-          headers: {'User-Agent': 'Voidflix-App/0.4.2'},
+          headers: {'User-Agent': 'Voidflix-App/0.4.4'},
         ).timeout(const Duration(seconds: 5));
         if (cfgRes.statusCode == 200) {
           final cfg = jsonDecode(cfgRes.body) as Map<String, dynamic>;
@@ -136,7 +136,7 @@ query GetLiveCricket {
       try {
         final feedRes = await http.get(
           Uri.parse('https://football-feed.pages.dev/links.json?t=${DateTime.now().millisecondsSinceEpoch}'),
-          headers: {'User-Agent': 'Voidflix-App/0.4.2'},
+          headers: {'User-Agent': 'Voidflix-App/0.4.4'},
         ).timeout(const Duration(seconds: 4));
         if (feedRes.statusCode == 200) {
           feedLinksMap = jsonDecode(feedRes.body) as Map<String, dynamic>;

@@ -1,6 +1,8 @@
 import 'dart:ui';
 import 'package:flutter/material.dart';
+import '../core/constants/theme_constants.dart';
 import '../models/media_detail.dart';
+import 'tv_focusable.dart';
 
 /// Full-screen Netflix-style Season Picker overlay with blurred backdrop,
 /// centered large typography, and circular white bottom close button.
@@ -51,11 +53,14 @@ class NetflixSeasonPicker {
                               ? se.name
                               : 'Season $n';
 
-                          return GestureDetector(
-                            onTap: () => Navigator.of(ctx).pop(n),
-                            behavior: HitTestBehavior.opaque,
+                          return TvFocusable(
+                            autofocus: isSel,
+                            scaleFactor: 1.08,
+                            glowColor: AppTheme.primaryRed,
+                            borderRadius: BorderRadius.circular(10),
+                            onPressed: () => Navigator.of(ctx).pop(n),
                             child: Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 12),
                               child: Text(
                                 label,
                                 textAlign: TextAlign.center,
@@ -79,8 +84,11 @@ class NetflixSeasonPicker {
                     right: 0,
                     bottom: 28,
                     child: Center(
-                      child: GestureDetector(
-                        onTap: () => Navigator.of(ctx).pop(),
+                      child: TvFocusable(
+                        scaleFactor: 1.1,
+                        glowColor: Colors.white,
+                        borderRadius: BorderRadius.circular(28),
+                        onPressed: () => Navigator.of(ctx).pop(),
                         child: Container(
                           width: 54,
                           height: 54,
