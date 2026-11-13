@@ -71,7 +71,7 @@ object VoidflixNotificationChecker {
                     connectTimeout = 7000
                     readTimeout = 7000
                     setRequestProperty("Accept", "application/json")
-                    setRequestProperty("User-Agent", "Voidflix-Android/0.4.3")
+                    setRequestProperty("User-Agent", "Voidflix-Android/0.4.4")
                 }
 
                 if (conn.responseCode == 200) {
