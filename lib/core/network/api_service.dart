@@ -1,13 +1,41 @@
 import 'dart:convert';
 import 'package:http/http.dart' as http;
+import 'package:shared_preferences/shared_preferences.dart';
 import '../constants/api_constants.dart';
 import '../../models/media_item.dart';
 import '../../models/media_detail.dart';
 
+class _CacheEntry {
+  final dynamic data;
+  final DateTime timestamp;
+  _CacheEntry(this.data, this.timestamp);
+
+  bool get isExpired => DateTime.now().difference(timestamp).inMinutes > 30;
+}
+
 class ApiService {
   final http.Client _client = http.Client();
+  static final Map<String, _CacheEntry> _cache = {};
   static bool _preferProxy = false;
+  static bool _hasLoadedPref = false;
+  static const String _preferProxyKey = 'voidflix_prefer_proxy';
   static const String _edgeProxyBase = 'https://voidflix.org/api/public/tmdb';
+
+  static Future<void> _initProxyPref() async {
+    if (_hasLoadedPref) return;
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      _preferProxy = prefs.getBool(_preferProxyKey) ?? false;
+      _hasLoadedPref = true;
+    } catch (_) {}
+  }
+
+  static void _markProxyPreferred() {
+    _preferProxy = true;
+    SharedPreferences.getInstance()
+        .then((p) => p.setBool(_preferProxyKey, true))
+        .catchError((_) => false);
+  }
 
   static String getImageUrl(String? path, {String size = 'w500'}) {
     return ApiConstants.getImageUrl(path, size: size);
@@ -16,28 +44,47 @@ class ApiService {
   Future<List<MediaItem>> getTrending() => getTrendingAll();
 
   Future<dynamic> _get(String endpoint, [Map<String, String>? queryParams]) async {
+    final cacheKey = '$endpoint?${queryParams?.entries.map((e) => '${e.key}=${e.value}').join('&') ?? ''}';
+    final cached = _cache[cacheKey];
+    if (cached != null && !cached.isExpired) {
+      return cached.data;
+    }
+
+    if (!_hasLoadedPref) {
+      await _initProxyPref();
+    }
+
+    dynamic result;
     if (_preferProxy) {
-      return _fetchFromProxy(endpoint, queryParams);
-    }
+      result = await _fetchFromProxy(endpoint, queryParams);
+    } else {
+      try {
+        final params = {
+          'api_key': ApiConstants.tmdbApiKey,
+          ...?queryParams,
+        };
 
-    try {
-      final params = {
-        'api_key': ApiConstants.tmdbApiKey,
-        ...?queryParams,
-      };
+        final uri = Uri.parse('${ApiConstants.tmdbBaseUrl}$endpoint').replace(queryParameters: params);
+        // Fast 1200ms timeout for direct TMDB so ISP block/throttling falls back to edge proxy instantly
+        final response = await _client.get(uri).timeout(const Duration(milliseconds: 1200));
 
-      final uri = Uri.parse('${ApiConstants.tmdbBaseUrl}$endpoint').replace(queryParameters: params);
-      final response = await _client.get(uri).timeout(const Duration(seconds: 5));
-
-      if (response.statusCode == 200) {
-        return jsonDecode(response.body);
-      } else {
-        throw Exception('TMDB API Error: ${response.statusCode}');
+        if (response.statusCode == 200) {
+          result = jsonDecode(response.body);
+        } else {
+          throw Exception('TMDB API Error: ${response.statusCode}');
+        }
+      } catch (_) {
+        _markProxyPreferred();
+        result = await _fetchFromProxy(endpoint, queryParams);
       }
-    } catch (_) {
-      _preferProxy = true;
-      return _fetchFromProxy(endpoint, queryParams);
     }
+
+    _cache[cacheKey] = _CacheEntry(result, DateTime.now());
+    return result;
+  }
+
+  void prefetchDetails(String mediaType, int id, {String? languageCode}) {
+    getDetails(mediaType, id, languageCode: languageCode).ignore();
   }
 
   Future<dynamic> _fetchFromProxy(String endpoint, [Map<String, String>? queryParams]) async {

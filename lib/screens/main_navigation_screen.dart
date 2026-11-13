@@ -134,8 +134,12 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
                   currentIndex: _bottomTabIndex,
                   onTap: (idx) {
                     setState(() {
+                      if (idx == 0) {
+                        _activeCategoryIndex = 0;
+                      }
                       _bottomTabIndex = idx;
                       _loadedBottomTabs.add(idx);
+                      _loadedCategoryTabs.add(0);
                     });
                   },
                 ),

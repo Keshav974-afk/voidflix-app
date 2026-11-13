@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:cached_network_image/cached_network_image.dart';
 import '../core/constants/api_constants.dart';
 import '../core/constants/theme_constants.dart';
+import '../core/network/api_service.dart';
 import '../core/services/tv_mode_service.dart';
 import '../models/media_item.dart';
 import '../screens/detail_screen.dart';
@@ -155,12 +156,22 @@ class MediaCard extends StatelessWidget {
     }
 
     return RepaintBoundary(
-      child: TvFocusable(
-        scaleFactor: 1.07,
-        glowColor: AppTheme.primaryRed,
-        borderRadius: BorderRadius.circular(12),
-        onPressed: handleAction,
-        child: cardContent,
+      child: Listener(
+        onPointerDown: (_) {
+          ApiService().prefetchDetails(effectiveItem.mediaType, effectiveItem.id);
+        },
+        child: TvFocusable(
+          scaleFactor: 1.07,
+          glowColor: AppTheme.primaryRed,
+          borderRadius: BorderRadius.circular(12),
+          onFocusChange: (focused) {
+            if (focused) {
+              ApiService().prefetchDetails(effectiveItem.mediaType, effectiveItem.id);
+            }
+          },
+          onPressed: handleAction,
+          child: cardContent,
+        ),
       ),
     );
   }
