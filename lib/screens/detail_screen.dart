@@ -30,11 +30,15 @@ import 'player_screen.dart';
 class DetailScreen extends StatefulWidget {
   final int mediaId;
   final String mediaType; // 'movie' or 'tv'
+  final int? initialSeason;
+  final int? initialEpisode;
 
   const DetailScreen({
     super.key,
     required this.mediaId,
     required this.mediaType,
+    this.initialSeason,
+    this.initialEpisode,
   });
 
   @override
@@ -64,7 +68,12 @@ class _DetailScreenState extends State<DetailScreen> {
     super.initState();
     _loadDetail();
     // Netflix-style background pre-warming: pre-resolve stream while user views synopsis
-    StreamExtractor.prewarm(widget.mediaType, widget.mediaId, season: 1, episode: 1);
+    StreamExtractor.prewarm(
+      widget.mediaType,
+      widget.mediaId,
+      season: widget.initialSeason ?? 1,
+      episode: widget.initialEpisode ?? 1,
+    );
   }
 
   void _updateTrailerPlayer(String key) {
@@ -156,7 +165,14 @@ class _DetailScreenState extends State<DetailScreen> {
         }
 
         if (widget.mediaType == 'tv' && detail.seasons.isNotEmpty) {
-          _selectedSeason = detail.seasons.first.seasonNumber;
+          int targetSeason = detail.seasons.first.seasonNumber;
+          if (widget.initialSeason != null) {
+            final exists = detail.seasons.any((s) => s.seasonNumber == widget.initialSeason);
+            if (exists) {
+              targetSeason = widget.initialSeason!;
+            }
+          }
+          _selectedSeason = targetSeason;
           _loadSeasonEpisodes(_selectedSeason);
         }
       }
@@ -444,8 +460,10 @@ class _DetailScreenState extends State<DetailScreen> {
                       child: GestureDetector(
                         onTap: () {
                           final saved = context.read<HistoryProvider>().getProgress(detail.id);
-                          final s = saved?.season ?? _selectedSeason;
-                          final e = saved?.episode ?? 1;
+                          final s = widget.initialSeason ?? (saved?.season ?? _selectedSeason);
+                          final e = (widget.initialSeason != null && widget.initialEpisode != null)
+                              ? widget.initialEpisode!
+                              : (saved?.episode ?? 1);
                           final posSec = (saved != null && saved.positionSeconds > 0)
                               ? saved.positionSeconds.toDouble()
                               : (saved != null && saved.progress > 0 && saved.durationSeconds > 0
@@ -750,8 +768,10 @@ class _DetailScreenState extends State<DetailScreen> {
                         glowColor: Colors.white,
                         borderRadius: BorderRadius.circular(6),
                         onPressed: () {
-                          final s = saved?.season ?? _selectedSeason;
-                          final e = saved?.episode ?? 1;
+                          final s = widget.initialSeason ?? (saved?.season ?? _selectedSeason);
+                          final e = (widget.initialSeason != null && widget.initialEpisode != null)
+                              ? widget.initialEpisode!
+                              : (saved?.episode ?? 1);
                           final offlineId = isTv
                               ? DownloadProvider.generateId('tv', detail.id, season: s, episode: e)
                               : DownloadProvider.generateId('movie', detail.id);

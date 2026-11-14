@@ -14,6 +14,7 @@ import '../core/constants/theme_constants.dart';
 import '../core/constants/api_constants.dart';
 import '../core/network/api_service.dart';
 import '../core/services/tv_mode_service.dart';
+import '../core/services/deep_link_service.dart';
 import '../models/media_item.dart';
 import '../providers/media_provider.dart';
 import '../providers/profile_provider.dart';
@@ -49,6 +50,7 @@ class _ProfileGateScreenState extends State<ProfileGateScreen> {
   @override
   void initState() {
     super.initState();
+    DeepLinkService.instance.setAppNotReady();
     _isManaging = widget.initialEditMode;
     _fetchTrendingPosters();
     _voidCastGateSub = VoidCastService().onCommand.listen((cmd) async {

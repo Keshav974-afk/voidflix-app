@@ -27,10 +27,23 @@ import 'netflix_season_picker.dart';
 class DetailModal extends StatefulWidget {
   final MediaItem item;
   final bool isDialog;
+  final int? initialSeason;
+  final int? initialEpisode;
 
-  const DetailModal({super.key, required this.item, this.isDialog = false});
+  const DetailModal({
+    super.key,
+    required this.item,
+    this.isDialog = false,
+    this.initialSeason,
+    this.initialEpisode,
+  });
 
-  static Future<void> show(BuildContext context, MediaItem item) {
+  static Future<void> show(
+    BuildContext context,
+    MediaItem item, {
+    int? initialSeason,
+    int? initialEpisode,
+  }) {
     final isWide = MediaQuery.of(context).size.width >= 768;
     if (isWide) {
       return showDialog(
@@ -44,7 +57,12 @@ class DetailModal extends StatefulWidget {
               color: Colors.transparent,
               child: ClipRRect(
                 borderRadius: BorderRadius.circular(16),
-                child: DetailModal(item: item, isDialog: true),
+                child: DetailModal(
+                  item: item,
+                  isDialog: true,
+                  initialSeason: initialSeason,
+                  initialEpisode: initialEpisode,
+                ),
               ),
             ),
           ),
@@ -55,7 +73,11 @@ class DetailModal extends StatefulWidget {
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
-      builder: (_) => DetailModal(item: item),
+      builder: (_) => DetailModal(
+        item: item,
+        initialSeason: initialSeason,
+        initialEpisode: initialEpisode,
+      ),
     );
   }
 
@@ -88,6 +110,9 @@ class _DetailModalState extends State<DetailModal> {
   @override
   void initState() {
     super.initState();
+    if (widget.initialSeason != null) {
+      _selectedSeason = widget.initialSeason!;
+    }
     _loadDetail();
   }
 
@@ -123,7 +148,14 @@ class _DetailModalState extends State<DetailModal> {
         });
 
         if (widget.item.mediaType == 'tv' && detail.seasons.isNotEmpty) {
-          _selectedSeason = detail.seasons.first.seasonNumber;
+          int targetSeason = detail.seasons.first.seasonNumber;
+          if (widget.initialSeason != null) {
+            final exists = detail.seasons.any((s) => s.seasonNumber == widget.initialSeason);
+            if (exists) {
+              targetSeason = widget.initialSeason!;
+            }
+          }
+          _selectedSeason = targetSeason;
           _loadSeasonEpisodes(_selectedSeason);
         }
 
@@ -793,8 +825,10 @@ class _DetailModalState extends State<DetailModal> {
                           height: 44,
                           child: ElevatedButton.icon(
                             onPressed: () {
-                              final s = savedProgress?.season ?? (isTv ? _selectedSeason : 1);
-                              final e = savedProgress?.episode ?? 1;
+                              final s = widget.initialSeason ?? (savedProgress?.season ?? (isTv ? _selectedSeason : 1));
+                              final e = (widget.initialSeason != null && widget.initialEpisode != null)
+                                  ? widget.initialEpisode!
+                                  : (savedProgress?.episode ?? 1);
                               final offlineId = isTv
                                   ? DownloadProvider.generateId('tv', widget.item.id, season: s, episode: e)
                                   : DownloadProvider.generateId('movie', widget.item.id);

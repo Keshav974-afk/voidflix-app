@@ -5,9 +5,9 @@ import 'package:google_fonts/google_fonts.dart';
 import 'package:provider/provider.dart';
 
 import '../core/constants/theme_constants.dart';
+import '../core/services/deep_link_service.dart';
 import '../core/services/remote_config_service.dart';
 import '../core/services/tv_mode_service.dart';
-import '../core/services/voidcast_service.dart';
 import '../models/media_item.dart';
 import '../providers/media_provider.dart';
 import '../providers/notification_provider.dart';
@@ -73,7 +73,10 @@ class _MainNavigationScreenState extends State<MainNavigationScreen> {
           MaterialPageRoute(builder: (_) => const UpdateRequiredScreen()),
         );
       } else {
-        AdminModals.checkAndShowModals(context);
+        DeepLinkService.instance.notifyMainAppReady(context);
+        if (DeepLinkService.instance.pendingLink == null) {
+          AdminModals.checkAndShowModals(context);
+        }
       }
     });
   }
