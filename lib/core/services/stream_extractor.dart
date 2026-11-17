@@ -1582,9 +1582,42 @@ class StreamExtractor {
             final primaryUrl = qualities.isNotEmpty ? qualities.first.url : (data['mp4'] as String? ?? '');
             if (primaryUrl.isEmpty) return null;
 
+            // Health and freshness validation for NetMirror/Hakuna streams:
+            if (primaryUrl.contains('hakunaymatata.com')) {
+              final tMatch = RegExp(r'[?&]t=(\d+)').firstMatch(primaryUrl);
+              if (tMatch != null) {
+                final t = int.tryParse(tMatch.group(1) ?? '0') ?? 0;
+                final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
+                final age = now - t;
+                if (age > 300 || age < -60) {
+                  debugPrint('StreamExtractor: NetMirror stream signature timestamp expired (age: ${age}s). Skipping.');
+                  return null;
+                }
+              }
+
+              try {
+                final probe = await http.get(
+                  Uri.parse(primaryUrl),
+                  headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+                    'Referer': 'https://movieboxhd.net/',
+                    'Origin': 'https://movieboxhd.net',
+                    'Range': 'bytes=0-1024',
+                  },
+                ).timeout(const Duration(milliseconds: 2000));
+                if (probe.statusCode == 429 || probe.statusCode == 403 || probe.statusCode == 428) {
+                  debugPrint('StreamExtractor: NetMirror CDN returned HTTP ${probe.statusCode}. Skipping.');
+                  return null;
+                }
+              } catch (_) {
+                return null;
+              }
+            }
+
             final streamHeaders = {
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-              'Referer': 'https://moviebox.ph/',
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+              'Referer': 'https://movieboxhd.net/',
+              'Origin': 'https://movieboxhd.net',
             };
 
             return ExtractedStream(

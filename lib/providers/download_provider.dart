@@ -266,8 +266,8 @@ class DownloadProvider extends ChangeNotifier {
   }) async {
     final urls = [
       mediaType == 'tv'
-          ? 'https://moviebox.ph/tv/download?tmdb=$mediaId&s=$season&e=$episode'
-          : 'https://moviebox.ph/movies/download?tmdb=$mediaId',
+          ? 'https://movieboxhd.net/tv/download?tmdb=$mediaId&s=$season&e=$episode'
+          : 'https://movieboxhd.net/movies/download?tmdb=$mediaId',
       'https://voidflix.org/watch/$mediaType/$mediaId',
       mediaType == 'tv'
           ? 'https://dl.vidsrc.vip/tv/$mediaId/$season/$episode'
