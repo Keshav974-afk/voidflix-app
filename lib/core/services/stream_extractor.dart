@@ -1589,7 +1589,7 @@ class StreamExtractor {
                 final t = int.tryParse(tMatch.group(1) ?? '0') ?? 0;
                 final now = DateTime.now().millisecondsSinceEpoch ~/ 1000;
                 final age = now - t;
-                if (age > 300 || age < -60) {
+                if (age > 43200 || age < -3600) {
                   debugPrint('StreamExtractor: NetMirror stream signature timestamp expired (age: ${age}s). Skipping.');
                   return null;
                 }
