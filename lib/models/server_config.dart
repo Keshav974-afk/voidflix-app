@@ -17,6 +17,47 @@ class VideoServer {
 class ServerConfig {
   static final List<VideoServer> servers = [
     // -------------------------------------------------------------------------
+    // 7MOVIES CASCADE SERVERS (P0 Vidly direct extract + P1 high-speed direct)
+    // -------------------------------------------------------------------------
+    VideoServer(
+      name: "Vidly",
+      description: "Direct HLS streaming with multi-language subtitles (7Movies P0)",
+      movieUrl: (id) => "https://vidly.pro/movie/$id",
+      tvUrl: (id, s, e) => "https://vidly.pro/tv/$id/$s/$e",
+      isDirectPlay: true,
+    ),
+    VideoServer(
+      name: "VidBolt",
+      description: "High-speed direct HLS stream cluster",
+      movieUrl: (id) => "https://vidbolt.xyz/movie/$id?autoPlay=true",
+      tvUrl: (id, s, e) => "https://vidbolt.xyz/tv/$id/$s/$e?autoPlay=true",
+      isDirectPlay: true,
+    ),
+    VideoServer(
+      name: "Cinezo",
+      description: "Direct adaptive HLS stream with multi-quality",
+      movieUrl: (id) =>
+          "https://player.cinezo.live/embed/movie/$id?autoplay=true",
+      tvUrl: (id, s, e) =>
+          "https://player.cinezo.live/embed/tv/$id/$s/$e?autoplay=true",
+      isDirectPlay: true,
+    ),
+    VideoServer(
+      name: "VidQueen",
+      description: "Direct HLS multi-quality stream",
+      movieUrl: (id) => "https://player.vidqueen.st/embed/movie/$id",
+      tvUrl: (id, s, e) => "https://player.vidqueen.st/embed/tv/$id/$s/$e",
+      isDirectPlay: true,
+    ),
+    VideoServer(
+      name: "Atlantic",
+      description: "Direct adaptive stream with native player",
+      movieUrl: (id) => "https://atlantic.st/embed/movie/$id",
+      tvUrl: (id, s, e) => "https://atlantic.st/embed/tv/$id/$s/$e",
+      isDirectPlay: true,
+    ),
+
+    // -------------------------------------------------------------------------
     // DIRECT NATIVE SERVERS (Extractable HLS • Hardware Accelerated • No Ads)
     // -------------------------------------------------------------------------
     VideoServer(
