@@ -367,11 +367,6 @@ class StreamExtractor {
   static void invalidateCache(String type, int tmdbId, int season, int episode) {
     final keys = [
       getCacheKey(type, tmdbId, season, episode),
-      getCacheKey(type, tmdbId, season, episode, prefix: 'vidly'),
-      getCacheKey(type, tmdbId, season, episode, prefix: 'vidbolt'),
-      getCacheKey(type, tmdbId, season, episode, prefix: 'cinezo'),
-      getCacheKey(type, tmdbId, season, episode, prefix: 'vidqueen'),
-      getCacheKey(type, tmdbId, season, episode, prefix: 'atlantic'),
       getCacheKey(type, tmdbId, season, episode, prefix: 'cinejoy'),
       getCacheKey(type, tmdbId, season, episode, prefix: 'vidrock'),
       getCacheKey(type, tmdbId, season, episode, prefix: 'vidlink'),
@@ -383,243 +378,6 @@ class StreamExtractor {
       _cache.remove(k);
       SharedPreferences.getInstance().then((prefs) => prefs.remove('cached_stream_$k')).catchError((_) => false);
     }
-  }
-
-  // -------------------------------------------------------------------------
-  // 7MOVIES CASCADE EXTRACTORS (Vidly P0, VidBolt, Cinezo, VidQueen, Atlantic)
-  // -------------------------------------------------------------------------
-
-  static Future<ExtractedStream?> extractVidly({
-    required String type,
-    required int tmdbId,
-    int season = 1,
-    int episode = 1,
-  }) async {
-    final key = getCacheKey(type, tmdbId, season, episode, prefix: 'vidly');
-    final cached = await getCachedEntry(key);
-    if (cached != null && cached.streams.isNotEmpty) {
-      return cached.streams.first;
-    }
-
-    // Try central Cloudflare database first
-    final remote = await fetchFromRemoteDatabase(type, tmdbId, season, episode, server: 'vidly');
-    if (remote != null) {
-      setCachedEntry(key, [remote]);
-      return remote;
-    }
-
-    try {
-      final pageUrl = type == 'movie'
-          ? 'https://vidly.pro/movie/$tmdbId'
-          : 'https://vidly.pro/tv/$tmdbId/$season/$episode';
-
-      final res = await http.get(
-        Uri.parse(pageUrl),
-        headers: {
-          'User-Agent':
-              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-          'Referer': 'https://7movies.ac/',
-          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-        },
-      ).timeout(const Duration(seconds: 6));
-
-      if (res.statusCode == 200) {
-        final body = res.body;
-        // Search for gzip.rousav.tech m3u8 in HTML or Next.js RSC payload
-        final match = RegExp(r'https?:[\\/]+gzip\.rousav\.tech[^\s"\x27\\]+index\.m3u8').firstMatch(body);
-        if (match != null) {
-          final cleanUrl = match.group(0)!.replaceAll(r'\/', '/').replaceAll(r'\', '');
-          final parentBase = cleanUrl.substring(0, cleanUrl.lastIndexOf('/') + 1);
-
-          final subs = <SubtitleTrack>[];
-          final qualities = <StreamQuality>[
-            StreamQuality(label: '720p', height: 720, url: cleanUrl),
-          ];
-
-          // Fetch master manifest to discover subtitle tracks
-          try {
-            final mRes = await http.get(
-              Uri.parse(cleanUrl),
-              headers: {
-                'User-Agent':
-                    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-                'Referer': 'https://vidly.pro/',
-              },
-            ).timeout(const Duration(seconds: 4));
-
-            if (mRes.statusCode == 200) {
-              final subMatches = RegExp(r'#EXT-X-MEDIA:TYPE=SUBTITLES.*?NAME="([^"]+)".*?URI="([^"]+)"')
-                  .allMatches(mRes.body);
-              for (final sm in subMatches) {
-                final label = sm.group(1) ?? 'Subtitle';
-                var subUri = sm.group(2) ?? '';
-                if (!subUri.startsWith('http')) {
-                  subUri = '$parentBase$subUri';
-                }
-                // If it points to an m3u8 playlist, resolve directly to the child .vtt
-                if (subUri.endsWith('.m3u8')) {
-                  try {
-                    final subListRes = await http.get(
-                      Uri.parse(subUri),
-                      headers: {'Referer': 'https://vidly.pro/'},
-                    ).timeout(const Duration(seconds: 3));
-                    if (subListRes.statusCode == 200) {
-                      for (final line in subListRes.body.split('\n')) {
-                        final trimmed = line.trim();
-                        if (trimmed.endsWith('.vtt')) {
-                          subUri = '$parentBase$trimmed';
-                          break;
-                        }
-                      }
-                    }
-                  } catch (_) {}
-                }
-
-                subs.add(SubtitleTrack(
-                  label: label,
-                  language: LanguageUtils.getInfo(label).code,
-                  url: subUri,
-                ));
-              }
-            }
-          } catch (_) {}
-
-          final stream = ExtractedStream(
-            url: cleanUrl,
-            type: 'hls',
-            sourceName: 'Vidly',
-            headers: {
-              'Referer': 'https://vidly.pro/',
-              'Origin': 'https://vidly.pro',
-              'User-Agent':
-                  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-            },
-            qualityLabel: '720p',
-            qualities: qualities,
-            subtitles: subs,
-          );
-
-          setCachedEntry(key, [stream]);
-          return stream;
-        }
-      }
-    } catch (e) {
-      debugPrint('StreamExtractor: Vidly extract error: $e');
-    }
-    return null;
-  }
-
-  static Future<ExtractedStream?> extractVidbolt({
-    required String type,
-    required int tmdbId,
-    int season = 1,
-    int episode = 1,
-  }) async {
-    final key = getCacheKey(type, tmdbId, season, episode, prefix: 'vidbolt');
-    final cached = await getCachedEntry(key);
-    if (cached != null && cached.streams.isNotEmpty) {
-      return cached.streams.first;
-    }
-
-    final remote = await fetchFromRemoteDatabase(type, tmdbId, season, episode, server: 'vidbolt');
-    if (remote != null) {
-      setCachedEntry(key, [remote]);
-      return remote;
-    }
-
-    try {
-      final apiUrl = type == 'movie'
-          ? 'https://vidbolt.xyz/api/resolve?type=movie&id=$tmdbId&hevc=0'
-          : 'https://vidbolt.xyz/api/resolve?type=tv&id=$tmdbId&season=$season&episode=$episode&hevc=0';
-
-      final res = await http.get(
-        Uri.parse(apiUrl),
-        headers: {
-          'User-Agent':
-              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-          'Referer': 'https://vidbolt.xyz/',
-          'Accept': 'application/json, */*',
-        },
-      ).timeout(const Duration(seconds: 6));
-
-      if (res.statusCode == 200) {
-        final data = jsonDecode(res.body) as Map<String, dynamic>;
-        final streamObj = data['stream'] as Map<String, dynamic>?;
-        final sources = streamObj?['sources'] as List<dynamic>?;
-        final source = (sources != null && sources.isNotEmpty && sources.first is Map)
-            ? (sources.first as Map<String, dynamic>)['url']?.toString()
-            : (data['source'] ?? data['hls'] ?? data['url']) as String?;
-        if (source != null && source.isNotEmpty) {
-          final subs = <SubtitleTrack>[];
-          final rawSubs = (streamObj?['subtitles'] ?? data['subtitles']) as List<dynamic>?;
-          if (rawSubs != null) {
-            for (final s in rawSubs) {
-              if (s is Map<String, dynamic> && s['file'] != null) {
-                final label = (s['language'] ?? s['label'] ?? 'English').toString();
-                subs.add(SubtitleTrack(
-                  label: label,
-                  language: LanguageUtils.getInfo(label).code,
-                  url: s['file'].toString(),
-                ));
-              }
-            }
-          }
-
-          final stream = ExtractedStream(
-            url: source,
-            type: source.contains('.mp4') ? 'mp4' : 'hls',
-            sourceName: 'VidBolt',
-            headers: {
-              'Referer': 'https://vidbolt.xyz/',
-              'Origin': 'https://vidbolt.xyz',
-              'User-Agent':
-                  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
-            },
-            qualityLabel: 'HD',
-            qualities: [StreamQuality(label: 'HD', height: 720, url: source)],
-            subtitles: subs,
-          );
-
-          setCachedEntry(key, [stream]);
-          return stream;
-        }
-      }
-    } catch (e) {
-      debugPrint('StreamExtractor: Vidbolt extract error: $e');
-    }
-    return null;
-  }
-
-  static Future<ExtractedStream?> extract7MoviesServer({
-    required String serverKey,
-    required String serverName,
-    required String type,
-    required int tmdbId,
-    int season = 1,
-    int episode = 1,
-  }) async {
-    final key = getCacheKey(type, tmdbId, season, episode, prefix: serverKey.toLowerCase());
-    final cached = await getCachedEntry(key);
-    if (cached != null && cached.streams.isNotEmpty) {
-      return cached.streams.first;
-    }
-
-    // Try central Cloudflare database / backend extract endpoint
-    final remote = await fetchFromRemoteDatabase(type, tmdbId, season, episode, server: serverKey);
-    if (remote != null && remote.type != 'embed') {
-      setCachedEntry(key, [remote]);
-      return remote;
-    }
-
-    // Direct HLS from Vidly (strictly no embed fallback)
-    final vidly = await extractVidly(type: type, tmdbId: tmdbId, season: season, episode: episode);
-    if (vidly != null) {
-      final directStream = vidly.copyWith(sourceName: serverName);
-      setCachedEntry(key, [directStream]);
-      return directStream;
-    }
-
-    return null;
   }
 
   static void clearCache() {
@@ -2025,26 +1783,6 @@ class StreamExtractor {
 
     // 2. If NetMirror is unavailable, run multiple extraction across all remaining direct sources
     try {
-      final vidlyFuture = extractVidly(
-        type: type,
-        tmdbId: tmdbId,
-        season: season,
-        episode: episode,
-      ).catchError((e) {
-        debugPrint('Vidly extractor error: $e');
-        return null;
-      });
-
-      final vidboltFuture = extractVidbolt(
-        type: type,
-        tmdbId: tmdbId,
-        season: season,
-        episode: episode,
-      ).catchError((e) {
-        debugPrint('Vidbolt extractor error: $e');
-        return null;
-      });
-
       final screenfetchFuture = extractScreenfetch(
         type: type,
         tmdbId: tmdbId,
@@ -2117,12 +1855,10 @@ class StreamExtractor {
         return <ExtractedStream>[];
       });
 
-      // Netflix-Style Fast Path: if ultra-fast Vidly, Vidbolt, Telegram or Cinejoy returns in <650ms,
+      // Netflix-Style Fast Path: if ultra-fast Telegram or Cinejoy returns in <650ms,
       // return immediately so the player starts playing in <1 second!
       // The remaining extractors will complete in background and enrich the cache.
       final fastDirect = await Future.any([
-        vidlyFuture.then((s) => s != null ? [s] : null),
-        vidboltFuture.then((s) => s != null ? [s] : null),
         screenfetchFuture.then((list) => list.isNotEmpty ? list : null),
         telegramFuture.then((list) => list.isNotEmpty ? list : null),
         aoneroomFuture.then((list) => list.isNotEmpty ? list : null),
@@ -2136,8 +1872,6 @@ class StreamExtractor {
 
         // Background worker to enrich cache with all alternate audio & subtitles
         Future.wait([
-          vidlyFuture,
-          vidboltFuture,
           screenfetchFuture,
           telegramFuture,
           aoneroomFuture,
@@ -2147,25 +1881,19 @@ class StreamExtractor {
           voidflixFuture,
         ]).then((all) {
           try {
-            final vy = all[0] as ExtractedStream?;
-            final vb = all[1] as ExtractedStream?;
-            final sfList = all[2] as List<ExtractedStream>;
-            final tList = all[3] as List<ExtractedStream>;
-            final arList = all[4] as List<ExtractedStream>;
-            final cList = all[5] as List<ExtractedStream>;
-            final vList = all[6] as List<ExtractedStream>;
-            final vl = all[7] as ExtractedStream?;
-            final vfList = all[8] as List<ExtractedStream>;
+            final sfList = all[0] as List<ExtractedStream>;
+            final tList = all[1] as List<ExtractedStream>;
+            final arList = all[2] as List<ExtractedStream>;
+            final cList = all[3] as List<ExtractedStream>;
+            final vList = all[4] as List<ExtractedStream>;
+            final vl = all[5] as ExtractedStream?;
+            final vfList = all[6] as List<ExtractedStream>;
 
             List<SubtitleTrack> bgSubs = [];
-            if (vy != null && vy.subtitles.isNotEmpty) bgSubs = vy.subtitles;
-            if (vb != null && vb.subtitles.isNotEmpty && bgSubs.isEmpty) bgSubs = vb.subtitles;
             if (vfList.isNotEmpty && vfList.first.subtitles.isNotEmpty && bgSubs.isEmpty) bgSubs = vfList.first.subtitles;
             if (vl != null && vl.subtitles.isNotEmpty && bgSubs.isEmpty) bgSubs = vl.subtitles;
 
             final combined = <ExtractedStream>[];
-            if (vy != null) combined.add(vy);
-            if (vb != null) combined.add(vb);
             for (final sf in sfList) {
               combined.add(sf.copyWith(subtitles: bgSubs.isNotEmpty ? bgSubs : sf.subtitles));
             }
@@ -2194,8 +1922,6 @@ class StreamExtractor {
       }
 
       final futures = await Future.wait([
-        vidlyFuture,
-        vidboltFuture,
         screenfetchFuture,
         telegramFuture,
         aoneroomFuture,
@@ -2205,35 +1931,19 @@ class StreamExtractor {
         voidflixFuture,
       ]);
 
-      final vidlyStream = futures[0] as ExtractedStream?;
-      final vidboltStream = futures[1] as ExtractedStream?;
-      final screenfetchStreams = futures[2] as List<ExtractedStream>;
-      final telegramStreams = futures[3] as List<ExtractedStream>;
-      final aoneroomStreams = futures[4] as List<ExtractedStream>;
-      final cinejoyStreams = futures[5] as List<ExtractedStream>;
-      final vidrockStreams = futures[6] as List<ExtractedStream>;
-      final vidlinkStream = futures[7] as ExtractedStream?;
-      final voidflixStreams = futures[8] as List<ExtractedStream>;
+      final screenfetchStreams = futures[0] as List<ExtractedStream>;
+      final telegramStreams = futures[1] as List<ExtractedStream>;
+      final aoneroomStreams = futures[2] as List<ExtractedStream>;
+      final cinejoyStreams = futures[3] as List<ExtractedStream>;
+      final vidrockStreams = futures[4] as List<ExtractedStream>;
+      final vidlinkStream = futures[5] as ExtractedStream?;
+      final voidflixStreams = futures[6] as List<ExtractedStream>;
 
-      if (vidlyStream != null && vidlyStream.subtitles.isNotEmpty) {
-        sharedSubs = vidlyStream.subtitles;
-      }
-      if (vidboltStream != null && vidboltStream.subtitles.isNotEmpty && sharedSubs.isEmpty) {
-        sharedSubs = vidboltStream.subtitles;
-      }
       if (voidflixStreams.isNotEmpty && voidflixStreams.first.subtitles.isNotEmpty && sharedSubs.isEmpty) {
         sharedSubs = voidflixStreams.first.subtitles;
       }
       if (vidlinkStream != null && vidlinkStream.subtitles.isNotEmpty && sharedSubs.isEmpty) {
         sharedSubs = vidlinkStream.subtitles;
-      }
-
-      // 0. Add 7Movies direct streams (Vidly P0, VidBolt)
-      if (vidlyStream != null) {
-        results.add(vidlyStream);
-      }
-      if (vidboltStream != null) {
-        results.add(vidboltStream);
       }
 
       // 0. Add Screenfetch (Filmpire) streams (Direct HLS 1080p, ultra-reliable)
